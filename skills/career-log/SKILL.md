@@ -57,7 +57,7 @@ The skill's own folder holds, besides the modes:
 
 ## Platforms
 
-The log may be cloned on macOS, Windows or Linux. Commands in this skill are written for macOS and Linux. On Windows, run them in PowerShell (Claude Code's PowerShell tool when it has one) with `py -3` for `python3`; Git Bash also works. Write paths with forward slashes; Python and git accept them on both. Build output goes to the ignored `.build/`, so nothing machine-specific gets committed. When the current machine lacks a tool, the skill link or the git identity, run the missing step of [SETUP.md](../../SETUP.md) and its check, after telling the user what it will install.
+The log may be cloned on macOS, Windows or Linux. Commands in this skill are written for macOS and Linux. On Windows, run them in PowerShell (Claude Code's PowerShell tool when it has one); Git Bash also works. In both, write `py -3` for `python3`: the `python3` alias that the Python install manager adds cannot see `%APPDATA%\TinyTeX`, so `tools/resume.py` would fall back to another TeX or report none. Write paths with forward slashes; Python and git accept them on both. Build output goes to the ignored `.build/`, so nothing machine-specific gets committed. When the current machine lacks a tool, the skill link or the git identity, run the missing step of [SETUP.md](../../SETUP.md) and its check, after telling the user what it will install.
 
 ## Source keys
 

@@ -2,7 +2,7 @@
 
 The log can be cloned on macOS, Windows or Linux, on one machine or several. Run these steps once per clone, in order, from the repo root. Each step ends on a **check**: the step is done when the check holds, and a step whose check already holds is skipped. An agent runs the commands itself and reports each check's output; a human copies them the same way.
 
-**Shells.** macOS: zsh or bash. Windows: PowerShell (Claude Code's PowerShell tool, or a PowerShell window). Git Bash also works on Windows, but it puts Git's own tools first on `PATH`, so PowerShell is the reference shell.
+**Shells.** macOS: zsh or bash. Windows: PowerShell (Claude Code's PowerShell tool, or a PowerShell window). Git Bash also works on Windows, but it puts Git's own tools first on `PATH`, so PowerShell is the reference shell. On Windows, write `py -3` wherever a command says `python3`, in Git Bash too: the `python3` alias that the Python install manager adds cannot see `%APPDATA%\TinyTeX`, so `tools/resume.py` would build with another TeX or find none.
 
 ## 1. Prerequisites
 
@@ -63,9 +63,9 @@ Both install, without sudo or admin and without touching `PATH`:
 - the packages in `tools/tex-packages.txt`;
 - poppler (Homebrew; winget, scoop or choco; on Linux, step 1 installs it).
 
-They download about 130 MB (the largest package, `cm-super`, is about 63 MB; tlmgr's time estimate for it is meaningless, ignore it), use 300–350 MB of disk, ask no questions, and take 1–3 minutes on a fast connection. They then build a copy of the example resume (`skills/career-log/examples/resume.tex`) into `.build/setup-check/` as a smoke test. They are idempotent, so rerun them whenever a tool goes missing. `tools/setup.sh` run from Git Bash hands over to `setup.ps1`.
+They download about 130 MB (the largest package, `cm-super`, is about 63 MB; tlmgr's time estimate for it is meaningless, ignore it), use 300–400 MB of disk, ask no questions, and take 1–3 minutes on a fast connection. They then build a copy of the example resume (`skills/career-log/examples/resume.tex`) into `.build/setup-check/` as a smoke test. They are idempotent, so rerun them whenever a tool goes missing. `tools/setup.sh` run from Git Bash hands over to `setup.ps1`.
 
-**Check:** the script exits 0 and its last line is `OK`. On a first Windows install, `tlmgr` prints one "path not found" line in the console's language; on Linux it prints `not verified: gpg unavailable` lines; both are harmless.
+**Check:** the script exits 0 and its last line is `OK`. On Windows, `tlmgr update --self` may print one "path not found" line in the console's language, and on Windows and Linux `tlmgr` prints `not verified: gpg unavailable` lines; both are harmless.
 
 ## 6. Verify against the baseline
 
@@ -83,7 +83,7 @@ New-Item -ItemType Directory -Force .build\verify | Out-Null; Copy-Item skills\c
 py -3 tools/resume.py .build/verify/resume.tex
 ```
 
-**Check:** exit code 0, and the report contains these lines (macOS, 2026-10-15), with bottom slack within 1pt:
+**Check:** exit code 0, and the report contains these lines (macOS, Linux and Windows, 2026-10-15), with bottom slack within 1pt:
 
 ```
 note: p1: 6 bullets, text block x 36–576, bottom slack 321pt
@@ -101,8 +101,14 @@ Run on every platform you use after any change to `tools/` (step 6 first). Each 
 |---|---|---|
 | Too long | Replace `removing a manual spreadsheet step` with that text plus ` that the finance team had run by hand every Friday afternoon for years before this consumer replaced it` | `FAIL: p1 bullet has 3 lines`; exit code 1 |
 | Dangling line | Replace `across 50 injected node failures` with that text plus ` in testing` | `FAIL: p1 dangling last line (6% of width)`; exit code 1 |
-| Missing package | Add `\usepackage{lipsum}` to the preamble, then run first without and then with `--install-missing` | Without the flag: `BUILD FAILED`, a hint to rerun, and exit code 2. With it: an `installing lipsum` line, then `OK` |
+| Missing package | Add `\usepackage{lipsum}` to the preamble, then run first without and then with `--install-missing`; then remove lipsum again (below) | Without the flag: `BUILD FAILED`, a hint to rerun, and exit code 2. With it: an `installing lipsum` line, then `OK` |
 | Broken source | Delete one `\end{itemize}` | `BUILD FAILED` with the `!` error lines; exit code 2 |
+
+The missing-package case can fail only while lipsum is not installed. If the run without the flag prints `OK`, an earlier run installed it and did not remove it: remove it, then run the case again. This removes it from the TeX that `tools/resume.py` uses:
+
+```
+python3 -c "import subprocess, sys; sys.path.insert(0, 'tools'); import resume; subprocess.run([resume.find_tex_bin('tlmgr'), 'remove', 'lipsum'], check=True)"
+```
 
 ## How `tools/resume.py` finds its tools
 
@@ -111,14 +117,14 @@ The lookup order is:
 2. the install locations from step 5 (TinyTeX in the user profile; poppler in the winget, scoop or choco folders);
 3. `PATH`.
 
-A `pdftotext` without `-bbox-layout` is skipped. That is xpdf's, and Git for Windows ships one. Another TeX on `PATH` (MacTeX, an older TeX Live) is therefore ignored once TinyTeX is installed. To use a different copy, set the variable to its `bin` folder.
+A `pdftotext` without `-bbox-layout` is skipped. That is xpdf's, and Git for Windows ships one. Another TeX on `PATH` (MacTeX, an older TeX Live) is therefore ignored once TinyTeX is installed; if `tools/resume.py` does build with a TeX outside TinyTeX, it first prints a `warning: building with …` line. To use a different copy, set the variable to its `bin` folder.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
 | `... not found. Run tools/setup...` or `pdftotext failed` | Rerun step 5 |
-| Bottom slack off by more than 1pt | A different TeX built it. `python3 -c "import sys; sys.path.insert(0, 'tools'); import resume; print(resume.find_tex_bin('pdflatex'))"` (`py -3` on Windows) prints the one in use; it should sit under the TinyTeX folder from step 5. Otherwise point `TINYTEX_BIN` at TinyTeX's `bin` folder |
+| `warning: building with …, not TinyTeX`, or bottom slack off by more than 1pt | A different TeX built it (another TeX can build the baseline to the same slack, so the warning is the reliable sign). `python3 -c "import sys; sys.path.insert(0, 'tools'); import resume; print(resume.find_tex_bin('pdflatex'))"` (`py -3` on Windows) prints the one in use; it should sit under the TinyTeX folder from step 5. Otherwise point `TINYTEX_BIN` at TinyTeX's `bin` folder |
 | `git -C ~/.claude/skills/career-log ...` answers "not a git repository" | Use the realpath fallback in [SKILL.md](skills/career-log/SKILL.md) |
 | `tlmgr itself needs to be updated` | Run `tlmgr update --self` from TinyTeX's `bin` folder (step 5's scripts do this first), then rerun step 5 |
 | A package is missing (`File '<x>.sty' not found`) | See [latex.md › Toolchain](skills/career-log/latex.md#toolchain) |

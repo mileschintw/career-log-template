@@ -45,9 +45,11 @@ DEST=$(cd "$DEST" && pwd)
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
+# core.autocrlf=false: Git for Windows sets it to true machine-wide, and the archive of the
+# tools/template subtree does not see the root .gitattributes, so its files would come out CRLF
 # shellcheck disable=SC2086
-git -C "$ROOT" archive --format=tar -o "$TMP/engine.tar" HEAD -- $ALLOW
-git -C "$ROOT" archive --format=tar -o "$TMP/skeleton.tar" HEAD:tools/template
+git -C "$ROOT" -c core.autocrlf=false archive --format=tar -o "$TMP/engine.tar" HEAD -- $ALLOW
+git -C "$ROOT" -c core.autocrlf=false archive --format=tar -o "$TMP/skeleton.tar" HEAD:tools/template
 tar xf "$TMP/engine.tar" -C "$DEST"
 tar xf "$TMP/skeleton.tar" -C "$DEST"
 mkdir -p "$DEST/sources/inbox" "$DEST/outputs"

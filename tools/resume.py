@@ -37,6 +37,10 @@ BULLET = "•"
 
 WINDOWS = os.name == "nt"
 SETUP_HINT = "Run tools\\setup.ps1 first." if WINDOWS else "Run tools/setup.sh first."
+# The python3 alias that the Windows Python install manager adds does not see %APPDATA%\TinyTeX,
+# though py -3 starts the same python.exe and does.
+ALIAS_HINT = (" If setup already ran, start Python with py -3, not python3: the python3 alias"
+              " cannot see %APPDATA%\\TinyTeX.") if WINDOWS else ""
 
 
 def _search(name, env_var, patterns, usable=lambda path: True):
@@ -65,7 +69,7 @@ def find_tex_bin(name):
         "~/Library/TinyTeX/bin/*/", "~/.TinyTeX/bin/*/",
         "%APPDATA%/TinyTeX/bin/windows/", "%ProgramData%/TinyTeX/bin/windows/"])
     if not found:
-        sys.exit(f"{name} not found. {SETUP_HINT}")
+        sys.exit(f"{name} not found. {SETUP_HINT}{ALIAS_HINT}")
     return found
 
 
@@ -93,6 +97,13 @@ def repo_root():
 
 def build(tex, outdir, install_missing):
     pdflatex = find_tex_bin("pdflatex")
+    # Another TeX can build the baseline to the same bottom slack, so the numbers alone do not show it
+    chosen = os.environ.get("TINYTEX_BIN")
+    on_purpose = chosen and os.path.normcase(os.path.dirname(os.path.abspath(pdflatex))) == \
+        os.path.normcase(os.path.abspath(chosen))
+    if not on_purpose and "tinytex" not in os.path.realpath(pdflatex).lower():
+        print(f"warning: building with {pdflatex}, not TinyTeX. {SETUP_HINT}{ALIAS_HINT}"
+              " To use this TeX on purpose, set TINYTEX_BIN to its bin folder.")
     outdir = os.path.abspath(outdir)  # pdflatex runs from the .tex folder, so a relative path would point elsewhere
     os.makedirs(outdir, exist_ok=True)
     stem = os.path.splitext(os.path.basename(tex))[0]

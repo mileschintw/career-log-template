@@ -4,7 +4,16 @@
 #   - poppler (pdfinfo, pdftotext, pdftoppm) through winget, scoop or choco
 # Run from PowerShell:  powershell -ExecutionPolicy Bypass -File tools\setup.ps1
 $ErrorActionPreference = 'Stop'
-$Root = (git -C $PSScriptRoot rev-parse --show-toplevel).Trim()
+# The folder above tools\ (tools\resume.py's fallback without git): needs no git and works outside a checkout
+$Root = Split-Path -Parent $PSScriptRoot
+
+# Prerequisites (SETUP.md step 1) first, so nothing is downloaded for a run that cannot finish.
+# Never the python3 alias: the Python install manager's one cannot see %APPDATA%\TinyTeX.
+if (Get-Command py -ErrorAction SilentlyContinue) { $PyExe = 'py'; $PyArgs = @('-3') }
+elseif (Get-Command python -ErrorAction SilentlyContinue) { $PyExe = 'python'; $PyArgs = @() }
+else { throw 'missing: Python 3.9+. Install it (winget install Python.Python.3.12), then rerun' }
+& $PyExe @PyArgs -c 'import sys; sys.exit(sys.version_info < (3, 9))'
+if ($LASTEXITCODE -ne 0) { throw "missing: Python 3.9+ ('$((@($PyExe) + $PyArgs) -join ' ')' runs none). Install it (winget install Python.Python.3.12), then rerun" }
 
 # TinyTeX's own rule: APPDATA unless the path has spaces or non-ASCII characters
 $TexBase = if ($env:APPDATA -match '^[!-~]+$') { $env:APPDATA } else { $env:ProgramData }
@@ -13,14 +22,19 @@ $Bin = Join-Path $TexDir 'bin\windows'
 $Tlmgr = Join-Path $Bin 'tlmgr.bat'
 
 if (-not (Test-Path (Join-Path $Bin 'pdflatex.exe'))) {
+  if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
+    throw 'missing: curl.exe (part of Windows 10 1803 and later). Install curl, then rerun'
+  }
   Write-Host "Installing TinyTeX into $TexDir"
   $Tmp = Join-Path $env:TEMP ("tinytex-" + [guid]::NewGuid())
   New-Item -ItemType Directory -Path $Tmp | Out-Null
   Push-Location $Tmp
-  try {
+  try {   # finally also runs on Ctrl-C, so no 70 MB leftover in %TEMP%
     curl.exe -fL --retry 5 -o TinyTeX-1-windows.exe 'https://github.com/rstudio/tinytex-releases/releases/download/daily/TinyTeX-1-windows.exe'
+    if ($LASTEXITCODE -ne 0) { throw "TinyTeX download failed (curl exit $LASTEXITCODE). Check the network or proxy (HTTPS_PROXY), then rerun" }
     & .\TinyTeX-1-windows.exe -y | Out-Null   # self-extracting archive; unpacks .\TinyTeX
     if ($LASTEXITCODE -ne 0) { throw 'TinyTeX extraction failed' }
+    New-Item -ItemType Directory -Force -Path $TexBase | Out-Null   # Move-Item renames into a missing folder
     Move-Item TinyTeX $TexBase
   } finally {
     Pop-Location
@@ -57,10 +71,6 @@ if (-not (Test-Poppler)) {
     throw 'Install poppler with winget, scoop or choco, or set POPPLER_BIN to its bin folder'
   }
 }
-
-if (Get-Command py -ErrorAction SilentlyContinue) { $PyExe = 'py'; $PyArgs = @('-3') }
-elseif (Get-Command python -ErrorAction SilentlyContinue) { $PyExe = 'python'; $PyArgs = @() }
-else { throw 'Python 3.9+ is required (winget install Python.Python.3.12)' }
 
 Write-Host 'Checking: building the example resume'
 $Newest = Get-Item (Join-Path $Root 'skills\career-log\examples\resume.tex')
