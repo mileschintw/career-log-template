@@ -2,7 +2,7 @@
 
 The log can be cloned on macOS, Windows or Linux, on one machine or several. Run these steps once per clone, in order, from the repo root. Each step ends on a **check**: the step is done when the check holds, and a step whose check already holds is skipped. An agent runs the commands itself and reports each check's output; a human copies them the same way.
 
-**Shells.** macOS: zsh or bash. Windows: PowerShell (Claude Code's PowerShell tool, or a PowerShell window). Git Bash also works on Windows, but it puts Git's own tools first on `PATH`, so PowerShell is the reference shell. On Windows, write `py -3` wherever a command says `python3`, in Git Bash too: the `python3` alias that the Python install manager adds cannot see `%APPDATA%\TinyTeX`, so `tools/resume.py` would build with another TeX or find none.
+**Shells.** macOS: zsh or bash. Windows: PowerShell (the agent's shell tool, or a PowerShell window). Git Bash also works on Windows, but it puts Git's own tools first on `PATH`, so PowerShell is the reference shell. On Windows, write `py -3` wherever a command says `python3`, in Git Bash too: the `python3` alias that the Python install manager adds cannot see `%APPDATA%\TinyTeX`, so `tools/resume.py` would build with another TeX or find none.
 
 ## 1. Prerequisites
 
@@ -34,7 +34,18 @@ git config --local user.email <your email>
 
 ## 4. Skill link
 
-The skill lives in this repo and is linked into `~/.claude/skills/`, so edits stay versioned here.
+The skill lives in this repo. Link it into the folder your agent reads skills from, so edits stay versioned here and the skill works from any project. Do the row for each agent you use. Working inside this repo needs no link: `AGENTS.md` points the agent at the skill.
+
+| Agent | Link path | Also read by |
+|---|---|---|
+| Claude Code | `~/.claude/skills/career-log` | Cursor |
+| Codex | `~/.agents/skills/career-log` | Cursor |
+| Antigravity App and IDE | `~/.gemini/config/skills/career-log` | |
+| Antigravity CLI | `~/.gemini/antigravity-cli/skills/career-log` | |
+
+Only Claude Code is tested, on macOS, Windows and Linux. The other rows follow each vendor's documented skill folder and are not tested on Windows.
+
+### Claude Code
 
 macOS and Linux:
 
@@ -50,7 +61,48 @@ New-Item -ItemType Directory -Force "$HOME\.claude\skills" | Out-Null
 New-Item -ItemType Junction -Path "$HOME\.claude\skills\career-log" -Target "$(git rev-parse --show-toplevel)/skills/career-log"
 ```
 
-**Check:** from a directory outside the repo, `git -C ~/.claude/skills/career-log rev-parse --show-toplevel` prints this repo's root (possibly with symlinks resolved, e.g. `/private/tmp/…` for `/tmp/…`), and the next Claude Code session lists the `career-log` skill. On Windows, `(Get-Item $HOME\.claude\skills\career-log).LinkType` is also `Junction`.
+### Codex (not tested on Windows)
+
+macOS and Linux:
+
+```
+mkdir -p ~/.agents/skills
+ln -s "$(git rev-parse --show-toplevel)/skills/career-log" ~/.agents/skills/career-log
+```
+
+Windows (PowerShell):
+
+```
+New-Item -ItemType Directory -Force "$HOME\.agents\skills" | Out-Null
+New-Item -ItemType Junction -Path "$HOME\.agents\skills\career-log" -Target "$(git rev-parse --show-toplevel)/skills/career-log"
+```
+
+### Antigravity (not tested on Windows)
+
+App and IDE, macOS and Linux:
+
+```
+mkdir -p ~/.gemini/config/skills
+ln -s "$(git rev-parse --show-toplevel)/skills/career-log" ~/.gemini/config/skills/career-log
+```
+
+CLI, macOS and Linux:
+
+```
+mkdir -p ~/.gemini/antigravity-cli/skills
+ln -s "$(git rev-parse --show-toplevel)/skills/career-log" ~/.gemini/antigravity-cli/skills/career-log
+```
+
+Windows (PowerShell), App and IDE, then CLI:
+
+```
+New-Item -ItemType Directory -Force "$HOME\.gemini\config\skills" | Out-Null
+New-Item -ItemType Junction -Path "$HOME\.gemini\config\skills\career-log" -Target "$(git rev-parse --show-toplevel)/skills/career-log"
+New-Item -ItemType Directory -Force "$HOME\.gemini\antigravity-cli\skills" | Out-Null
+New-Item -ItemType Junction -Path "$HOME\.gemini\antigravity-cli\skills\career-log" -Target "$(git rev-parse --show-toplevel)/skills/career-log"
+```
+
+**Check:** from a directory outside the repo, `git -C <link path> rev-parse --show-toplevel` prints this repo's root (possibly with symlinks resolved, e.g. `/private/tmp/…` for `/tmp/…`), and the agent's next session lists the `career-log` skill. On Windows, `(Get-Item <link path>).LinkType` is also `Junction`.
 
 ## 5. LaTeX toolchain
 
@@ -125,7 +177,7 @@ A `pdftotext` without `-bbox-layout` is skipped. That is xpdf's, and Git for Win
 |---|---|
 | `... not found. Run tools/setup...` or `pdftotext failed` | Rerun step 5 |
 | `warning: building with …, not TinyTeX`, or bottom slack off by more than 1pt | A different TeX built it (another TeX can build the baseline to the same slack, so the warning is the reliable sign). `python3 -c "import sys; sys.path.insert(0, 'tools'); import resume; print(resume.find_tex_bin('pdflatex'))"` (`py -3` on Windows) prints the one in use; it should sit under the TinyTeX folder from step 5. Otherwise point `TINYTEX_BIN` at TinyTeX's `bin` folder |
-| `git -C ~/.claude/skills/career-log ...` answers "not a git repository" | Use the realpath fallback in [SKILL.md](skills/career-log/SKILL.md) |
+| `git -C <link path> ...` (step 4) answers "not a git repository" | Use the realpath fallback in [SKILL.md](skills/career-log/SKILL.md) |
 | `tlmgr itself needs to be updated` | Run `tlmgr update --self` from TinyTeX's `bin` folder (step 5's scripts do this first), then rerun step 5 |
 | A package is missing (`File '<x>.sty' not found`) | See [latex.md › Toolchain](skills/career-log/latex.md#toolchain) |
 

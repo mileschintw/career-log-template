@@ -5,7 +5,7 @@ description: Personal career log repo — raw records of past work, projects and
 
 # Career log
 
-The log is the git repo that contains this skill (private; see its `origin` remote). Resolve its root with `git -C <this skill's base directory> rev-parse --show-toplevel`. If git answers "not a git repository" (possible on Windows if git does not follow the junction under `~/.claude/skills`; Git 2.38 does), resolve the link first with `python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" <base directory>` and run git on the result. Every path below is relative to that root, and every git command runs there (`git -C <root> ...`), whatever the current project is.
+The log is the git repo that contains this skill (private; see its `origin` remote). Resolve its root with `git -C <this skill's base directory> rev-parse --show-toplevel`. If git answers "not a git repository" (possible on Windows if git does not follow the junction of the skill link (SETUP.md step 4); Git 2.38 does), resolve the link first with `python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" <base directory>` and run git on the result. Every path below is relative to that root, and every git command runs there (`git -C <root> ...`), whatever the current project is.
 
 At the start of each session, `git -C <root> pull --ff-only`: the user may work from more than one clone, and another machine may have pushed.
 
@@ -57,7 +57,7 @@ The skill's own folder holds, besides the modes:
 
 ## Platforms
 
-The log may be cloned on macOS, Windows or Linux. Commands in this skill are written for macOS and Linux. On Windows, run them in PowerShell (Claude Code's PowerShell tool when it has one); Git Bash also works. In both, write `py -3` for `python3`: the `python3` alias that the Python install manager adds cannot see `%APPDATA%\TinyTeX`, so `tools/resume.py` would fall back to another TeX or report none. Write paths with forward slashes; Python and git accept them on both. Build output goes to the ignored `.build/`, so nothing machine-specific gets committed. When the current machine lacks a tool, the skill link or the git identity, run the missing step of [SETUP.md](../../SETUP.md) and its check, after telling the user what it will install.
+The log may be cloned on macOS, Windows or Linux. Commands in this skill are written for macOS and Linux. On Windows, run them in PowerShell (the agent's shell tool, or a PowerShell window); Git Bash also works. In both, write `py -3` for `python3`: the `python3` alias that the Python install manager adds cannot see `%APPDATA%\TinyTeX`, so `tools/resume.py` would fall back to another TeX or report none. Write paths with forward slashes; Python and git accept them on both. Build output goes to the ignored `.build/`, so nothing machine-specific gets committed. When the current machine lacks a tool, the skill link or the git identity, run the missing step of [SETUP.md](../../SETUP.md) and its check, after telling the user what it will install.
 
 ## Source keys
 
