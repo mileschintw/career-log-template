@@ -1,0 +1,77 @@
+% Blank resume layout for the career-log skill. Replace every <...> placeholder;
+% every fact must come from an entry in the log.
+% Based on the r/EngineeringResumes template, https://github.com/r-engineeringresumes/resume-templates
+% Copyright (c) 2024 r-engineeringresumes. MIT License: see that repository's LICENSE.
+
+\documentclass[11pt]{article}       % set main text size
+\usepackage[letterpaper,                % set paper size to letterpaper. change to a4paper for resumes outside of North America
+top=0.5in,                          % specify top page margin
+bottom=0.5in,                       % specify bottom page margin
+left=0.5in,                         % specify left page margin
+right=0.5in]{geometry}              % specify right page margin
+                       
+\usepackage{XCharter}               % set font
+\usepackage[T1]{fontenc}            % output encoding
+\usepackage[utf8]{inputenc}         % input encoding
+\usepackage{enumitem}               % enable lists for bullet points: itemize and \item
+\usepackage[hidelinks]{hyperref}    % format hyperlinks
+\usepackage{titlesec}               % enable section title customization
+\raggedright                        % disable text justification
+\pagestyle{empty}                   % disable page numbering
+
+% ensure PDF output will be all-Unicode and machine-readable
+\input{glyphtounicode}
+\pdfgentounicode=1
+
+% format section headings: bolding, size, white space above and below
+\titleformat{\section}{\bfseries\large}{}{0pt}{}[\vspace{1pt}\titlerule\vspace{-6.5pt}]
+
+% format bullet points: size, white space above and below, white space between bullets
+\renewcommand\labelitemi{$\vcenter{\hbox{\small$\bullet$}}$}
+\setlist[itemize]{itemsep=-2pt, leftmargin=12pt}
+
+% resume starts here
+\begin{document}
+
+% name
+\centerline{\Huge <Full Name>}
+
+\vspace{5pt}
+
+% contact information
+\centerline{<City, ST> | \href{mailto:you@example.com}{you@example.com} | \href{https://github.com/<you>}{github.com/<you>}}
+
+\vspace{-10pt}
+
+% skills section: tools the bullets below show, grouped by category
+\section*{Skills}
+\textbf{<Category>:} <Tool>, <Tool>, <Tool> \\
+\textbf{<Category>:} <Tool>, <Tool>, <Tool>
+
+\vspace{-6.5pt}
+
+% experience section: one block per role, newest first
+\section*{Experience}
+\textbf{<Job Title>,} <Company> -- <City, ST> \hfill <Mon YYYY> -- <Mon YYYY> \\
+\vspace{-9pt}
+\begin{itemize}
+  \item <Past-tense verb> <what you did>, <how>, <measured result with its number>
+\end{itemize}
+
+\vspace{-18.5pt}
+
+% projects section
+\section*{Projects}
+\textbf{<Project Name>} \hfill \href{https://github.com/<you>/<project>}{github.com/<you>/<project>} \\
+\vspace{-9pt}
+\begin{itemize}
+  \item <Past-tense verb> <what you built>, <how>, <measured result with its number>
+\end{itemize}
+
+\vspace{-18.5pt}
+
+% education section
+\section*{Education}
+\textbf{<School>} -- <Degree> \hfill <Mon YYYY>
+
+\end{document}

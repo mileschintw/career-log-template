@@ -1,0 +1,18 @@
+# Mode: interview
+
+Prepare the user for a scheduled interview: a prep pack built from what the interviewer read and what the log can defend, then an optional mock interview. Coding drills and generic system-design practice are outside this mode; it covers the questions about the user, their work and this company.
+
+1. **Load the application.** Find its folder in `outputs/` (written by `apply`): the posting, and the resume and answers the interviewer has read. If there is none, ask the user for the posting and which resume version they sent; record both in a new `outputs/<YYYY-MM-DD>-<company>-<role>/` folder. Ask what `applications.md` does not already say: stage (recruiter screen, technical, project deep dive, behavioural, final), date, format, interviewer names and titles.
+2. **Research the company and interviewers.** From the web, cite every fact with its URL, and keep only what a fetched page confirms (a search snippet is a lead). Interviewer notes stay within public professional information. Collect two or three recent, verifiable specifics for "why this company".
+3. **Build the prep pack.** Sections:
+   - **Consistency brief.** Every claim on the submitted resume and answers that the interviewer can probe, each with its entry, its caveat and a one-line deeper answer. Nothing in the room that is not on the paper; everything on the paper defensible in depth. Start from the resume output's "Risks to handle in conversation" and `profile.md › Interview prep list` (skills and claims resting on thin evidence).
+   - **Likely questions,** in priority order: feedback from earlier rounds, then the requirement map's gaps, then the posting's requirements, then the stage type. A gap gets an honest bridge (acknowledge it, connect the closest real experience, say how the user is closing it), never invented experience.
+   - **Stories.** Map each likely behavioural question to `stories.md` and arrange the entry's facts as situation, task, action, result. Facts come only from the entry; a question no entry covers is listed as uncovered.
+   - **Project deep dives.** For each project on the resume: the entry's `## How it works`, `## Decisions and trade-offs`, `## Dead ends and mistakes` and `## Likely questions`, condensed to what this stage will probe.
+   - **The awkward ones,** answered from the log: why the user left their last role, work authorisation and sponsorship, graduation date, anything an entry's `## Conflicts` makes delicate.
+   - **Questions to ask,** four to six, fitted to the stage and the research; drop any the research already answers publicly.
+   Save it as `interview-<stage>.md` in the application folder and present it in chat.
+4. **Offer a mock interview.** If accepted, run it in this conversation: a warm-up, then questions from the pack in stage order, one at a time. After each answer give short feedback (what landed, what to sharpen, which story or fact would have served better) in the user's own register from `direction.md`. Finish with a curveball.
+5. **Close the loop.** New facts the user recalls while preparing go into their entries the same session (`(user, YYYY-MM-DD)`). After the interview, ask for the questions asked and any feedback: record them in the application folder, update `applications.md › Events and contacts`, and add any story that proved useful to `stories.md`. Commit and push: `interview(<company>): <stage>`.
+
+Done when the pack covers every claim on the submitted materials, every likely question has a story, a bridge, or an explicit "uncovered" mark, and every new fact from the session is in its entry.

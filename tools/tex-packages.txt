@@ -1,0 +1,17 @@
+# TeX Live packages the resume templates need beyond TinyTeX's base set.
+# Found by compiling resumes on both templates.
+# r/EngineeringResumes template
+xcharter
+xkeyval
+fontaxes
+mweights
+etoolbox
+enumitem
+titlesec
+xstring
+carlisle
+# sb2nov template (older resumes)
+preprint
+marvosym
+fancyhdr
+cm-super

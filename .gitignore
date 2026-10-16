@@ -1,0 +1,6 @@
+.DS_Store
+.build/
+outputs/**/*.png
+!outputs/*-page/*.png
+__pycache__/
+*.pyc

@@ -1,0 +1,87 @@
+% Example resume for the career-log skill: a fictional person, Alex Doe.
+% Based on the r/EngineeringResumes template, https://github.com/r-engineeringresumes/resume-templates
+% Copyright (c) 2024 r-engineeringresumes. MIT License: see that repository's LICENSE.
+% Every name, number and link below is invented.
+
+\documentclass[11pt]{article}       % set main text size
+\usepackage[letterpaper,                % set paper size to letterpaper. change to a4paper for resumes outside of North America
+top=0.5in,                          % specify top page margin
+bottom=0.5in,                       % specify bottom page margin
+left=0.5in,                         % specify left page margin
+right=0.5in]{geometry}              % specify right page margin
+                       
+\usepackage{XCharter}               % set font
+\usepackage[T1]{fontenc}            % output encoding
+\usepackage[utf8]{inputenc}         % input encoding
+\usepackage{enumitem}               % enable lists for bullet points: itemize and \item
+\usepackage[hidelinks]{hyperref}    % format hyperlinks
+\usepackage{titlesec}               % enable section title customization
+\raggedright                        % disable text justification
+\pagestyle{empty}                   % disable page numbering
+
+% ensure PDF output will be all-Unicode and machine-readable
+\input{glyphtounicode}
+\pdfgentounicode=1
+
+% format section headings: bolding, size, white space above and below
+\titleformat{\section}{\bfseries\large}{}{0pt}{}[\vspace{1pt}\titlerule\vspace{-6.5pt}]
+
+% format bullet points: size, white space above and below, white space between bullets
+\renewcommand\labelitemi{$\vcenter{\hbox{\small$\bullet$}}$}
+\setlist[itemize]{itemsep=-2pt, leftmargin=12pt}
+
+% resume starts here
+\begin{document}
+
+% name
+\centerline{\Huge Alex Doe}
+
+\vspace{5pt}
+
+% contact information
+\centerline{Springfield, ST | \href{mailto:alex.doe@example.com}{alex.doe@example.com} | \href{https://github.com/example}{github.com/example}}
+
+\vspace{-10pt}
+
+% skills section
+\section*{Skills}
+\textbf{Languages:} Go, Python, SQL \\
+\textbf{Backend \& Data:} PostgreSQL, Redis, Kafka, gRPC
+
+\vspace{-6.5pt}
+
+% experience section
+\section*{Experience}
+\textbf{Software Engineering Intern,} Northwind Freight -- Springfield, ST \hfill June 2025 -- Sept 2025 \\
+\vspace{-9pt}
+\begin{itemize}
+  \item Cut shipment-quote API p95 latency from 820 ms to 210 ms by replacing per-request PostgreSQL lookups with a Redis rate cache refreshed every five minutes
+  \item Built a Kafka consumer in Go that reconciles carrier invoices nightly, flagging 3\% of 40k monthly invoices for review and removing a manual spreadsheet step
+  \item Co-designed a feature-flag rollout with a senior engineer, rolling out the new rate cache to all four sales regions over two weeks with zero rollbacks
+\end{itemize}
+
+\textbf{Teaching Assistant, Databases,} Example State University -- Springfield, ST \hfill Jan 2025 -- May 2025 \\
+\vspace{-9pt}
+\begin{itemize}
+  \item Held weekly office hours for 120 students and wrote a Python autograder for SQL assignments that cut grading time per assignment by half for three TAs
+\end{itemize}
+
+\vspace{-18.5pt}
+
+% projects section
+\section*{Projects}
+\textbf{Tidepool: Distributed Job Queue} \hfill \href{https://github.com/example/tidepool}{github.com/example/tidepool} \\
+\vspace{-9pt}
+\begin{itemize}
+  \item Designed a Go job queue with at-least-once delivery and gRPC workers, sustaining 5k jobs per second on a 3-node cluster in sustained load tests
+  \item Added leader election and lease-based retries, recovering every in-flight job across 50 injected node failures
+\end{itemize}
+
+\vspace{-18.5pt}
+
+% education section
+\section*{Education}
+\textbf{Example State University} -- MS in Computer Science \hfill Expected June 2027 \\
+\textbf{Example State University} -- BS in Computer Science \hfill June 2025
+
+\end{document}
