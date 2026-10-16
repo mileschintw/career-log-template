@@ -104,7 +104,7 @@ Start from the user's newest `outputs/*-page/index.html` if one exists, otherwis
 
 - edit only the data block at the top of the script, `PAGE` through `NOTES`; its opening comment lists every object (employers `C`, skipped `OUT`, `ROUTES`, `PITCHES`, `SECOND`, `ASK`, `PRESSED`, `NOTES`, labels and tiers);
 - describe the hall in `HALL` (rows, booths per row, spacing, entrance); `boothPos()` computes positions from it. A hall that is not straight rows needs a new `boothPos()`;
-- the rendering code below the data block never names an employer, so it stays as it is.
+- the rendering code below the data block never names an employer, so it stays as it is. The static `<title>` is only a fallback (`PAGE.title` replaces it on load); set it too, for link previews.
 
 Its layout:
 

@@ -68,7 +68,7 @@ Short citations for imported material. Generic forms:
 | `sources/resumes/<file>` | An imported resume version |
 | `<repo>@<sha>:<path>:<line>` | A file in one of the user's git repos |
 
-Keys for this log's own imports (a chat export, a profile page) are defined in `sources/keys.md`. Add a row there whenever a new source folder appears.
+Keys for this log's own imports (a chat export, a profile page) are defined in `sources/keys.md`. Add a row there whenever a new source folder appears (`sources/resumes/` needs none: its generic key is above).
 
 ## Modes
 

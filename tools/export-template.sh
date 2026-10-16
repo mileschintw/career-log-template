@@ -28,11 +28,17 @@ if [ -n "$(git -C "$ROOT" status --porcelain -- $ALLOW)" ]; then
 fi
 
 # grep exits 2 on a malformed pattern; check them all before writing anything
+NPAT=0
 while IFS= read -r pat || [ -n "$pat" ]; do
+  pat=$(printf '%s' "$pat" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
   case "$pat" in ''|'#'*) continue ;; esac
+  NPAT=$((NPAT + 1))
   RC=0; printf 'x\n' | grep -E -- "$pat" >/dev/null 2>&1 || RC=$?
   if [ "$RC" -gt 1 ]; then echo "FAIL: bad pattern in $DENY: $pat"; exit 1; fi
 done < "$DENY"
+if [ "$NPAT" -eq 0 ]; then
+  echo "refusing: $DENY has no patterns. Add your name, email, schools, employers and projects, one per line"; exit 1
+fi
 
 mkdir -p "$DEST"
 DEST=$(cd "$DEST" && pwd)
@@ -50,6 +56,7 @@ touch "$DEST/sources/inbox/.gitkeep" "$DEST/outputs/.gitkeep"
 # Scan for personal content. LICENSE names the copyright holder on purpose.
 FOUND=0
 while IFS= read -r pat || [ -n "$pat" ]; do
+  pat=$(printf '%s' "$pat" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
   case "$pat" in ''|'#'*) continue ;; esac
   HITS=$( { (cd "$DEST" && find . | grep -iwE -- "$pat") || true
             grep -rniwE --exclude=LICENSE -- "$pat" "$DEST" || true; } )

@@ -12,7 +12,7 @@ Turn an entry's log lines, links and imported phrasings into a complete record, 
    - the questions an interviewer is most likely to ask, with draft answers.
    Record each answer with `(user, YYYY-MM-DD)`. An unanswerable question stays a `GAP:` with a note. If the user says the experience did not happen or does not count, follow *Dropped experiences* in SKILL.md instead of finishing the entry.
 4. **Show the user the updated entry** (or a diff) and apply their corrections.
-5. **Update the indexes.** `README.md` row (period, tags, status); `stories.md`, adding this entry under every behavioural question type it can answer, pointing at the section.
+5. **Update the indexes.** `README.md` row (period, tags, status `consolidated`, with a short note in parentheses if gaps remain); `stories.md`, adding this entry under every behavioural question type it can answer, pointing at the section.
 6. **Commit and push**: `consolidate(<slug>): <summary>`.
 
 Done when every section is filled or carries an explicit `GAP:` the user could not answer, every number has its measurement and source, the attribution section names all three categories (even if one is "none"), and `stories.md` points at this entry for every story it holds.

@@ -1,4 +1,5 @@
 # Patterns that must never appear in a Template exported from this log
 # (tools/export-template.sh). One extended regex per line, matched as whole
 # words, case-insensitive. Add your name, email, phone, schools, employers,
-# projects and anything else that identifies you. This file is not exported.
+# projects and anything else that identifies you; the export refuses an empty
+# list. import and log append new employer and project names. Not exported.

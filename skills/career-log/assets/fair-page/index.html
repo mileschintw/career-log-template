@@ -1,4 +1,4 @@
-<title>Fair Day</title>
+<title>Career fair</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&display=swap">
 <style>
@@ -512,7 +512,8 @@ function drawMap(r){
   });
   const svg = $("hall");
   svg.setAttribute("viewBox", `-4 -4 ${hallW+8} ${hallH+44}`);
-  svg.setAttribute("aria-label", `Hall floor plan, ${HALL.entrance.label.toLowerCase()} at the bottom left`);
+  const side = HALL.entrance.at < 0.34 ? "left" : HALL.entrance.at > 0.66 ? "right" : "centre";
+  svg.setAttribute("aria-label", `Hall floor plan, ${HALL.entrance.label.toLowerCase()} at the bottom ${side}`);
   svg.innerHTML = s;
   svg.querySelectorAll(".bt").forEach(g=>{
     const open = ()=>showSheet(g.dataset.b);
