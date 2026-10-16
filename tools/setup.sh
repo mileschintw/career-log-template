@@ -18,13 +18,19 @@ esac
 
 find_bin() { for d in "$TEXDIR"/bin/*/; do [ -x "$d/pdflatex" ] && { echo "${d%/}"; return; }; done; }
 
+need() { command -v "$1" >/dev/null 2>&1 || { echo "missing: $1. Install the prerequisites in SETUP.md step 1, then rerun"; exit 1; }; }
+
 BIN=$(find_bin || true)
 if [ -z "${BIN:-}" ]; then
+  need curl; need tar
+  [ "$(uname)" = Linux ] && need xz   # macOS tar reads .xz itself
   echo "Installing TinyTeX into $TEXDIR"
   TMP=$(mktemp -d)
+  trap 'rm -rf "$TMP"' EXIT   # no 60 MB leftover when a step fails
+  trap 'exit 130' INT TERM HUP  # route Ctrl-C through the EXIT trap
   curl -L -f --retry 5 -o "$TMP/$BUNDLE" "https://github.com/rstudio/tinytex-releases/releases/download/daily/$BUNDLE"
+  mkdir -p "$(dirname "$TEXDIR")"
   tar xf "$TMP/$BUNDLE" -C "$(dirname "$TEXDIR")"
-  rm -rf "$TMP"
   BIN=$(find_bin)
 fi
 echo "pdflatex: $BIN/pdflatex"

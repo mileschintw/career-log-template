@@ -8,8 +8,8 @@ The log can be cloned on macOS, Windows or Linux, on one machine or several. Run
 
 | | macOS | Windows | Linux |
 |---|---|---|---|
-| Install | git, Python 3.9+, Homebrew | Git for Windows, Python 3.9+ (`winget install Python.Python.3.12`); winget is built in | git, Python 3.9+, curl, and poppler (`sudo apt-get install poppler-utils` or your distribution's package) |
-| Check | `git --version` and `python3 --version` print versions | `git --version` and `py -3 --version` print versions | `git --version`, `python3 --version` and `pdftotext -v` print versions |
+| Install | git, Python 3.9+, [Homebrew](https://brew.sh) (its installer asks for your admin password and may install Xcode's command-line tools first, which can take 10+ minutes) | Git for Windows, Python 3.9+ (`winget install Python.Python.3.12`); winget is built in | `sudo apt-get update && sudo apt-get install git python3 curl xz-utils ca-certificates poppler-utils` (Debian/Ubuntu; other distributions: the same packages under their names) |
+| Check | `git --version` and `python3 --version` print versions | `git --version` and `py -3 --version` print versions | `git --version`, `python3 --version`, `xz --version` and `pdftotext -v` print versions |
 
 ## 2. Clone
 
@@ -50,7 +50,7 @@ New-Item -ItemType Directory -Force "$HOME\.claude\skills" | Out-Null
 New-Item -ItemType Junction -Path "$HOME\.claude\skills\career-log" -Target "$(git rev-parse --show-toplevel)/skills/career-log"
 ```
 
-**Check:** from a directory outside the repo, `git -C ~/.claude/skills/career-log rev-parse --show-toplevel` prints this repo's root, and the next Claude Code session lists the `career-log` skill. On Windows, `(Get-Item $HOME\.claude\skills\career-log).LinkType` is also `Junction`.
+**Check:** from a directory outside the repo, `git -C ~/.claude/skills/career-log rev-parse --show-toplevel` prints this repo's root (possibly with symlinks resolved, e.g. `/private/tmp/…` for `/tmp/…`), and the next Claude Code session lists the `career-log` skill. On Windows, `(Get-Item $HOME\.claude\skills\career-log).LinkType` is also `Junction`.
 
 ## 5. LaTeX toolchain
 
@@ -63,9 +63,9 @@ Both install, without sudo or admin and without touching `PATH`:
 - the packages in `tools/tex-packages.txt`;
 - poppler (Homebrew; winget, scoop or choco; on Linux, step 1 installs it).
 
-They then build a copy of the example resume (`skills/career-log/examples/resume.tex`) into `.build/setup-check/` as a smoke test. They are idempotent, so rerun them whenever a tool goes missing. `tools/setup.sh` run from Git Bash hands over to `setup.ps1`.
+They download about 130 MB (the largest package, `cm-super`, is about 63 MB; tlmgr's time estimate for it is meaningless, ignore it), use 300–350 MB of disk, ask no questions, and take 1–3 minutes on a fast connection. They then build a copy of the example resume (`skills/career-log/examples/resume.tex`) into `.build/setup-check/` as a smoke test. They are idempotent, so rerun them whenever a tool goes missing. `tools/setup.sh` run from Git Bash hands over to `setup.ps1`.
 
-**Check:** the script exits 0 and its last line is `OK`. On a first Windows install, `tlmgr` prints one "path not found" line in the console's language; it is harmless.
+**Check:** the script exits 0 and its last line is `OK`. On a first Windows install, `tlmgr` prints one "path not found" line in the console's language; on Linux it prints `not verified: gpg unavailable` lines; both are harmless.
 
 ## 6. Verify against the baseline
 
