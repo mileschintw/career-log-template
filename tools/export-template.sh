@@ -14,7 +14,7 @@ DEST=${1:?usage: tools/export-template.sh <dest>}
 DENY="$ROOT/.export-deny"
 
 # The allowlist: the Engine, plus the files every Log needs as they are.
-ALLOW="skills tools SETUP.md AGENTS.md CLAUDE.md GLOSSARY.md docs/adr .gitattributes .gitignore entries/_template.md"
+ALLOW="skills tools SETUP.md AGENTS.md CLAUDE.md GLOSSARY.md docs/adr docs/social-preview/social-preview.svg .gitattributes .gitignore entries/_template.md"
 
 if [ -e "$DEST" ] && [ -n "$(ls -A "$DEST" 2>/dev/null)" ]; then
   echo "refusing: $DEST exists and is not empty"; exit 1

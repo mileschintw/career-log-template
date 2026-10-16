@@ -1,6 +1,21 @@
-# career-log
+# career-log: an AI career journal and resume builder for Claude Code, Codex and Cursor
 
-Raw records of past work, projects and achievements, written once so they never have to be remembered again. Resumes, cover letters, bios and interview answers are derived from these records by the `career-log` skill. It works with coding agents that read `AGENTS.md` and Agent Skills: [Claude Code](https://claude.com/claude-code), OpenAI Codex, Cursor and Google Antigravity. Only Claude Code is fully tested; the others should broadly work.
+![career-log: log your work as it happens, then write a tailored resume from the record](docs/social-preview/social-preview.svg)
+
+A GitHub template for keeping a career log (a "brag document") in git and turning it into tailored resumes, cover letters, job application answers and interview prep with an AI coding agent. You log wins as they happen: a PR merged, a hard bug fixed, feedback received. Every claim in a resume, cover letter, bio or interview answer then traces back to a dated record, so nothing is invented and nothing is forgotten.
+
+The `career-log` skill works with coding agents that read `AGENTS.md` and Agent Skills: [Claude Code](https://claude.com/claude-code), OpenAI Codex, Cursor and Google Antigravity. Only Claude Code is fully tested; the others should broadly work.
+
+## Features
+
+- **Career log / brag document**: one Markdown file per job, project or course, with dated log lines, plus a bank of stories for behavioural interview questions.
+- **Tailored resumes**: one-page LaTeX resumes (ATS-friendly PDF) built and layout-checked by `tools/resume.py`, tailored to each job posting.
+- **Job applications**: paste a posting URL to get a fit call, a tailored resume and form answers, then a second-agent review.
+- **Interview prep**: a prep pack from what the employer will read, then a mock interview.
+- **Skill gap analysis**: a gap heatmap across job postings and a project-first learning plan.
+- **Career fair planning**: rank employers by sponsorship, domain fit and size, with a timed route.
+- **Import**: merge old resumes (PDF, Word, LaTeX) and web profiles into the log.
+- **Provenance**: every output ships with a table linking each claim to its source record.
 
 ## Quick start
 

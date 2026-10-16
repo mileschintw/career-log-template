@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+<rect width="1280" height="640" fill="#0d1117"/>
+<rect x="80" y="64" width="1120" height="512" rx="16" fill="#161b22" stroke="#30363d" stroke-width="2"/>
+<circle cx="120" cy="100" r="8" fill="#ff5f56"/><circle cx="148" cy="100" r="8" fill="#ffbd2e"/><circle cx="176" cy="100" r="8" fill="#27c93f"/>
+<g font-family="Menlo, monospace" font-size="28">
+<text x="130" y="170" fill="#8b949e">$ git log --graph --oneline</text>
+<line x1="150" y1="210" x2="150" y2="378" stroke="#30363d" stroke-width="4"/>
+<circle cx="150" cy="210" r="9" fill="#e3b341"/>
+<text x="180" y="219" fill="#e3b341">log</text><text x="300" y="219" fill="#c9d1d9">shipped the feature</text>
+<circle cx="150" cy="266" r="9" fill="#e3b341"/>
+<text x="180" y="275" fill="#e3b341">log</text><text x="300" y="275" fill="#c9d1d9">fixed the hard bug</text>
+<circle cx="150" cy="322" r="9" fill="#58a6ff"/>
+<text x="180" y="331" fill="#58a6ff">talk</text><text x="300" y="331" fill="#c9d1d9">what's the story here?</text>
+<circle cx="150" cy="378" r="12" fill="#3fb950"/>
+<text x="180" y="387" fill="#3fb950">out</text><text x="300" y="387" fill="#c9d1d9">resume.pdf, tailored</text>
+</g>
+<text x="130" y="490" font-family="Helvetica, Arial, sans-serif" font-size="64" font-weight="700" fill="#f0f6fc">career-log</text>
+<text x="130" y="536" font-family="Helvetica, Arial, sans-serif" font-size="28" fill="#8b949e">Your career, version-controlled. Write the resume from the record.</text>
+</svg>
