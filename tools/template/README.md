@@ -21,17 +21,18 @@ A GitHub template for keeping a career log (a "brag document") in git and lettin
 1. On GitHub, click **Use this template** to create your own repo, and make it **Private**: it will hold your personal records.
 2. Clone it, open your coding agent in the repo root, and say "set up this machine following SETUP.md". It sets your git identity, links the skill into the skill folder your agent reads (SETUP.md step 4), installs the LaTeX tools and runs the checks.
 3. Hand over what you have. Put old resumes and CVs (PDF, `.tex`, Word), bios, reports and LinkedIn exports in `sources/inbox/` and say "import my old resumes". For an AI chat history, say "import my ChatGPT history" (or Claude, Gemini, Perplexity) and the agent tells you how to export it. For a logged-in website, name the site; that part needs an agent with a browser tool.
-4. From then on, when something worth remembering lands in any project, say "log this to my career log"; to apply for a job, paste the posting URL and say "apply to <URL>".
+4. From then on, when something worth remembering lands in any project, say "log this to my career log"; to apply for a job, paste the posting URL and say "apply to <URL>"; for a reusable version, say "write a backend engineer resume".
 
 Talk to your agent in any language. Records are written in English by default (change it in `direction.md`); each output picks its own language. The example data in `skills/career-log/examples/` only shows the format and is never treated as your experience.
 
 ## Features
 
 - **Career log / brag document**: one Markdown file per job, project or course, with dated log lines, plus a bank of stories for behavioural interview questions.
-- **Tailored resumes**: one-page LaTeX resumes (ATS-friendly PDF) built and layout-checked by `tools/resume.py`, tailored to each job posting.
-- **Job applications**: paste a posting URL to get a fit call, a tailored resume and form answers, then a second-agent review.
+- **Tailored resumes**: one-page LaTeX resumes (ATS-friendly PDF), built and layout-checked by `tools/resume.py`. Make one for a single job posting, one per target role, or a general version; a second agent reviews each before you see it. The first time you ask for a role, the agent asks what that version should lead with and saves your answer in `direction.md`.
+- **Fit check**: paste a posting URL and get a go / no-go before any writing: sponsorship and clearance, where the role ranks among your targets, and each stated requirement mapped to the record that proves it, or marked as a gap. Ask for the fit alone and it stops there.
+- **Job applications**: answers to the form's free-text questions, drawn from your records. Your own tools fill in the rest of the form and track the application. A resume made for one posting is saved with the posting and the answers. For a reusable version you upload yourself, git history and the application date recover the exact file (keep its file name when you upload it).
 - **Interview prep**: a prep pack from what the employer will read, then a mock interview.
-- **Skill gap analysis**: a gap heatmap across job postings and a project-first learning plan.
+- **Skill gap analysis**: for one dream posting or a batch of them, a gap heatmap that separates skills your records prove from skills you only claim, and a project-first learning plan. The fit check decides whether to apply; this decides what to learn.
 - **Employer ranking**: sort a career fair roster or job list by sponsorship, domain fit and size.
 - **Import**: merge old resumes and CVs (PDF, Word, LaTeX), bios, reports, LinkedIn exports, AI chat histories (ChatGPT, Claude.ai, Gemini, Perplexity) and logged-in websites into one entry per experience. Reading a website, and Perplexity, which has no export, needs an agent with a browser tool.
 - **Provenance**: every output ships with a table linking each claim to its source record.
@@ -72,11 +73,10 @@ Invoke the skill and say what you want. The `career-log` skill (in [`skills/care
 |---|---|
 | "log this to my career log" | **log**: append a dated line to an entry |
 | "consolidate the <project> entry" | **consolidate**: fill every section, interviewing you on the gaps |
-| "apply to <posting URL>" | **apply**: fit call, tailored resume and form answers, second-agent review |
 | "prep me for the <company> interview" | **interview**: prep pack from what they read, then a mock interview |
-| "what should I learn for these postings" | **upskill**: evidence-based gap heatmap and a project-first learning plan |
+| "what should I learn for these postings", "how do I close the gap to <posting URL>" | **upskill**: evidence-based gap heatmap and a project-first learning plan |
 | "rank these career fair employers" | **rank**: tiers by sponsorship, domain fit, size, with an opening line for each top employer |
-| "write resume bullets for <role>" | **write**: derive an output, with a provenance table |
+| "apply to <posting URL>", "how well do I fit <posting URL>", "write a backend engineer resume" | **write**: a fit call on a posting; a resume for that posting, a target role or a general version; form answers and cover letters. Employer-facing drafts get a second-agent review and a provenance table |
 | "import my old resumes" (files in `sources/inbox/`, or a logged-in site through the agent's browser) | **import**: merge old documents into entries |
 | "import my ChatGPT history" (or Claude, Gemini, Perplexity) | **import**: tells you how to export it, screens every conversation, and copies only the ones you pick; the raw export stays out of git |
 | "audit my career log" | **audit**: report missing stories, gaps and conflicts |

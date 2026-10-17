@@ -1,6 +1,6 @@
 # Writing standards
 
-Rules every output follows, whoever the log belongs to. `write`, `apply` and the review pass check drafts against this file. The user's own preferences live in `direction.md › Writing preferences for applications`; where the two disagree, the user's preference wins.
+Rules every output follows, whoever the log belongs to. `write` and the review pass check drafts against this file. The user's own preferences live in `direction.md › Writing preferences for applications`; where the two disagree, the user's preference wins.
 
 Each rule names where it comes from:
 - **r/ER**: the r/EngineeringResumes wiki ([index](https://www.reddit.com/r/EngineeringResumes/wiki/index/), read 2026-10-15; [sample bullet points](https://www.reddit.com/r/EngineeringResumes/wiki/sample-bullet-points/)) and its [LaTeX template](https://github.com/r-engineeringresumes/resume-templates) (MIT);

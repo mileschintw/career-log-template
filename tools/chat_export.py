@@ -448,8 +448,32 @@ def read_known(norm, read):
 
 def rank(c, with_updated):
     last = max((m["time"] for m in c["messages"] if m["time"]), default="")
-    return ((c["updated"],) if with_updated else ()) + (last, len(c["messages"]),
-                                                        json.dumps(c, sort_keys=True, ensure_ascii=False))
+    return ((c["updated"],) if with_updated else ()) + (last, len(c["messages"]))
+
+
+def content(c):
+    return json.dumps(c, sort_keys=True, ensure_ascii=False)
+
+
+class Best:
+    """The best copy so far under one order: rank() first, then the copy's content. The current
+    best's rank is kept, and content is serialised only when two ranks tie, each copy at most once."""
+
+    def __init__(self, with_updated):
+        self.with_updated, self.copy, self.key, self.text = with_updated, None, None, None
+
+    def offer(self, c):
+        key, text = rank(c, self.with_updated), None
+        if self.copy is not None:
+            if key < self.key:
+                return
+            if key == self.key:
+                if self.text is None:
+                    self.text = content(self.copy)
+                text = content(c)
+                if text <= self.text:
+                    return
+        self.copy, self.key, self.text = c, key, text
 
 
 class Pick:
@@ -461,17 +485,15 @@ class Pick:
     Only the best copy under each order is kept, never every copy."""
 
     def __init__(self):
-        self.all_updated, self.by_updated, self.by_recency = True, None, None
+        self.all_updated, self.by_updated, self.by_recency = True, Best(True), Best(False)
 
     def add(self, c):
         self.all_updated = self.all_updated and bool(c["updated"])
-        if self.by_updated is None or rank(c, True) > rank(self.by_updated, True):
-            self.by_updated = c
-        if self.by_recency is None or rank(c, False) > rank(self.by_recency, False):
-            self.by_recency = c
+        self.by_updated.offer(c)
+        self.by_recency.offer(c)
 
     def best(self):
-        return self.by_updated if self.all_updated else self.by_recency
+        return (self.by_updated if self.all_updated else self.by_recency).copy
 
 
 def cmd_index(a):

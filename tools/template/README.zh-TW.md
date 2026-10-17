@@ -21,17 +21,18 @@
 1. 在 GitHub 按 **Use this template** 建立自己的 repo，並設為 **Private**：這裡會放你的個人經歷。
 2. 把它 clone 到電腦上，在 repo 根目錄開你的 coding agent，對它說「照 SETUP.md 幫我設定這台電腦」。它會設定 git 身分、把 skill 連到你的 agent 讀取的 skill 資料夾（SETUP.md 第 4 步）、安裝 LaTeX 工具並跑檢查。
 3. 手上有什麼就交出來。把舊履歷和 CV（PDF、`.tex`、Word）、自我介紹、報告和 LinkedIn 匯出檔放進 `sources/inbox/`，說「import my old resumes」。AI 聊天記錄就說「import my ChatGPT history」（或 Claude、Gemini、Perplexity），agent 會告訴你怎麼匯出。已登入的網站就說出網站名稱；這部分需要有瀏覽器工具的 agent。
-4. 之後在任何專案完成一件值得記的事，說「log this to my career log」；要投履歷時，貼職缺網址說「apply to <網址>」。
+4. 之後在任何專案完成一件值得記的事，說「log this to my career log」；要投履歷時，貼職缺網址說「apply to <網址>」；要一份可重複使用的版本，就說「write a backend engineer resume」。
 
 你可以用任何語言跟你的 agent 對話。記錄預設用英文寫（可在 `direction.md` 改），每份產出各自選語言。範例資料在 `skills/career-log/examples/`，只是格式示範，不會被當成你的經歷。
 
 ## 功能
 
 - **職涯日誌 / brag document**：每份工作、專案或課程一個 Markdown 檔，內含有日期的記錄，外加一份行為面試題的故事庫。
-- **客製化履歷**：一頁的 LaTeX 履歷（ATS 友善的 PDF），由 `tools/resume.py` 編譯並檢查版面，依每個職缺調整。
-- **投遞職缺**：貼上職缺網址，就會得到適合度判斷、依職缺調整的履歷和申請表答案，再由第二個 agent 審閱。
+- **客製化履歷**：一頁的 LaTeX 履歷（ATS 友善的 PDF），由 `tools/resume.py` 編譯並檢查版面。可以針對單一職缺做一份、每個目標職位各做一份，或做一份通用版；每份在你看到之前，都先由第二個 agent 審閱。第一次要某個職位的版本時，agent 會問你這份要以什麼為重點，並把答案存進 `direction.md`。
+- **適合度判斷**：貼上職缺網址，動筆之前先判斷值不值得投：簽證贊助和安全許可、這個職位在你的目標裡排第幾，以及每項職缺要求對應到哪筆記錄能證明，或標成缺口。只問適合度的話，它就停在這裡。
+- **投遞職缺**：申請表上的開放式問題，依你的記錄作答。表單其他欄位和投遞追蹤交給你自己的工具。針對單一職缺做的履歷，會和職缺、答案存在一起；你自己上傳的可重複使用版本，則用 git 歷史和投遞日期找回當時那份檔案（上傳時保留它的檔名）。
 - **面試準備**：根據雇主會讀到的資料整理準備包，再進行模擬面試。
-- **技能缺口分析**：橫跨多個職缺的技能缺口熱圖，以及以專案為主的學習計畫。
+- **技能缺口分析**：針對一個夢想職缺或一批職缺，產出一張區分「有記錄證明」和「只是自稱」的技能缺口熱圖，以及以專案為主的學習計畫。適合度判斷決定要不要投，這裡決定要學什麼。
 - **雇主排序**：依簽證贊助、領域契合度和公司規模，排序徵才博覽會的名單或職缺清單。
 - **匯入**：把舊履歷和 CV（PDF、Word、LaTeX）、自我介紹、報告、LinkedIn 匯出檔、AI 聊天記錄（ChatGPT、Claude.ai、Gemini、Perplexity）和已登入的網站，併成每段經歷一筆條目。讀取網站，以及沒有匯出功能的 Perplexity，需要有瀏覽器工具的 agent。
 - **來源追溯**：每份產出都附一張表，把每項陳述連到它的來源記錄。
@@ -72,11 +73,10 @@
 |---|---|
 | "log this to my career log" | **log**：在某筆條目加一行有日期的記錄 |
 | "consolidate the <project> entry" | **consolidate**：補齊每個段落，針對缺口追問你 |
-| "apply to <posting URL>" | **apply**：適合度判斷、針對職缺改寫的履歷和申請表答案、第二個 agent 審閱 |
 | "prep me for the <company> interview" | **interview**：根據對方會讀到的資料整理準備包，再進行模擬面試 |
-| "what should I learn for these postings" | **upskill**：以證據為本的技能缺口熱圖，以及以專案為主的學習計畫 |
+| "what should I learn for these postings"、"how do I close the gap to <posting URL>" | **upskill**：以證據為本的技能缺口熱圖，以及以專案為主的學習計畫 |
 | "rank these career fair employers" | **rank**：依簽證贊助、領域契合度、規模分級，並為每個排名前面的雇主準備一句開場白 |
-| "write resume bullets for <role>" | **write**：產出文件，並附來源追溯表 |
+| "apply to <posting URL>"、"how well do I fit <posting URL>"、"write a backend engineer resume" | **write**：針對職缺的適合度判斷；針對該職缺、目標職位或通用版的履歷；申請表答案和求職信。給雇主看的草稿會由第二個 agent 審閱，並附來源追溯表 |
 | "import my old resumes"（檔案放在 `sources/inbox/`，或透過 agent 的瀏覽器讀取已登入的網站） | **import**：把舊文件併入條目 |
 | "import my ChatGPT history"（或 Claude、Gemini、Perplexity） | **import**：告訴你怎麼匯出，逐一篩選每段對話，只複製你挑的那些；原始匯出檔不進 git |
 | "audit my career log" | **audit**：列出缺少的故事、缺口和矛盾 |
