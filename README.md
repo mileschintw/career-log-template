@@ -2,9 +2,11 @@ English | [繁體中文](README.zh-TW.md)
 
 # career-log: an AI career journal and resume builder for Claude Code, Codex, Cursor and Antigravity
 
-![macOS](https://img.shields.io/badge/macOS-supported-2ea44f) ![Windows](https://img.shields.io/badge/Windows-supported-2ea44f) ![Linux](https://img.shields.io/badge/Linux-supported-2ea44f) ![Claude Code: tested](https://img.shields.io/badge/Claude_Code-tested-2ea44f) ![Codex: should work](https://img.shields.io/badge/Codex-should_work-blue) ![Cursor: should work](https://img.shields.io/badge/Cursor-should_work-blue) ![Antigravity: should work](https://img.shields.io/badge/Antigravity-should_work-blue)
+![Claude Code: tested](https://img.shields.io/badge/Claude_Code-tested-2ea44f) ![Codex: should work](https://img.shields.io/badge/Codex-should_work-blue) ![Cursor: should work](https://img.shields.io/badge/Cursor-should_work-blue) ![Antigravity: should work](https://img.shields.io/badge/Antigravity-should_work-blue)
 
-A GitHub template for keeping a career log (a "brag document") in git and letting your AI coding agent turn it into tailored resumes, cover letters, job application answers and interview prep. Every claim it writes traces back to a dated record, so nothing is invented and nothing is forgotten.
+![macOS](https://img.shields.io/badge/macOS-supported-2ea44f) ![Windows](https://img.shields.io/badge/Windows-supported-2ea44f) ![Linux](https://img.shields.io/badge/Linux-supported-2ea44f)
+
+A GitHub template for keeping a career log (a "brag document") in git and letting your AI coding agent turn it into tailored resumes, cover letters, job application answers and interview prep. Every claim it writes traces back to a dated record, so it can't invent anything, and nothing you logged gets lost.
 
 - **Hand over everything you have.** You don't type your history in. Give the agent your old resumes and CVs, bios, reports, LinkedIn exports and AI chat histories, or let it read a logged-in website in its browser. It merges them into one entry per experience.
 - **No commands to learn.** Invoke the skill and say what you want, in your own words and in any language. It picks the right mode from your request and walks you through it.
@@ -13,6 +15,15 @@ A GitHub template for keeping a career log (a "brag document") in git and lettin
 - **Your OS, your agent.** Runs on macOS, Windows and Linux with Claude Code, Codex, Cursor and Antigravity. Only [Claude Code](https://claude.com/claude-code) is fully tested; the others should broadly work, but are not tested on Windows.
 
 ![career-log: log your work as it happens, then write a tailored resume from the record](docs/social-preview/social-preview.svg)
+
+## Quick start
+
+1. On GitHub, click **Use this template** to create your own repo, and make it **Private**: it will hold your personal records.
+2. Clone it, open your coding agent in the repo root, and say "set up this machine following SETUP.md". It sets your git identity, links the skill into the skill folder your agent reads (SETUP.md step 4), installs the LaTeX tools and runs the checks.
+3. Hand over what you have. Put old resumes and CVs (PDF, `.tex`, Word), bios, reports and LinkedIn exports in `sources/inbox/` and say "import my old resumes". For an AI chat history, say "import my ChatGPT history" (or Claude, Gemini, Perplexity) and the agent tells you how to export it. For a logged-in website, name the site; that part needs an agent with a browser tool.
+4. From then on, when something worth remembering lands in any project, say "log this to my career log"; to apply for a job, paste the posting URL and say "apply to <URL>".
+
+Talk to your agent in any language. Records are written in English by default (change it in `direction.md`); each output picks its own language. The example data in `skills/career-log/examples/` only shows the format and is never treated as your experience.
 
 ## Features
 
@@ -51,20 +62,11 @@ Like every rule here, these are defaults you can override (see the top of this p
 
 The skill is designed for **English resumes in the North American style**: one page, the rules in [writing.md](skills/career-log/writing.md), and the bundled LaTeX template. You can talk to your agent in any language, and records can be in any language; the scope is about the resume it produces.
 
-Other languages and resume styles depend on three planned features: custom resume templates, Typst templates, and CJK (Chinese, Japanese, Korean) resumes. Even after those land, resumes in other languages or styles **may not work as well** as North American English ones. Those features will extend the same design, built and tested around this style, rather than adding rules tuned for other markets.
-
-## Quick start
-
-1. On GitHub, click **Use this template** to create your own repo, and make it **Private**: it will hold your personal records.
-2. Clone it, open your coding agent in the repo root, and say "set up this machine following SETUP.md". It sets your git identity, links the skill into the skill folder your agent reads (SETUP.md step 4), installs the LaTeX tools and runs the checks.
-3. Hand over what you have. Put old resumes and CVs (PDF, `.tex`, Word), bios, reports and LinkedIn exports in `sources/inbox/` and say "import my old resumes". For an AI chat history, say "import my ChatGPT history" (or Claude, Gemini, Perplexity) and the agent tells you how to export it. For a logged-in website, name the site; that part needs an agent with a browser tool.
-4. From then on, when something worth remembering lands in any project, say "log this to my career log"; to apply for a job, paste the posting URL and say "apply to <URL>".
-
-Talk to your agent in any language. Records are written in English by default (change it in `direction.md`); each output picks its own language. The example data in `skills/career-log/examples/` only shows the format and is never treated as your experience.
+Other languages and resume styles depend on three planned features: custom resume templates, Typst templates, and CJK (Chinese, Japanese, Korean) resumes. Even after those land, resumes in other languages or styles **may not work as well** as North American English ones. Those features will extend the design built and tested for this style, and none of them adds rules tuned for other markets.
 
 ## How to use
 
-Invoke the skill and say what you want. The `career-log` skill (in [`skills/career-log/`](skills/career-log/SKILL.md)) works from any session of those agents once it is linked into the skill folder your agent reads (see [SETUP.md](SETUP.md) step 4), and it picks the mode from your request. The table is a reference of what you can ask for, not a list of commands: the quoted phrases are examples, and any wording works.
+Invoke the skill and say what you want. The `career-log` skill (in [`skills/career-log/`](skills/career-log/SKILL.md)) works from any session of those agents once it is linked into the skill folder your agent reads (see [SETUP.md](SETUP.md) step 4), and it picks the mode from your request. The table shows what you can ask for. The quoted phrases are examples; any wording works.
 
 | You can ask | Mode |
 |---|---|

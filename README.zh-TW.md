@@ -2,9 +2,11 @@
 
 # career-log：給 Claude Code、Codex、Cursor 和 Antigravity 用的 AI 職涯日誌與履歷產生器
 
-![macOS](https://img.shields.io/badge/macOS-supported-2ea44f) ![Windows](https://img.shields.io/badge/Windows-supported-2ea44f) ![Linux](https://img.shields.io/badge/Linux-supported-2ea44f) ![Claude Code: tested](https://img.shields.io/badge/Claude_Code-tested-2ea44f) ![Codex: should work](https://img.shields.io/badge/Codex-should_work-blue) ![Cursor: should work](https://img.shields.io/badge/Cursor-should_work-blue) ![Antigravity: should work](https://img.shields.io/badge/Antigravity-should_work-blue)
+![Claude Code: tested](https://img.shields.io/badge/Claude_Code-tested-2ea44f) ![Codex: should work](https://img.shields.io/badge/Codex-should_work-blue) ![Cursor: should work](https://img.shields.io/badge/Cursor-should_work-blue) ![Antigravity: should work](https://img.shields.io/badge/Antigravity-should_work-blue)
 
-這是一個 GitHub template，用 git 保存職涯日誌（也就是「brag document」），再讓你的 AI coding agent 把它變成量身打造的履歷、求職信、申請表答案和面試準備。它寫出的每一句話都能追溯到一筆有日期的記錄，不會憑空捏造，也不會忘記。
+![macOS](https://img.shields.io/badge/macOS-supported-2ea44f) ![Windows](https://img.shields.io/badge/Windows-supported-2ea44f) ![Linux](https://img.shields.io/badge/Linux-supported-2ea44f)
+
+這是一個 GitHub template，用 git 保存職涯日誌（也就是「brag document」），再讓你的 AI coding agent 把它變成量身打造的履歷、求職信、申請表答案和面試準備。它寫出的每一句話都能追溯到一筆有日期的記錄，所以 agent 不會憑空捏造，你記下的事也不會遺失。
 
 - **手上有什麼就全部交給它。** 不必自己把經歷打進去。把舊履歷和 CV、自我介紹、報告、LinkedIn 匯出檔和 AI 聊天記錄交給 agent，或讓它用瀏覽器讀取你已登入的網站。它會把這些併成每段經歷一筆條目。
 - **不用學指令。** 呼叫 skill，用你自己的話、任何語言說你想做什麼。它會依你的要求選對模式，一步步帶你完成。
@@ -13,6 +15,15 @@
 - **你的作業系統、你的 agent。** 支援 macOS、Windows 和 Linux，可搭配 Claude Code、Codex、Cursor 和 Antigravity 使用。目前只有 [Claude Code](https://claude.com/claude-code) 完整測過；其他應該大致可用，但沒在 Windows 上測過。
 
 ![career-log：工作當下就記下來，之後從記錄寫出量身打造的履歷](docs/social-preview/social-preview.svg)
+
+## 快速開始
+
+1. 在 GitHub 按 **Use this template** 建立自己的 repo，並設為 **Private**：這裡會放你的個人經歷。
+2. 把它 clone 到電腦上，在 repo 根目錄開你的 coding agent，對它說「照 SETUP.md 幫我設定這台電腦」。它會設定 git 身分、把 skill 連到你的 agent 讀取的 skill 資料夾（SETUP.md 第 4 步）、安裝 LaTeX 工具並跑檢查。
+3. 手上有什麼就交出來。把舊履歷和 CV（PDF、`.tex`、Word）、自我介紹、報告和 LinkedIn 匯出檔放進 `sources/inbox/`，說「import my old resumes」。AI 聊天記錄就說「import my ChatGPT history」（或 Claude、Gemini、Perplexity），agent 會告訴你怎麼匯出。已登入的網站就說出網站名稱；這部分需要有瀏覽器工具的 agent。
+4. 之後在任何專案完成一件值得記的事，說「log this to my career log」；要投履歷時，貼職缺網址說「apply to <網址>」。
+
+你可以用任何語言跟你的 agent 對話。記錄預設用英文寫（可在 `direction.md` 改），每份產出各自選語言。範例資料在 `skills/career-log/examples/`，只是格式示範，不會被當成你的經歷。
 
 ## 功能
 
@@ -37,7 +48,7 @@
 - [Tech Interview Handbook 履歷指南](https://www.techinterviewhandbook.org/resume/)（`TIH`）：採用兩條規則，即縮寫要寫出全稱，以及用純文字檢查 ATS 的讀取。它的格式建議與 r/ER 衝突，其餘不採用。
 
 **從真實求職得到的經驗**，是一般指南沒寫到的。來源是作者用這個 skill 準備真實申請時做的判斷（`practice`），以及招募人員、用人團隊的工程師和同儕的建議（`feedback`）。舉幾條：
-- 條列先寫你做了什麼，數字放在後面：以數字開頭的條列，會讓人看不出你做了什麼。（同儕的建議）
+- 條列先寫你做了什麼，數字放在後面：以數字開頭，讀者就找不到你的貢獻。（同儕的建議）
 - 畢業日期放在讀者一眼就看得到的地方。（招募人員的篩選順序，由同儕轉述）
 - Skills 列出的技能，也要出現在某條條列裡：招募人員先拿 Skills 對照職缺，再找用到這些技能的經歷。（同一位招募人員的看法）
 - 軟實力以 1–3 項證據寫進技術條列，不另開條列。（用人團隊工程師的建議）
@@ -51,20 +62,11 @@
 
 這個 skill 是為**北美風格的英文履歷**設計的：一頁、遵循 [writing.md](skills/career-log/writing.md) 的規則、使用內附的 LaTeX 範本。你可以用任何語言跟 agent 對話，記錄也可以用任何語言寫；適用範圍指的是它產出的履歷。
 
-其他語言和履歷風格要等三項規劃中的功能：自訂履歷範本、Typst 範本，以及 CJK（中文、日文、韓文）履歷。即使這些功能完成，其他語言或風格的履歷**效果可能仍不如**北美英文履歷。這些功能會延伸同一套以這種風格建立並測試的設計，而不是另外加入針對其他市場調整的規則。
-
-## 快速開始
-
-1. 在 GitHub 按 **Use this template** 建立自己的 repo，並設為 **Private**：這裡會放你的個人經歷。
-2. 把它 clone 到電腦上，在 repo 根目錄開你的 coding agent，對它說「照 SETUP.md 幫我設定這台電腦」。它會設定 git 身分、把 skill 連到你的 agent 讀取的 skill 資料夾（SETUP.md 第 4 步）、安裝 LaTeX 工具並跑檢查。
-3. 手上有什麼就交出來。把舊履歷和 CV（PDF、`.tex`、Word）、自我介紹、報告和 LinkedIn 匯出檔放進 `sources/inbox/`，說「import my old resumes」。AI 聊天記錄就說「import my ChatGPT history」（或 Claude、Gemini、Perplexity），agent 會告訴你怎麼匯出。已登入的網站就說出網站名稱；這部分需要有瀏覽器工具的 agent。
-4. 之後在任何專案完成一件值得記的事，說「log this to my career log」；要投履歷時，貼職缺網址說「apply to <網址>」。
-
-你可以用任何語言跟你的 agent 對話。記錄預設用英文寫（可在 `direction.md` 改），每份產出各自選語言。範例資料在 `skills/career-log/examples/`，只是格式示範，不會被當成你的經歷。
+其他語言和履歷風格要等三項規劃中的功能：自訂履歷範本、Typst 範本，以及 CJK（中文、日文、韓文）履歷。即使這些功能完成，其他語言或風格的履歷**效果可能仍不如**北美英文履歷。這些功能會延伸這套為北美風格建立並測試的設計，也不會另外加入針對其他市場調整的規則。
 
 ## 使用方式
 
-呼叫 skill，說你想做什麼。`career-log` skill（在 [`skills/career-log/`](skills/career-log/SKILL.md)）連到你的 agent 讀取的 skill 資料夾之後（見 [SETUP.md](SETUP.md) 第 4 步），在上述任何 agent 的任何 session 都能用，並會依你的要求選模式。下表列出你可以要求的事，僅供參考，不是指令清單：引號裡的句子只是範例，怎麼說都行。
+呼叫 skill，說你想做什麼。`career-log` skill（在 [`skills/career-log/`](skills/career-log/SKILL.md)）連到你的 agent 讀取的 skill 資料夾之後（見 [SETUP.md](SETUP.md) 第 4 步），在上述任何 agent 的任何 session 都能用，並會依你的要求選模式。下表列出你可以要求的事。引號裡的句子只是範例，怎麼說都行。
 
 | 你可以要求 | 模式 |
 |---|---|

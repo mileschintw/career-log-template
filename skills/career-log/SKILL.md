@@ -68,7 +68,7 @@ Every resume an employer received must be recoverable exactly as sent.
 
 - **Through an application:** its folder in `outputs/applications/` keeps the `.tex` and `.pdf`, and is not edited after sending.
 - **Outside one** (a career fair, a recruiter email): record the commit, not a copy. Take the last commit that touched the target's files before the version was sent (`git -C <root> log -1 --format=%H -- outputs/resumes/<target>.*`), with its work committed first. In the `applications.md` row write `[<target> @ <short hash>](<permalink>)`, where the permalink is `https://github.com/<owner>/<repo>/blob/<full hash>/outputs/resumes/<target>.pdf`, with `<owner>/<repo>` read from `git -C <root> remote get-url origin` (both `https://github.com/<owner>/<repo>.git` and `git@github.com:<owner>/<repo>.git`). If origin is not on GitHub, or there is no remote, write the bare short hash.
-- The hash is the source of truth; the link is a convenience. To read the sent version: `git -C <root> show <hash>:outputs/resumes/<target>.tex`.
+- The hash is the source of truth; the link is a convenience. To read the sent version, take the file path from the permalink (the part after `/blob/<hash>/`), which stays right when a target is later renamed or moved, and swap `.pdf` for `.tex`: `git -C <root> show <hash>:<path>.tex`. A row with a bare hash and no link: `git -C <root> show <hash>:outputs/resumes/<target>.tex`, and if that path is missing at the hash, `git -C <root> show --stat <hash>` lists what the commit touched.
 
 Drafts are never committed: they are built under `.build/` ([latex.md](latex.md#the-loop)) and copied into `outputs/` only when the user approves them.
 
@@ -85,7 +85,7 @@ Short citations for imported material. Generic forms:
 | `sources/resumes/<file>` | An imported resume version |
 | `<repo>@<sha>:<path>:<line>` | A file in one of the user's git repos |
 
-Keys for this log's own imports (a chat export, a profile page) are defined in `sources/keys.md`. Add a row there whenever a new source folder appears (`sources/resumes/` needs none: its generic key is above).
+Keys for this log's own imports (a chat export, a profile page) are defined in `sources/keys.md`. Add a row there whenever a new source folder or a new chat extract appears (`sources/resumes/` needs none: its generic key is above).
 
 ## Modes
 

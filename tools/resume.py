@@ -3,6 +3,7 @@
 
     python3 tools/resume.py <file.tex> [--out DIR] [--install-missing] [--no-png]
     python3 tools/resume.py --check <file.pdf>
+    python3 tools/resume.py <a.pdf> --same-text <b.pdf>
 
 Build: pdflatex into a scratch dir (default <repo>/.build/<stem>/), then copy the
 PDF next to the .tex. With --install-missing, packages reported missing are
@@ -13,6 +14,11 @@ dangling last lines, bottom slack, overfull boxes, contact details in the text
 layer. Writes a PNG of each page for a visual read. Exit status 1 when any check
 fails, 2 when the build itself fails. Needs only the standard library plus
 TinyTeX and poppler (tools/setup.sh or tools/setup.ps1 installs both).
+
+Same text: exit 0 when two PDFs hold the same words in the same order (whitespace and
+line breaks ignored, so a rebuild after a toolchain update still matches), 1 when they
+differ, with the first difference shown, or when either has no text layer, 2 when pdftotext
+fails on either file or the options are wrong. Audit uses it to catch a stale committed PDF.
 
 Runs on macOS, Linux and Windows. Binaries are found in TINYTEX_BIN and POPPLER_BIN
 first, then in the default install locations, then on PATH. PATH comes last because
@@ -173,6 +179,29 @@ def lines_of(pdf):
     return pages
 
 
+def words_of(pdf):
+    run = subprocess.run([find_poppler_bin("pdftotext"), "-enc", "UTF-8", pdf, "-"],
+                         capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if run.returncode != 0:
+        print(f"pdftotext failed on {pdf} (exit {run.returncode}): {run.stderr.strip()[:500]}")
+        sys.exit(2)
+    return run.stdout.split()
+
+
+def same_text(a, b):
+    wa, wb = words_of(a), words_of(b)
+    blank = [p for p, w in ((a, wa), (b, wb)) if not w]
+    if blank:  # two blank PDFs would otherwise "match"
+        print("FAIL: no text layer in " + ", ".join(blank))
+        return False
+    if wa == wb:
+        print(f"same text: {len(wa)} words")
+        return True
+    i = next((i for i, (x, y) in enumerate(zip(wa, wb)) if x != y), min(len(wa), len(wb)))
+    print(f"FAIL: text differs at word {i}: {' '.join(wa[i:i + 8])!r} vs {' '.join(wb[i:i + 8])!r}")
+    return False
+
+
 def check(pdf, log_path=None, png=True):
     fails, notes = [], []
     pages = lines_of(pdf)
@@ -244,12 +273,18 @@ def main():
         stream.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("path", help=".tex to build and check, or .pdf with --check")
-    ap.add_argument("--check", action="store_true", help="only check an existing PDF")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true", help="only check an existing PDF")
+    mode.add_argument("--same-text", metavar="PDF", help="compare the words of the .pdf in path with this one")
     ap.add_argument("--out", help="scratch build dir (default <repo>/.build/<stem>)")
     ap.add_argument("--install-missing", action="store_true", help="tlmgr-install missing packages and retry")
     ap.add_argument("--no-png", action="store_true", help="skip page images")
     a = ap.parse_args()
-    if a.check:
+    if a.same_text is not None and (a.out is not None or a.install_missing or a.no_png):
+        ap.error("--same-text compares two existing PDFs; --out, --install-missing and --no-png do not apply")
+    if a.same_text is not None:
+        ok = same_text(a.path, a.same_text)
+    elif a.check:
         ok = check(a.path, png=not a.no_png)
     else:
         stem = os.path.splitext(os.path.basename(a.path))[0]
