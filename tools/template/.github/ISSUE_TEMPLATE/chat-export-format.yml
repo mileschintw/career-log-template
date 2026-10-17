@@ -1,0 +1,50 @@
+name: Chat export format changed
+description: A ChatGPT, Claude.ai, Gemini or Perplexity export no longer parses with tools/chat_export.py
+title: "<platform>: <what changed>"
+labels: ["chat-export"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Issues are public.** Describe the format with keys and shapes only.
+        Never paste message text, names, ids, dates, URLs or anything from your career log.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - ChatGPT
+        - Claude.ai
+        - Gemini Apps
+        - Perplexity
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: broke
+    attributes:
+      label: What broke
+      description: The parser warning, or the symptom (wrong counts, missing turns, a crash). Name the file inside the export, not your path.
+    validations:
+      required: true
+  - type: textarea
+    id: sample
+    attributes:
+      label: Redacted structural sample
+      description: |
+        Keys, types and nesting only, for example `{"chat_messages": [{"sender": "str", "text": "str"}]}`.
+        No message text, names, ids, dates or URLs.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: change
+    attributes:
+      label: Parser change (optional)
+      description: A diff of tools/chat_export.py if you already fixed it locally.
+      render: diff
+  - type: input
+    id: version
+    attributes:
+      label: Template version
+      description: The commit your repo was created from, or "unknown".

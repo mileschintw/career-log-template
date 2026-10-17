@@ -24,3 +24,8 @@ Citation keys are defined in [sources/keys.md](sources/keys.md). Applications an
 The rules every user shares are in [writing.md](skills/career-log/writing.md). This section holds the user's own preferences; where they disagree with writing.md, these win.
 
 - **Languages:** record language English. (default; change it here)
+
+## Repo workflow
+How the skill commits to this repo.
+
+- **Bulk changes as pull requests:** off. (default; change it here) When on, every import and every edit across several entries lands on a `data/` branch as a pull request you review before it reaches the default branch. Needs `gh` and a GitHub remote; see [SKILL.md › Commits](skills/career-log/SKILL.md).

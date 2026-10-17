@@ -21,4 +21,4 @@ Behavioural question types → where the story lives. A row with no entry is a m
 | Scope / prioritisation / tech debt | |
 
 ## Application questions
-<!-- Recurring application question types → the approved answer in outputs/. -->
+<!-- Recurring application question types → the approved answer in outputs/reports/ or an application folder. -->

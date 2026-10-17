@@ -28,7 +28,7 @@ It also prints the bottom slack and writes `<stem>-1.png`. Read the PNG after ev
 
 The checks are calibrated on the r/EngineeringResumes template. The older sb2nov template builds but nests bullets, so its bullet counts are not meaningful.
 
-Build from a copy, never in `sources/resumes/`: originals there are never edited, and a build writes a PDF beside the source. Work in the output's folder under `outputs/` (an `apply` application folder, or beside a `write` output).
+Build from a copy, never in `sources/resumes/` or `outputs/`: originals in `sources/resumes/` are never edited, a build writes a PDF and a PNG beside the source, and a rebuilt PDF differs byte for byte from the committed one. Draft in `.build/drafts/<name>/` (ignored), so iteration never shows up in `git status`: copy the starting `.tex` there (`<name>` is the target for a `write` resume, the application folder's name for `apply`), edit and build it there, and copy the `.tex` and its built `.pdf` into `outputs/` only when the user approves.
 
 ## Editing the r/EngineeringResumes template
 

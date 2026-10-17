@@ -183,5 +183,5 @@ A `pdftotext` without `-bbox-layout` is skipped. That is xpdf's, and Git for Win
 
 ## Daily use
 
-- **More than one machine.** Pull before starting and push when done; the skill pushes after every mode that writes. Generated files (`.build/`, page PNGs) are ignored, so nothing machine-specific reaches the repo.
+- **More than one machine.** Pull before starting and push when done; the skill pushes after every mode that writes. If you turned on *Bulk changes as pull requests* in `direction.md › Repo workflow`, an import or another bulk change sits on a `data/` branch until you merge its pull request ([SKILL.md › Commits](skills/career-log/SKILL.md)): merge or close it before switching machines, or the other clone will not have it. Generated files (`.build/`, page PNGs) are ignored, so nothing machine-specific reaches the repo.
 - **Changing `tools/` or this file.** Push, then run steps 6 and 7 on every other platform you use. On Windows, run them in PowerShell and in Git Bash: Git Bash puts Git's own xpdf `pdftotext` first on `PATH`, which once broke only there.

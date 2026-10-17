@@ -7,7 +7,7 @@ description: Personal career log repo — raw records of past work, projects and
 
 The log is the git repo that contains this skill (private; see its `origin` remote). Resolve its root with `git -C <this skill's base directory> rev-parse --show-toplevel`. If git answers "not a git repository" (possible on Windows if git does not follow the junction of the skill link (SETUP.md step 4); Git 2.38 does), resolve the link first with `python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" <base directory>` and run git on the result. Every path below is relative to that root, and every git command runs there (`git -C <root> ...`), whatever the current project is.
 
-At the start of each session, `git -C <root> pull --ff-only`: the user may work from more than one clone, and another machine may have pushed.
+At the start of each session, `git -C <root> pull --ff-only --prune`: the user may work from more than one clone, and another machine may have pushed. Then look for unmerged data branches (*Commits* below), wherever they were started: `git -C <root> branch -a --list "data/*" "origin/data/*"` (the pull has just fetched the other machine's, and pruned the ones it deleted), and `git -C <root> worktree list`. For each branch found, `gh pr list --head <branch>` shows whether it has a pull request; one without is work still in progress on another machine. If there is one, tell the user before starting: its changes are not on the default branch yet, so this session would not see them, and editing the same files here would conflict with it. Merge it, close it or continue on it, as the user decides.
 
 It stores **raw material**: facts about what happened, recorded richly enough that nobody has to remember them again. Every resume bullet, cover letter, bio or interview answer is an **output** derived from the raw material, never the other way round.
 
@@ -17,19 +17,19 @@ It stores **raw material**: facts about what happened, recorded richly enough th
 |---|---|
 | `README.md` | Index: one row per entry. Update it whenever an entry is created or its period, title, tags or status change. Status starts with `stub` (mostly `GAP`), `imported` (filled from documents or repos, not yet consolidated) or `consolidated`, optionally followed by a short note in parentheses |
 | `profile.md` | Static facts: contact, education, languages, skills summary |
-| `direction.md` | Target roles ranked, employer preferences, constraints, emphasis by target, languages, the user's own writing preferences |
+| `direction.md` | Target roles ranked, employer preferences, constraints, emphasis by target, languages, the user's own writing preferences, repo workflow switches |
 | `applications.md` | Applications this repo prepared materials for, plus career fairs and recruiter contacts. Not a submission tracker (`direction.md › Tools the user already uses`) |
 | `stories.md` | Story index (behavioural question type → entry section) and the application-question bank |
 | `entries/<YYYY-MM>-<slug>.md` | One file per experience. Template: `entries/_template.md` |
-| `outputs/<YYYY-MM-DD>-<slug>.md` | Derived documents, each with a provenance table |
-| `outputs/<YYYY-MM-DD>-<company>-<role>/` | One folder per application: posting, resume, answers, provenance, interview packs |
-| `outputs/<YYYY-MM-DD>-<event>-page/` | A career fair's phone page (`index.html`, `map.png`) ([career-fair.md](career-fair.md)) |
-| `sources/inbox/` | Files waiting to be imported |
+| `outputs/applications/<YYYY-MM-DD>-<company>-<role>/` | One folder per application: posting, resume (`.tex` and the `.pdf` as sent), answers, provenance, interview packs. Frozen once sent; later interview packs and notes are added beside it |
+| `outputs/resumes/<target>.md` / `.tex` / `.pdf` | One file set per general or target resume version (`general`, `ai-infra`, `backend-infra`, ...), no date: the approved text with its provenance table, the source and the built PDF. Overwritten in place; git history holds the old versions. A version sent outside an application is recorded in `applications.md` as a commit hash ([Sent versions](#sent-versions)) |
+| `outputs/reports/<YYYY-MM-DD>-<slug>.md` | Dated documents that are neither a resume nor an application: rankings, upskill reports, bios, pitches, reusable answers. Each has a provenance table |
+| `sources/inbox/` | Files waiting to be imported. Ignored by git, so raw chat exports never get committed |
 | `sources/resumes/` | Imported resume and CV originals, never edited |
 | `sources/<origin>/` | Other imported originals, one folder per origin (for example `linkedin/`, `transcripts/`, one folder per chat-history export), never edited |
 | `sources/import-log.md` | One section per import run |
 | `sources/keys.md` | Source keys for this log's imported material (below) |
-| `tools/` | `setup.sh` / `setup.ps1` (TinyTeX, TeX packages, poppler), `resume.py` (build and layout-check a resume), `tex-packages.txt`, `export-template.sh` (build the shareable Template). How to use them: [latex.md](latex.md) |
+| `tools/` | `setup.sh` / `setup.ps1` (TinyTeX, TeX packages, poppler), `resume.py` (build and layout-check a resume), `tex-packages.txt`, `export-template.sh` (build the shareable Template), `chat_export.py` (screen and extract AI chat-history exports, see [modes/import-chats.md](modes/import-chats.md)). How to use the resume tools: [latex.md](latex.md) |
 
 The skill's own folder holds, besides the modes:
 
@@ -37,7 +37,6 @@ The skill's own folder holds, besides the modes:
 |---|---|
 | [writing.md](writing.md) | Writing standards every output follows |
 | [latex.md](latex.md) | Editing, building and checking a resume `.tex` |
-| [career-fair.md](career-fair.md), `assets/fair-page/` | The career-fair playbook and its starting page |
 | `assets/resume-blank.tex` | The blank r/EngineeringResumes layout a first resume starts from |
 | `examples/` | A fictional person's records: the format to copy and the setup check's resume. **Never part of the log**: no mode reads it as the user's facts, cites it, or copies a fact from it ([docs/adr/0002](../../docs/adr/0002-examples-live-in-the-engine.md)) |
 
@@ -53,7 +52,25 @@ The skill's own folder holds, besides the modes:
 - **Dropped experiences.** When the user says something never happened or does not count (a project abandoned, a role declined), delete its entry and its index rows, and leave one line in `sources/import-log.md` saying what was removed and why. Preferences it revealed stay in `direction.md`.
 - **Visibility.** `visibility: nda` entries stay detailed in the log; outputs generalise them (no internal system names, no unpublished numbers).
 - **Languages.** The user may talk in any language. Log files are written in the record language set in `direction.md › Writing preferences for applications` (English when unset). Each output is written in the language the user asks for, or the one `direction.md` gives for that kind of output. The user's own words are quoted in their original language, with a translation in brackets when the record language differs.
-- Commit with the repo-local git identity (`git -C <root> config --local user.email`), and push after every mode that writes. If no local identity is set, stop and ask the user: the global one may belong to someone else.
+- **Commits.** Commit with the repo-local git identity (`git -C <root> config --local user.email`). If no local identity is set, stop and ask the user: the global one may belong to someone else. Never force-push the default branch: other clones pull it with `--ff-only`. Where a commit goes depends on its size:
+  - **Bulk data changes** are any import, and any other mode run that rewrites more than one entry (a consolidate over several entries, the fixes after an audit). Appending pointer lines to `## Past phrasings`, as apply and write do, does not count.
+  - **Small data changes** are everything else: a log line, interview notes, an application row, a gap or two answered, a direction update. Commit them to the default branch and push, after every mode that writes.
+  - **With the data-branch flow on** (*opt-in*, below), a bulk change works on a branch in its own worktree, started from the default branch whatever `<root>` has checked out. `<default>` is the default branch's name, from `git -C <root> symbolic-ref --short refs/remotes/origin/HEAD` (minus `origin/`; if it is unset, `git -C <root> remote set-head origin --auto` first). Run `git -C <root> fetch`, then `git -C <root> worktree add --no-track .worktrees/<topic> -b data/<topic> origin/<default>`; `--no-track` keeps the branch from tracking the default branch, so a push can never land there. Worktrees go in `.worktrees/`, or where the agent's own tooling puts them (Claude Code: `.claude/worktrees/`); both are ignored, and the start check's `git worktree list` finds them anywhere. Call the worktree's path `<wt>` and the root resolved above `<main>`; for the rest of the session the worktree is `<root>`, and every write of the session goes there, small ones included, so nothing is split between the branch and the default branch. Ignored files are not in the worktree: raw exports stay in `<main>/sources/inbox/` and are read from there. Commit and push the branch after every mode that writes (the first time `git -C <root> push -u origin data/<topic>`, then `git -C <root> push`), so the work is backed up and the other machine can see it.
+  - **When the session's work is done,** open a pull request (`gh pr create`, no issue needed) whose body lists what changed per file and what was left out, and ask the user to review the diff. If GitHub reports a conflict (the default branch moved meanwhile), run `git -C <root> fetch` and `git -C <root> merge origin/<default>` in the worktree, resolve each conflict by keeping both sides' facts with their sources (ask the user where two facts contradict), push, and show the user the resolution.
+  - **Merge only on the user's yes:** `gh pr merge <n> --merge`, without `--delete-branch` (the branch is still checked out in the worktree). Then, in `<main>`: `git pull --ff-only`, `git worktree remove <wt>`, `git branch -d data/<topic>`, `git push origin --delete data/<topic>`. If `worktree remove` refuses because files are left in the worktree, show the user `git -C <wt> status` and use `--force` only on their yes. Before the user switches machines, the pull request is merged or closed.
+  - **The data-branch flow is opt-in.** It applies only when `direction.md › Repo workflow` sets *Bulk changes as pull requests* to on, and `gh` and a GitHub remote are available. Otherwise, the default, bulk data changes go to the default branch like small ones, with no worktree: wherever a mode says to start the `data/` worktree, skip it, and read `<main>` and `<wt>` in any mode as `<root>`. The user turns it on or off by saying so (*Direction upkeep*).
+  - **Names appended to `.export-deny`** during a bulk session are committed in `<main>` to the default branch and pushed at once, not on the data branch, so a Template export from the default branch never scans with an old list.
+  - **Engine changes** (anything that changes how the agent behaves) follow [AGENTS.md › Changes](../../AGENTS.md#changes).
+
+## Sent versions
+
+Every resume an employer received must be recoverable exactly as sent.
+
+- **Through an application:** its folder in `outputs/applications/` keeps the `.tex` and `.pdf`, and is not edited after sending.
+- **Outside one** (a career fair, a recruiter email): record the commit, not a copy. Take the last commit that touched the target's files before the version was sent (`git -C <root> log -1 --format=%H -- outputs/resumes/<target>.*`), with its work committed first. In the `applications.md` row write `[<target> @ <short hash>](<permalink>)`, where the permalink is `https://github.com/<owner>/<repo>/blob/<full hash>/outputs/resumes/<target>.pdf`, with `<owner>/<repo>` read from `git -C <root> remote get-url origin` (both `https://github.com/<owner>/<repo>.git` and `git@github.com:<owner>/<repo>.git`). If origin is not on GitHub, or there is no remote, write the bare short hash.
+- The hash is the source of truth; the link is a convenience. To read the sent version: `git -C <root> show <hash>:outputs/resumes/<target>.tex`.
+
+Drafts are never committed: they are built under `.build/` ([latex.md](latex.md#the-loop)) and copied into `outputs/` only when the user approves them.
 
 ## Platforms
 
@@ -82,6 +99,6 @@ Pick the mode from the request, then read its file and follow it:
 | **interview** | An interview is scheduled, or the user wants a mock interview | [modes/interview.md](modes/interview.md) |
 | **upskill** | The user asks what to learn, or which skills their target postings want that the log cannot show | [modes/upskill.md](modes/upskill.md) |
 | **write** | The user needs a single output without a posting pipeline: resume version, cover letter, bio, pitch, one application answer | [modes/write.md](modes/write.md) |
-| **rank** | The user has a list of employers (career fair, job board) to sort | [modes/rank.md](modes/rank.md); fairs also [career-fair.md](career-fair.md) |
-| **import** | Old resumes or documents are in `sources/inbox/`, the user hands some over, or points at a logged-in web source (chat history, LinkedIn) | [modes/import.md](modes/import.md) |
+| **rank** | The user has a list of employers (career fair, job board) to sort | [modes/rank.md](modes/rank.md) |
+| **import** | Old resumes or documents are in `sources/inbox/`, the user hands some over, or points at a logged-in web source (chat history, LinkedIn) | [modes/import.md](modes/import.md); chat histories [modes/import-chats.md](modes/import-chats.md) |
 | **audit** | Before a job-search push, or when asked how complete the log is | [modes/audit.md](modes/audit.md) |

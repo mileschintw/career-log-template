@@ -1,6 +1,12 @@
 .DS_Store
 .build/
+.worktrees/
+.claude/worktrees/
 outputs/**/*.png
-!outputs/*-page/*.png
+!outputs/reports/*-page/*.png
 __pycache__/
 *.pyc
+
+# Raw chat exports stay local; only picked threads move to sources/<origin>/
+sources/inbox/*
+!sources/inbox/.gitkeep
