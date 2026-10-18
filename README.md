@@ -6,6 +6,8 @@ English | [繁體中文](README.zh-TW.md)
 
 ![macOS](https://img.shields.io/badge/macOS-supported-2ea44f) ![Windows](https://img.shields.io/badge/Windows-supported-2ea44f) ![Linux](https://img.shields.io/badge/Linux-supported-2ea44f)
 
+[![Watch a one-minute video tour of career-log-template](https://gitdiagram.com/video-badge.svg)](https://gitdiagram.com/mileschintw/career-log-template/video)
+
 A GitHub template for keeping a career log (a "brag document") in git and letting your AI coding agent turn it into tailored resumes, cover letters, job application answers and interview prep. Every claim it writes traces back to a dated record, so it can't invent anything, and nothing you logged gets lost.
 
 - **Hand over everything you have.** You don't type your history in. Give the agent your old resumes and CVs, bios, reports, LinkedIn exports and AI chat histories, or let it read a logged-in website in its browser. It merges them into one entry per experience.

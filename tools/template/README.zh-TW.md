@@ -6,6 +6,8 @@
 
 ![macOS](https://img.shields.io/badge/macOS-supported-2ea44f) ![Windows](https://img.shields.io/badge/Windows-supported-2ea44f) ![Linux](https://img.shields.io/badge/Linux-supported-2ea44f)
 
+[![觀看 career-log-template 一分鐘影片導覽](https://gitdiagram.com/video-badge.svg)](https://gitdiagram.com/mileschintw/career-log-template/video)
+
 這是一個 GitHub template，用 git 保存職涯日誌（也就是「brag document」），再讓你的 AI coding agent 把它變成量身打造的履歷、求職信、申請表答案和面試準備。它寫出的每一句話都能追溯到一筆有日期的記錄，所以 agent 不會憑空捏造，你記下的事也不會遺失。
 
 - **手上有什麼就全部交給它。** 不必自己把經歷打進去。把舊履歷和 CV、自我介紹、報告、LinkedIn 匯出檔和 AI 聊天記錄交給 agent，或讓它用瀏覽器讀取你已登入的網站。它會把這些併成每段經歷一筆條目。
