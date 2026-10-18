@@ -18,9 +18,9 @@ Static facts. Each line carries its source, like an entry. Example: [skills/care
 |---|---|---|---|
 
 ### Conflicts
-<!-- Facts that differ between sources (dates, titles), and which one to use for which kind of application. -->
+<!-- Facts that differ between sources (dates, titles), in the forms entries/_template.md › Conflicts gives: an `Open:` line, or a `Settled:` line such as `Settled: use "<A>" for <application type>, "<B>" for <application type> (<why>). (<source>)`. -->
 
 ## Skills summary
 
 ## Interview prep list
-<!-- Skills and claims on approved resumes that rest on thin evidence; review before an interview that touches them. -->
+<!-- Skills and claims on approved resumes that rest on thin evidence, and known bugs or negative results behind a resume claim (kept off the page, writing.md › Principles); review before an interview that touches them. -->

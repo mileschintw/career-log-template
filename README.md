@@ -31,7 +31,7 @@ Talk to your agent in any language. Records are written in English by default (c
 
 ## Features
 
-- **Career log / brag document**: one Markdown file per job, project or course, with dated log lines, plus a bank of stories for behavioural interview questions.
+- **Career log / brag document**: one Markdown file per job, project or course, with dated notes waiting to be merged into it, plus a bank of stories for behavioural interview questions.
 - **Tailored resumes**: one-page LaTeX resumes (ATS-friendly PDF), built and layout-checked by `tools/resume.py`. Make one for a single job posting, one per target role, or a general version; a second agent reviews each before you see it. The first time you ask for a role, the agent asks what that version should lead with and saves your answer in `direction.md`.
 - **Fit check**: paste a posting URL and get a go / no-go before any writing: your hard constraints (work authorisation, for one) against the posting, where the role ranks among your targets, and each stated requirement mapped to the record that proves it, or marked as a gap. Ask for the fit alone and it stops there.
 - **Job applications**: answers to the form's free-text questions, drawn from your records. Your own tools fill in the rest of the form and track the application. A resume made for one posting is saved with the posting and the answers. For a reusable version you upload yourself, git history and the application date recover the exact file (keep its file name when you upload it).
@@ -75,7 +75,7 @@ Invoke the skill and say what you want. The `career-log` skill (in [`skills/care
 
 | You can ask | Mode |
 |---|---|
-| "log this to my career log" | **log**: append a dated line to an entry |
+| "log this to my career log" | **log**: add a dated line to an entry's pending notes |
 | "consolidate the <project> entry" | **consolidate**: fill every section, interviewing you on the gaps |
 | "prep me for the <company> interview" | **interview**: prep pack from what they read, then a mock interview |
 | "what should I learn for these postings", "how do I close the gap to <posting URL>" | **upskill**: evidence-based gap heatmap and a project-first learning plan |
@@ -84,6 +84,8 @@ Invoke the skill and say what you want. The `career-log` skill (in [`skills/care
 | "import my old resumes" (files in `sources/inbox/`, or a logged-in site through the agent's browser) | **import**: merge old documents into entries |
 | "import my ChatGPT history" (or Claude, Gemini, Perplexity) | **import**: tells you how to export it, screens every conversation, and copies only the ones you pick; the raw export stays out of git |
 | "audit my career log" | **audit**: report missing stories, gaps and conflicts |
+
+Keeping it current: `log` only notes things down; consolidate an entry from time to time, so its pending notes move into the right sections and the agent asks you about its gaps. `log` and `write` tell you when an entry is due, and `audit` ranks which entries to consolidate first. Nothing keeps a history inside the files: git does.
 
 Recommended: install the [humanizer](https://github.com/blader/humanizer) skill. The skill runs its own AI-tell check either way ([writing.md](skills/career-log/writing.md)); with humanizer installed, it also runs humanizer on every employer-facing output.
 
@@ -97,7 +99,7 @@ Some of what the skill does depends on who you are, not on general resume rules:
 | Work authorisation | The fit check's go / no-go, and what employer ranking researches (sponsorship, citizenship, clearance) | `direction.md › Constraints` | Asked the first time a posting, a ranking or interview prep needs it. No gate meanwhile: the fit check lists the posting's requirement for you to check |
 | Other hard constraints (location, start date, role level) | The same go / no-go | `direction.md › Constraints` | No limit; add one whenever you like |
 | Employer sorting order | How `rank` orders employers after your hard constraints | `direction.md › Employer preferences` | Asked on your first ranking, proposing domain fit, then size and pay |
-| What a resume version leads with | Which records each target version puts first, and what it leaves out | `direction.md › What to emphasise, by target` | Asked the first time you ask for that target |
+| What a resume version leads with | Which records each target version puts first, what it leaves out, and how far back it reaches (about five years by default) | `direction.md › What to emphasise, by target` | Asked the first time you ask for that target |
 | Writing preferences | Overrides for the rules in [writing.md](skills/career-log/writing.md) | `direction.md › Writing preferences for applications` | writing.md as it is |
 | Record language | The language your Log files are written in | `direction.md › Writing preferences for applications` | English |
 | Bulk changes as pull requests | Whether imports and other edits across several entries land on a branch you review as a pull request | `direction.md › Repo workflow` | Off |
@@ -121,7 +123,7 @@ Entries appear here as you log them.
 
 - [`profile.md`](profile.md): contact, education, languages, skills summary
 - [`stories.md`](stories.md): behavioural question types → stories, and recurring application questions → material
-- [`applications.md`](applications.md): applications this repo prepared materials for, career fairs and recruiter contacts
+- [`applications.md`](applications.md): career fairs, recruiter contacts, resume versions sent outside an application, and applications with no folder under `outputs/applications/`
 - [`direction.md`](direction.md): target roles, employer preferences, constraints, what to emphasise, languages
 - `entries/`: one file per experience ([template](entries/_template.md))
 - `outputs/`: derived documents, each with a provenance table: `applications/` (one folder per application, frozen once sent), `resumes/` (one living file per resume target; git history keeps the old versions) and `reports/` (dated rankings and other reports)

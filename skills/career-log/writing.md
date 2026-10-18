@@ -28,6 +28,16 @@ Run this on every draft before the user sees it, then once more on the final tex
 
 ## Resumes
 
+### Principles
+
+Every other resume rule works inside these three, and the review pass checks them.
+
+1. **The page never shows weakness.** A resume has to pass the screen before anyone can ask a follow-up question, so nothing on it hedges: no caveats, negative results, known bugs or "showed no gain". Never fabricate. A claim may be framed at its strongest true reading, one the user can explain and defend in an interview; a measured range stays whole (Keep a range, below). Caveats go to interview prep instead: the risks section saved with the resume ([write](modes/write.md) step 10), which [interview](modes/interview.md) starts from, and, for a known bug or negative result that any resume using the claim would carry, `profile.md › Interview prep list`. (practice)
+2. **A project shows what was built and learned.** List the techniques the user implemented, including ones that did not win an evaluation: building them is still a skill. Never claim a technique beat another when the evaluation says it did not, and leave a losing comparison off the page. A tool that was only evaluated, never built, gets no bullet; the Skills section rules decide whether it is listed. (practice)
+3. **`Settled: do not use` blocks a false claim, not a topic.** Its why-clause names the claim that is false. A technique or system the line mentions may still appear, stated truthfully. (practice)
+
+Never fabricate, and Principle 3, apply to every output. The rest applies to resumes: a form answer follows its question (one that asks about a failure gets the failure), and may keep a caveat where the question invites it.
+
 ### Format
 
 - **Template:** the r/EngineeringResumes LaTeX template, single column, no icons or graphics. Editing and building: [latex.md](latex.md). (r/ER)
@@ -47,7 +57,8 @@ Run this on every draft before the user sees it, then once more on the final tex
 - **Keep a range** when the measurement is a range ("2–10x"), not its best case. (practice)
 - **A metric's label names the exact quantity measured**: "p95 queue wait", not "p95 latency", when the number is how long jobs waited in the queue. (practice)
 - **An outcome metric beats a caught-failure metric** on the page. A skimmer reads "checkout conversion 2.1% → 2.6%" as a result; "caught 312 of 400 requests timing out" reads as "the system was broken". Caught-failure stories go to interviews. (practice)
-- **The page shows what worked.** A dropped feature, a rejected tool or a result that showed no gain reads weak, like confessing a mistake; spend the line on more of the system instead. Those stories go to interviews and form answers. (practice)
+- **The page shows what was built and what worked, never what failed.** "Dropped", "rejected" and "showed no gain" read weak, like confessing a mistake. A technique the user built stays on the page as built (Principle 2); that it lost, was dropped or was replaced does not. A feature that was never built, or a tool that was only tried, gets no line: spend it on more of the system instead. Those stories go to interviews and form answers. (practice)
+- **Recency.** Experience that ended more than about five years ago stays off by default; "ended" is the end of the entry's `period`, and an `ongoing` entry is current. It goes back on when it is the only evidence for a requirement: a stated requirement of the posting in a posting run, or what the target's `direction.md › What to emphasise` line asks for in a target run. Education is not experience: the degree stays whatever its date. `direction.md › What to emphasise` can set another window for one target or for all of them, and its line wins. (practice)
 - **Plain words for what was done.** "Compared each change on held-out data with settings fixed in advance" reads as work; "pre-registered, paired, Holm-corrected evaluation" reads as buzzwords and makes the number beside it less believable. The method names are for the interview. (practice)
 - **A tool named in a bullet claims what it implies.** "Prometheus histograms" says a Prometheus server ran. When only a format, client library or exporter was used, name what was done ("per-stage latency histograms"). (practice)
 - **Usage is counted in the user's unit.** Messages, turns or API calls are not usage: write problems solved, users or sessions, as the user would count them, and confirm the figure with the user. Other people's use goes in only when the user can size it. (practice)

@@ -62,14 +62,14 @@ Read the written files once, top to bottom. A picked conversation can drift into
 ## 6. Merge
 
 Continue with [import.md](import.md) from step 3, treating each conversation as a document:
-- The user's turns give facts, decisions, reasons, numbers and past phrasings, each cited by its key (`chatgpt-2025-01-31 T4.U2`). A resume bullet or pitch the user typed goes under `## Past phrasings` with its date and target.
-- An assistant turn that restates the user's work is a lead. A number in it is checked against the entries and recorded under `## Conflicts` when it does not match.
+- The user's turns give facts, decisions, reasons, numbers and past phrasings, each cited by its key (`chatgpt-2025-01-31 T4.U2`). A resume bullet or pitch the user typed goes under `## Past phrasings` with its angle and key, once per distinct wording.
+- An assistant turn that restates the user's work is a lead. A number in it is checked against the entries and recorded under `## Conflicts` when it does not match: as an `Open:` line quoting both sides, or as a do-not-use `Settled:` line when the entries contradict it.
 - Preferences, targets and reactions to companies go to `direction.md`; a target role goes in as `GAP: confirm: <role> (<source>)`, to be confirmed before any mode relies on it ([SKILL.md › Settings](../SKILL.md#settings)). Applications, fairs and recruiter contacts go to `applications.md`.
 - Questions only the user can answer (who did what, why, whether a claim holds) go to them in one numbered round, as in import step 4.
 
 ## 7. Log and clean up
 
-1. Add a section to `sources/import-log.md`: platforms and date ranges, how many conversations were indexed and picked, files written, groups not picked, categories left out with counts, cuts and drops, conflicts, and the gaps that matter most.
+1. Add a section to `sources/import-log.md`: platforms and date ranges, how many conversations were indexed and picked, files written, groups not picked, categories left out with counts, cuts and drops, conflicts, and per entry how many `GAP:` markers it has (the gaps themselves stay in the entries). A fact or ruling the user gives during the import goes into its entry with `(user, YYYY-MM-DD)`, never only into this section.
 2. Commit and push: `import: <n> file(s), <m> entr(y/ies) (<platforms>)`. On a `data/` branch, open the pull request when the session's work is done ([SKILL.md › Commits](../SKILL.md)).
 3. Delete the scratch work directory and any capture files. The raw exports stay in the ignored `sources/inbox/` until the user moves them to their own backup. Remind them, and never delete them yourself.
 

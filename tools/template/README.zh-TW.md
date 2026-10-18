@@ -31,7 +31,7 @@
 
 ## 功能
 
-- **職涯日誌 / brag document**：每份工作、專案或課程一個 Markdown 檔，內含有日期的記錄，外加一份行為面試題的故事庫。
+- **職涯日誌 / brag document**：每份工作、專案或課程一個 Markdown 檔，內含待併入的有日期記錄，外加一份行為面試題的故事庫。
 - **客製化履歷**：一頁的 LaTeX 履歷（ATS 友善的 PDF），由 `tools/resume.py` 編譯並檢查版面。可以針對單一職缺做一份、每個目標職位各做一份，或做一份通用版；每份在你看到之前，都先由第二個 agent 審閱。第一次要某個職位的版本時，agent 會問你這份要以什麼為重點，並把答案存進 `direction.md`。
 - **適合度判斷**：貼上職缺網址，動筆之前先判斷值不值得投：拿你的硬性條件（例如工作身分）對照職缺、這個職位在你的目標裡排第幾，以及每項職缺要求對應到哪筆記錄能證明，或標成缺口。只問適合度的話，它就停在這裡。
 - **投遞職缺**：申請表上的開放式問題，依你的記錄作答。表單其他欄位和投遞追蹤交給你自己的工具。針對單一職缺做的履歷，會和職缺、答案存在一起；你自己上傳的可重複使用版本，則用 git 歷史和投遞日期找回當時那份檔案（上傳時保留它的檔名）。
@@ -75,7 +75,7 @@
 
 | 你可以要求 | 模式 |
 |---|---|
-| "log this to my career log" | **log**：在某筆條目加一行有日期的記錄 |
+| "log this to my career log" | **log**：在某筆條目的待整理記錄加一行有日期的記錄 |
 | "consolidate the <project> entry" | **consolidate**：補齊每個段落，針對缺口追問你 |
 | "prep me for the <company> interview" | **interview**：根據對方會讀到的資料整理準備包，再進行模擬面試 |
 | "what should I learn for these postings"、"how do I close the gap to <posting URL>" | **upskill**：以證據為本的技能缺口熱圖，以及以專案為主的學習計畫 |
@@ -84,6 +84,8 @@
 | "import my old resumes"（檔案放在 `sources/inbox/`，或透過 agent 的瀏覽器讀取已登入的網站） | **import**：把舊文件併入條目 |
 | "import my ChatGPT history"（或 Claude、Gemini、Perplexity） | **import**：告訴你怎麼匯出，逐一篩選每段對話，只複製你挑的那些；原始匯出檔不進 git |
 | "audit my career log" | **audit**：列出缺少的故事、缺口和矛盾 |
+
+日常保養：`log` 只是先記下來；請不時 consolidate 各條目，把待整理的記錄放進對應的段落，agent 也會針對缺口問你。`log` 和 `write` 會在某個條目該整理時提醒你，`audit` 則會排出哪些條目最該先整理。檔案裡不保留歷程，歷程交給 git。
 
 建議安裝 [humanizer](https://github.com/blader/humanizer) skill。不論有沒有裝，這個 skill 都會自己檢查 AI 寫作痕跡（[writing.md](skills/career-log/writing.md)）；裝了 humanizer 的話，每份要給雇主看的產出也會再跑一次 humanizer。
 
@@ -97,7 +99,7 @@ skill 的部分行為取決於你是誰，而不是一般的履歷規則：需�
 | 工作身分 | 適合度判斷的投或不投，以及雇主排序要查什麼（簽證贊助、公民身分、安全許可） | `direction.md › Constraints` | 第一次有職缺、雇主排序或面試準備需要它時會問你。在那之前不設門檻：適合度判斷會列出職缺的相關要求，讓你自己確認 |
 | 其他硬性條件（地點、到職日、職級） | 同樣影響投或不投 | `direction.md › Constraints` | 沒有限制；隨時可以加 |
 | 雇主排序方式 | 過了硬性條件之後，`rank` 怎麼排雇主 | `direction.md › Employer preferences` | 第一次排序時會問你，建議的答案是先看領域契合度，再看規模和薪資 |
-| 履歷版本的重點 | 每個目標版本先放哪些記錄、略過哪些 | `direction.md › What to emphasise, by target` | 第一次要那個目標的版本時會問你 |
+| 履歷版本的重點 | 每個目標版本先放哪些記錄、略過哪些，以及往回收錄幾年（預設約五年） | `direction.md › What to emphasise, by target` | 第一次要那個目標的版本時會問你 |
 | 寫作偏好 | 改寫 [writing.md](skills/career-log/writing.md) 裡的規則 | `direction.md › Writing preferences for applications` | 照 writing.md |
 | 記錄語言 | Log 檔案用什麼語言寫 | `direction.md › Writing preferences for applications` | 英文 |
 | 大量變更走 pull request | 匯入和其他跨多筆經歷的修改是否先放到分支上，讓你以 pull request 審閱 | `direction.md › Repo workflow` | 關閉 |
@@ -118,7 +120,7 @@ skill 的部分行為取決於你是誰，而不是一般的履歷規則：需�
 
 - [`profile.md`](profile.md)：聯絡方式、學歷、語言、技能摘要
 - [`stories.md`](stories.md)：行為面試題類型 → 故事，以及常見申請題 → 素材
-- [`applications.md`](applications.md)：這個 repo 準備過材料的申請、徵才博覽會和招募人員聯絡記錄
+- [`applications.md`](applications.md)：徵才博覽會、招募人員聯絡記錄、在申請之外寄出的履歷版本，以及在 `outputs/applications/` 底下沒有資料夾的申請
 - [`direction.md`](direction.md)：目標職位、雇主偏好、限制條件、要強調的重點、語言
 - `entries/`：每段經歷一個檔案（[範本](entries/_template.md)）
 - `outputs/`：產出的文件，每份都附來源追溯表：`applications/`（每個申請一個資料夾，送出後就不再更動）、`resumes/`（每個履歷方向一份持續更新的檔案，舊版本留在 git 歷史裡）和 `reports/`（加上日期的排名和其他報告）

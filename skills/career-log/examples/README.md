@@ -11,7 +11,7 @@ A user's first resume starts from the blank layout [../assets/resume-blank.tex](
 
 | File | Shows |
 |---|---|
-| [entries/2025-06-northwind-freight-internship.md](entries/2025-06-northwind-freight-internship.md) | A consolidated entry: provenance on every fact, attribution, a metric with its caveat, a `GAP:`, a conflict, past phrasings |
+| [entries/2025-06-northwind-freight-internship.md](entries/2025-06-northwind-freight-internship.md) | A consolidated entry: provenance on every fact, attribution, a metric with its caveat, a `GAP:`, a settled conflict, past phrasings |
 | [profile.md](profile.md) | Static facts with sources |
 | [direction.md](direction.md) | Targets, constraints, languages and personal writing preferences |
 | [resume.tex](resume.tex) | A one-page resume on the r/EngineeringResumes template that passes `tools/resume.py` |

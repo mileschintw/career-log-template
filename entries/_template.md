@@ -50,10 +50,15 @@ last_updated: YYYY-MM-DD
 <!-- What an interviewer is most likely to ask, with draft answers. -->
 
 ## Past phrasings
-<!-- Wordings already used in resumes and other outputs, verbatim, with source and context. -->
+<!-- Reusable wordings, verbatim, at most two per claim per angle. A claim is one accomplishment or result; a wording that states two counts toward each. The angle is the resume target a wording suits: a target name from outputs/resumes/, or for a posting, the target closest to its role, or `general` for a wording that suits no single target (a neutral version, or an imported bullet that fits no target). Each cites where it appeared, once. Replaced in place by a better one; no record of where each was used. -->
 
 ## Conflicts
-<!-- Contradictions between sources, quoted with their sources, until resolved. -->
+<!-- Open: a line starting `Open:`, each side quoted with its source. Settled: one line, with the right value also written in its section:
+`Settled: use "<right>", not "<wrong>"[ or "<wrong2>"] (<why>). (<source>)`
+`Settled: both "<A>" and "<B>" are right (<why>). (<source>)`
+`Settled: use "<A>" for <context>, "<B>" for <context> (<why>). (<source>)`
+`Settled: do not use "<claim>" (<why it is unsupported>). (<source>)`: "<claim>" is the false claim ("X beat Y"), not a topic; X itself may still appear, stated truthfully.
+An older conflict line without either marker gets one at the next consolidate. -->
 
-## Log
-<!-- - YYYY-MM-DD: what happened. links -->
+## Pending
+<!-- Facts not yet placed in the sections above, deleted once placed. - YYYY-MM-DD (the day recorded, not the day it happened): what. links -->

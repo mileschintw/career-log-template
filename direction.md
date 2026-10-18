@@ -12,9 +12,6 @@ Citation keys are defined in [sources/keys.md](sources/keys.md). Applications an
 
 - **Sorting order for ranking employers:** GAP: after your hard constraints, what decides which employers come first (domain fit, size, pay, location, ...)?
 
-## Career-fair tactics
-<!-- What worked or failed at past fairs: queues, on-site interviews, entry times. -->
-
 ## Tools the user already uses
 <!-- Job trackers, boards, anything outside this repo the skill should not duplicate. -->
 
@@ -24,6 +21,7 @@ Hard constraints: a role or employer that breaks one is out. A line still marked
 - **Work authorisation:** GAP: does any role need sponsorship, a citizenship or a clearance you lack? Which visa, if any, must an employer sponsor?
 
 ## What to emphasise, by target
+<!-- One line per resume target (`general` included): the entries to lead with and what to leave out. Experience that ended more than about five years ago stays off resumes by default (writing.md › Recency); a line here changes that window for one target or for all of them, for example "Recency: ten years, every target" or "Backend: keep <entry> despite its age". -->
 
 ## Self-description the user approves of
 

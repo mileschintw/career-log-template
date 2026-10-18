@@ -18,7 +18,7 @@ Cut the shipment-quote API's p95 latency from 820 ms to 210 ms and automated inv
 
 ## Context
 - Northwind Freight's quote API answered sales and customer requests for shipping prices. Sales complained that quotes "spin" during calls. (user, 2025-10-02)
-- The manager's goal for the summer: p95 under 300 ms before the autumn peak. (intern-goals doc, `sources/inbox/northwind-goals.pdf` p.1)
+- The manager's goal for the summer: p95 under 300 ms before the autumn peak. (intern-goals doc, `sources/northwind/2025-06-goals.pdf` p.1)
 
 ## My contribution
 - **I did:** profiled the quote path, found per-request rate lookups in PostgreSQL, built the Redis rate cache and its refresh job (PR #412); wrote the Kafka invoice reconciler in Go end to end. (PR #412; reconciler repo)
@@ -56,14 +56,11 @@ Cut the shipment-quote API's p95 latency from 820 ms to 210 ms and automated inv
 - *How did you know the latency gain was real and not the holiday?* GAP: whether the gain held in a normal-traffic week.
 
 ## Past phrasings
-- "Cut shipment-quote API p95 latency from 820 ms to 210 ms by replacing per-request PostgreSQL lookups with a Redis rate cache refreshed every five minutes" (examples/resume.tex)
-- "Built a Kafka consumer in Go that reconciles carrier invoices nightly, flagging 3% of 40k monthly invoices for review and removing a manual spreadsheet step" (examples/resume.tex)
-- "Co-designed a feature-flag rollout with a senior engineer, rolling out the new rate cache to all four sales regions over two weeks with zero rollbacks" (examples/resume.tex)
+- "Cut shipment-quote API p95 latency from 820 ms to 210 ms by replacing per-request PostgreSQL lookups with a Redis rate cache refreshed every five minutes" (backend; examples/resume.tex)
+- "Built a Kafka consumer in Go that reconciles carrier invoices nightly, flagging 3% of 40k monthly invoices for review and removing a manual spreadsheet step" (backend; examples/resume.tex)
+- "Co-designed a feature-flag rollout with a senior engineer, rolling out the new rate cache to all four sales regions over two weeks with zero rollbacks" (backend; examples/resume.tex)
 
 ## Conflicts
-- The 2025-09 resume draft said "5x faster"; 820 / 210 is 3.9x. Use "from 820 ms to 210 ms". (sources/resumes/2025-09-draft.tex; PR #412 comment)
+- Settled: use "from 820 ms to 210 ms", not "5x faster" (820 / 210 is 3.9x). (sources/resumes/2025-09-draft.tex; PR #412 comment)
 
-## Log
-- 2025-08-14: PR #412 merged. https://git.example.com/northwind/quotes/pull/412
-- 2025-09-26: last region switched to the rate cache.
-- 2025-10-02: consolidated with the user.
+## Pending
