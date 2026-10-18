@@ -22,7 +22,7 @@ Run this on every draft before the user sees it, then once more on the final tex
 6. **No chatbot closers or openers.** No "I hope this helps", "Great question", "In conclusion". (humanizer)
 7. **No not-X-but-Y contrasts** set up only to knock down. (humanizer)
 8. **No filler.** Cut any sentence whose removal loses nothing. (humanizer)
-9. **No repeating what the form or resume already shows**: GPA, school name, timeline, program name. Spend the words on what the reader cannot see elsewhere. (practice)
+9. **No repeating what the form or resume already shows**: GPA, school name, timeline, program name. Spend the words on what the reader cannot see elsewhere. Across one application (the resume and every answer the same reader sees), each number appears once: give each artifact its own evidence. (practice)
 
 **Second layer.** If the `humanizer` skill is available in this session, run it on the final text of every employer-facing output after the check above. If it is not available, the check above is the whole pass; do not stop or ask for it.
 
@@ -47,6 +47,11 @@ Run this on every draft before the user sees it, then once more on the final tex
 - **Keep a range** when the measurement is a range ("2–10x"), not its best case. (practice)
 - **A metric's label names the exact quantity measured**: "p95 queue wait", not "p95 latency", when the number is how long jobs waited in the queue. (practice)
 - **An outcome metric beats a caught-failure metric** on the page. A skimmer reads "checkout conversion 2.1% → 2.6%" as a result; "caught 312 of 400 requests timing out" reads as "the system was broken". Caught-failure stories go to interviews. (practice)
+- **The page shows what worked.** A dropped feature, a rejected tool or a result that showed no gain reads weak, like confessing a mistake; spend the line on more of the system instead. Those stories go to interviews and form answers. (practice)
+- **Plain words for what was done.** "Compared each change on held-out data with settings fixed in advance" reads as work; "pre-registered, paired, Holm-corrected evaluation" reads as buzzwords and makes the number beside it less believable. The method names are for the interview. (practice)
+- **A tool named in a bullet claims what it implies.** "Prometheus histograms" says a Prometheus server ran. When only a format, client library or exporter was used, name what was done ("per-stage latency histograms"). (practice)
+- **Usage is counted in the user's unit.** Messages, turns or API calls are not usage: write problems solved, users or sessions, as the user would count them, and confirm the figure with the user. Other people's use goes in only when the user can size it. (practice)
+- **A project's first bullet says what the project is** and what it does for its user; the stack, the packaging and the version number come after or not at all ("v3" carries no information). A project placed near the top needs a clear point tied to the target, or it moves down. (practice)
 - **No test counts** as resume content: anyone can write a thousand tests. (practice)
 - **Soft skills** appear as 1–3 pieces of leadership or collaboration evidence inside technical bullets, not as separate bullets. (feedback)
 - **Courses** are listed by topic when the catalogue title would not mean anything to the reader. (practice)
