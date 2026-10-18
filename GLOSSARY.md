@@ -24,6 +24,10 @@ _Avoid_: sample entry, demo data, dummy
 Rules for outputs that hold for anyone, kept in the Engine; a person's own preferences stay in their Log's direction.
 _Avoid_: style guide, writing preferences (that is the personal part)
 
+**Setting**:
+A choice about one person that changes what the Engine does (the target roles, a hard constraint, how to rank employers, the record language), kept in their Log's `direction.md`; one not yet answered is a `GAP:` line with no *skipped* note, or has no line yet.
+_Avoid_: config, option, preference (when the Engine depends on it)
+
 ## Languages
 
 **Conversation language**:

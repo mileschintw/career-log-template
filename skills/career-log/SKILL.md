@@ -11,6 +11,21 @@ At the start of each session, `git -C <root> pull --ff-only --prune`: the user m
 
 It stores **raw material**: facts about what happened, recorded richly enough that nobody has to remember them again. Every resume bullet, cover letter, bio or interview answer is an **output** derived from the raw material, never the other way round.
 
+## Settings
+
+Settings are the lines in `direction.md` that decide what a mode does for this user: the target roles (§ Target roles, ranked), the lines under Constraints (work authorisation and any other hard constraint), the sorting order under Employer preferences, each target's line under What to emphasise, the Writing preferences for applications (the record language among them) and *Bulk changes as pull requests*. Each is in one of four states:
+- **unanswered:** its line is a `GAP:` with no *skipped* note, or there is no line;
+- **skipped:** the user was asked at the point of need and declined: `GAP: <question> (skipped, user, YYYY-MM-DD)`;
+- **default:** the Template's value, marked `(default; change it here)` (the record language, *Bulk changes as pull requests*), or writing.md for a writing preference never stated; it counts as answered;
+- **answered:** a value with its source, `(user, YYYY-MM-DD)`. "None" is an answer, and an answer is final: a mode does not ask a follow-up about something the answer leaves out, it flags it instead. A value from an imported document is not an answer yet: it is written as `GAP: confirm: <value> (<source>)` and is unanswered, with that value as the proposed answer. The target roles are judged by their section, not one line: answered when § Target roles, ranked holds at least one role the user confirmed, `(user, YYYY-MM-DD)` (a ranked list, under one source or one per role, or the bold line filled in), unanswered while it holds only the `GAP:` line with no *skipped* note, or nothing. A role found in an import (a resume's objective, an old chat) is a value from an imported document: it goes in as `GAP: confirm: <role> (<source>)` under the bold line, which stays, so the round or the mode that needs it asks the user to confirm. Recording a confirmed role removes the bold `GAP:` line.
+
+**At the point of need.** A mode that needs an unanswered setting asks once, records the answer (*Direction upkeep*) or, when the user declines, marks the line skipped, and goes on. A skipped setting is not asked again unless the user brings it up; the mode goes on as its own file says for a setting with no answer. No mode waits on a setting. `write`, `rank`, `upskill` and `interview` say where they ask.
+
+**A new Log.** A Log made from the Template ships its settings unanswered: `direction.md › First-session setup` says *Settings round: not offered yet*, and the settings with no safe default (the target roles, work authorisation, the sorting order) are bold-labelled `GAP:` lines. While that line says *not offered yet*, offer the round once the session's start check is done, unless the request is `log` (keep that one quick and offer next session):
+- in one numbered round, every bold-labelled setting line under Target roles, Constraints and Employer preferences that is unanswered (not other gaps the Log holds), then the record language and *Bulk changes as pull requests*, each with a recommended answer and the option to skip;
+- record each answer in its line. A `GAP:` line skipped here stays unanswered, so the mode that first needs it asks once more; a default skipped here keeps its default;
+- set the line to *Settings round: offered YYYY-MM-DD*, commit and push, then go on with the request. If the push is rejected (another clone pushed first, perhaps its own round), run `git -C <root> fetch` and `git -C <root> merge origin/<default>`; where both sides changed a setting line, ask the user which answer stands, keep the earlier round date, resolve any other conflict as *Commits* says (keep both sides' facts with their sources), then commit the merge and push.
+
 ## Layout
 
 | Path | What |
@@ -29,7 +44,7 @@ It stores **raw material**: facts about what happened, recorded richly enough th
 | `sources/<origin>/` | Other imported originals, one folder per origin (for example `linkedin/`, `transcripts/`, one folder per chat-history export), never edited |
 | `sources/import-log.md` | One section per import run |
 | `sources/keys.md` | Source keys for this log's imported material (below) |
-| `tools/` | `setup.sh` / `setup.ps1` (TinyTeX, TeX packages, poppler), `resume.py` (build and layout-check a resume), `tex-packages.txt`, `export-template.sh` (build the shareable Template), `chat_export.py` (screen and extract AI chat-history exports, see [modes/import-chats.md](modes/import-chats.md)). How to use the resume tools: [latex.md](latex.md) |
+| `tools/` | `setup.sh` / `setup.ps1` (TinyTeX, TeX packages, poppler), `resume.py` (build and layout-check a resume), `tex-packages.txt`, `export-template.sh` (build the shareable Template), `chat_export.py` (screen and extract AI chat-history exports, see [modes/import-chats.md](modes/import-chats.md)), `tests/` (its tests and anonymised fixtures). How to use the resume tools: [latex.md](latex.md) |
 
 The skill's own folder holds, besides the modes:
 

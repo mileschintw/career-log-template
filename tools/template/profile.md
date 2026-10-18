@@ -7,7 +7,7 @@ Static facts. Each line carries its source, like an entry. Example: [skills/care
 - **Email:** GAP
 - **Location:** GAP
 - **Links:** GAP
-- **Work authorisation:** GAP
+- **Work authorisation:** kept in [direction.md › Constraints](direction.md#constraints), with the roles it rules out.
 
 ## Languages
 | Language | Level | Notes |

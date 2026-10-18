@@ -7,7 +7,7 @@ Static facts. Each line carries its source, like an entry.
 - **Email:** alex.doe@example.com. (user, 2025-10-01)
 - **Location:** Springfield, ST. (user, 2025-10-01)
 - **Links:** github.com/example. (user, 2025-10-01)
-- **Work authorisation:** GAP: confirm before the first application.
+- **Work authorisation:** kept in [direction.md › Constraints](direction.md#constraints).
 
 ## Languages
 | Language | Level | Notes |

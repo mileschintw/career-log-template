@@ -14,7 +14,7 @@ When the source is an AI chat history (a ChatGPT, Claude.ai or Gemini export, or
    - Lift facts (dates, titles, numbers, technologies, outcomes) into the matching sections, each with provenance `(sources/resumes/<file>)`.
    - Record contradictions between versions (different dates, numbers, titles, scope) under `## Conflicts`, quoting each side with its source. Leave them unresolved for consolidate.
    - Leave every section the documents cannot fill as `GAP:`.
-   Merge profile facts into `profile.md` the same way.
+   Merge profile facts into `profile.md` the same way, except work authorisation (a visa, citizenship, "no sponsorship required"), which goes to the work authorisation line in `direction.md › Constraints` as `GAP: confirm: <fact> (<source>)`, so the agent asks the user to confirm it before gating on it ([SKILL.md › Settings](../SKILL.md#settings)). When that line is already answered, leave it as it is and list any imported fact that differs in the import report. When it already holds a `GAP: confirm:` with a different fact, add the new one to the same line (`GAP: confirm: <fact> (<source>) or <fact> (<source>)`).
    For any story an imported item could tell (a hard bug, a lead role, a conflict), add a link under its question type in `stories.md`, marked *(raw)*.
 6. **Write the import report** as a new section in `sources/import-log.md`: files imported; entries created and updated; conflicts found; and, per entry, the gaps that matter most, with the consolidate questions they imply.
 7. **Show the report** to the user, then commit and push: `import: <n> file(s), <m> entr(y/ies)`. On a `data/` branch, open the pull request when the session's work is done ([SKILL.md › Commits](../SKILL.md)).

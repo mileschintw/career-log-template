@@ -1,0 +1,101 @@
+n	platform	start_utc	user_turns	space	title	first_prompt
+0	chatgpt	2028-08-02T03:23	2		xray november hotel nectar golf kelp	pebble golf victor uniform mike november dune hotel lumen echo alpha fern whiskey whiskey vale bravo romeo sage yankee juliet quartz
+1	chatgpt	2028-11-04T06:47	1		golf romeo kelp kelp ember	lima jade india charlie sierra yankee echo hotel sage mike oscar victor echo lumen river willow yankee onyx sage harbor cedar
+2	chatgpt	2029-01-15T09:23	1		echo amber charlie	victor sierra ember bravo hotel kelp pebble grove zephyr oscar ember hotel zulu foxtrot amber yarrow fern juliet onyx harbor
+3	chatgpt	2029-01-25T20:00	2		golf vale uniform india whiskey lima echo quartz	oscar 乙 kilo juliet
+4	claude	2029-01-30T08:18	1		mike golf delta november golf vale bravo	whiskey kelp alpha pebble oscar november quebec november quartz uniform thistle oscar cedar zephyr
+5	chatgpt	2029-03-02T22:00	1		charlie xray november bravo dune	pebble tango zephyr kilo xray iris charlie amber zephyr zulu sage mike uniform sage charlie grove india amber ember sage onyx sierra hotel kelp onyx lima
+6	claude	2029-04-18T20:11	1		vale grove oscar cedar onyx	xray victor onyx quebec willow maple basil iris lumen romeo papa quartz mike india lumen juliet kelp zulu sierra
+7	claude	2029-04-29T06:32	1		alpha maple november lima river delta sage	echo grove quartz papa mike lima dune victor kilo maple jade xray thistle amber papa whiskey
+8	chatgpt	2029-05-21T04:51	1		papa bravo zulu bravo	lumen dune charlie lima whiskey golf zulu quebec yarrow cedar lima basil basil cedar ember cedar foxtrot uniform willow oscar papa river fern fern romeo lima go
+9	chatgpt	2029-06-09T16:05	1		juliet onyx sierra yarrow quebec	quartz zulu juliet amber quartz november fern lumen pebble romeo oscar delta zulu oscar nectar willow fern fern onyx charlie oscar umber echo maple
+10	chatgpt	2029-06-10T10:28	1		onyx jade yarrow kelp	pebble onyx lumen thistle harbor zulu kilo quebec echo victor iris yankee quartz juliet pebble whiskey basil hotel lima cedar whiskey delta
+11	chatgpt	2029-06-12T15:16	1		mike amber amber alpha	amber alpha golf juliet delta fern yankee quebec quebec november xray charlie bravo willow oscar thistle foxtrot
+12	chatgpt	2029-08-08T13:29	1		hotel dune golf kilo	delta hotel fern echo mike xray lima nectar willow foxtrot nectar juliet onyx willow whiskey oscar cedar
+13	claude	2029-08-18T03:36	1		iris dune yankee uniform grove umber foxtrot ember	delta lumen india zephyr foxtrot kilo victor lima november ember river yarrow quebec victor kelp echo golf grove
+14	claude	2029-08-18T21:07	1		hotel india yarrow mike mike harbor	harbor umber papa bravo amber juliet india yarrow [file: file-263.jpg, not exported]
+15	chatgpt	2029-09-24T04:39	1		ember river victor ember	fern sierra sierra kelp uniform alpha sierra tango echo lima foxtrot golf yarrow cedar kilo victor india victor quartz zulu juliet dune thistle onyx lumen sage
+16	claude	2029-10-12T06:34	1		onyx charlie zephyr kilo thistle yankee xray india willow	papa vale kilo yarrow november alpha onyx victor xray uniform maple papa charlie river grove zulu [file: file-240.jpg, not exported]
+17	chatgpt	2029-10-26T18:05	1		oscar bravo river sage	pebble jade kilo basil willow onyx ember cedar delta hotel quartz november charlie kilo lumen
+18	chatgpt	2029-11-10T02:07	1		foxtrot alpha harbor ember victor	thistle hotel echo sage echo kilo papa tango hotel tango onyx golf umber thistle vale
+19	chatgpt	2029-11-23T15:36	1		golf kilo umber lumen yankee nectar	india dune whiskey november echo ember jade zulu umber charlie whiskey papa nectar willow november oscar
+20	claude	2029-12-08T05:39	1		lima charlie victor fern	sierra golf grove amber fern vale zulu golf vale echo nectar bravo zephyr willow yarrow onyx uniform hotel ember
+21	chatgpt	2029-12-15T11:46	1		golf lima fern onyx delta whiskey	maple tango quartz yankee juliet river india umber zephyr november zulu thistle oscar victor
+22	claude	2029-12-24T11:05	1		lumen jade whiskey jade echo fern willow maple	yankee cedar bravo fern river thistle vale willow hotel [file: file-177.jpg, not exported]
+23	chatgpt	2030-01-09T08:26	1		victor india zephyr	victor uniform pebble mike cedar maple india quartz echo fern maple vale juliet kelp kelp grove river foxtrot amber delta grove basil yankee kilo river
+24	chatgpt	2030-02-01T16:17	1		dune papa uniform juliet	sage lima willow sierra sage yankee basil charlie zulu sierra kelp november
+25	chatgpt	2030-02-05T21:33	1		ember tango fern delta juliet	fern yankee foxtrot bravo amber oscar
+26	chatgpt	2030-02-28T16:11	1		grove 寅	basil victor 辰 壬 甲 jade 申 戊 丑 sierra river umber hotel india 丑 thistle
+27	chatgpt	2030-02-28T18:42	1		zulu basil sierra dune	kelp thistle whiskey quebec dune cedar kilo sierra juliet uniform hotel quebec amber fern sierra maple pebble
+28	chatgpt	2030-03-02T15:50	1		kelp alpha harbor cedar	hotel umber
+29	claude	2030-03-16T16:28	1		romeo november mike quartz alpha echo nectar nectar umber	river india bravo willow dune zephyr kilo dune zulu kilo jade delta tango harbor yankee uniform grove cedar quartz basil uniform oscar iris zulu alpha delta
+30	claude	2030-03-26T10:28	1		thistle pebble dune mike grove zephyr oscar	nectar kelp zephyr harbor grove tango golf nectar grove bravo amber mike golf zephyr harbor november kilo zephyr foxtrot charlie november
+31	chatgpt	2030-03-28T09:09	1		willow lima whiskey fern	hotel juliet yankee thistle victor lima dune kelp zulu yarrow hotel iris basil papa delta dune juliet bravo charlie
+32	claude	2030-04-06T08:12	1		foxtrot zephyr juliet charlie kelp india charlie	victor yarrow papa grove hotel juliet yarrow willow quebec grove iris onyx mike uniform
+33	chatgpt	2030-04-10T11:37	1		fern hotel oscar sierra	kelp basil alpha whiskey yankee charlie fern victor kelp harbor lumen foxtrot juliet whiskey mike jade yankee
+34	claude	2030-05-28T23:11	1		delta kelp ember harbor quebec xray	jade papa vale xray hotel alpha maple romeo yankee fern quebec harbor nectar jade ember willow harbor echo basil
+35	chatgpt	2030-06-06T11:31	1		hotel pebble fern sierra juliet	vale 乙 amber 申 foxtrot 壬 tango mike 丁 壬 子 辛 申 lumen 戌 lima sage 丑 子 丁 己 umber 戊 辰 nectar 申 申 寅 mike delta amber
+36	gemini-apps	2030-06-20T22:06	1			nectar whiskey foxtrot kilo xray zephyr vale kelp iris willow victor oscar maple ember lumen tango yankee maple sierra xray quebec vale oscar river kelp amber g
+37	gemini-apps	2030-06-20T23:03	2			zulu hotel november willow romeo charlie sierra romeo tango nectar pebble charlie zulu was used in this chat. Manage your Gems. [files: view]
+38	gemini-apps	2030-06-21T16:57	2			river hotel echo tango vale uniform victor lima kelp india bravo onyx india ember amber lumen umber ember romeo foxtrot juliet was used in this chat. Manage you
+39	gemini-apps	2030-06-22T05:08	12			丑 fern tango 丁 lumen yankee Attached 1 file. maplevale lima nectar uniform sage papa nectar [files: file-273-38e0443721663a36.jpg]
+40	gemini-apps	2030-06-22T11:13	1			xray kilo
+41	gemini-apps	2030-06-22T12:11	2			india 壬 甲 癸 zulu Attached 1 file. xrayquebec delta hotel nectar grove papa [files: file-270-cbcab3872c7df423.jpg]
+42	gemini-apps	2030-06-22T13:41	2			lima xray grove nectar lumen kelp xray xray zulu dune sage uniform yarrow harbor kelp kilo maple xray fern kelp thistle zulu uniform grove delta charlie bravo s
+43	gemini-apps	2030-06-22T14:54	4			river hotel echo tango vale uniform victor lima kelp india bravo onyx india ember amber lumen umber ember romeo foxtrot juliet was used in this chat. Manage you
+44	gemini-apps	2030-06-22T16:55	1			辰 己 vale dune 巳 亥 amber lumen Attached 1 file. alphaumber romeo yankee kelp onyx bravo juliet [files: file-276-d042e4c22e331acf.jpg]
+45	gemini-apps	2030-06-22T19:01	2			酉 foxtrot 巳 癸 癸 壬 亥
+46	gemini-apps	2030-06-22T21:42	1			kelp amber thistle iris xray onyx grove india quebec nectar ember kelp hotel november yarrow harbor charlie xray uniform echo basil india juliet ember thistle n
+47	gemini-apps	2030-06-22T23:49	3			丙 cedar 申 papa 癸 lima 辰 辛 zulu 丁 river basil 丁
+48	gemini-apps	2030-06-23T07:34	3			申 酉 甲 sierra november kilo 乙 papa sierra 酉 kelp 子 卯 戊 kilo 丑 charlie lima 巳 酉 未 yankee 寅 uniform 乙 amber yarrow
+49	gemini-apps	2030-06-23T13:26	6			己 巳 卯 tango quebec whiskey papa 戊 丁 子 酉 丁 壬 umber hotel jade yankee 庚 bravo dune 寅 lumen willow 申 戌 onyx basil 卯 子 romeo charlie
+50	gemini-apps	2030-06-23T16:05	6			巳 丁 未 yankee 酉 golf zephyr 酉 卯 壬 golf thistle nectar 丙 kelp grove Attached 2 files. novemberecho delta oscarjade iris [files: file-341-6d77ec6262127c0b.jpg, fil
+51	gemini-apps	2030-06-24T00:10	2			willow papa yarrow river yankee echo juliet willow echo willow sierra iris was used in this chat. Manage your Gems. [files: view]
+52	gemini-apps	2030-06-24T04:59	2			basil zulu lima nectar pebble papa oscar whiskey foxtrot charlie uniform sage nectar uniform iris river romeo basil onyx zephyr umber umber victor dune golf gro
+53	gemini-apps	2030-06-24T13:12	13			charlie nectar kelp echo river mike grove iris onyx vale pebble lima oscar amber ember papa sierra lima grove sage kilo papa whiskey lima charlie tango was used
+54	gemini-apps	2030-06-25T00:43	1			kelp ember romeo dune ember jade charlie sierra pebble pebble lumen was used in this chat. Manage your Gems. [files: view]
+55	gemini-apps	2030-06-25T10:35	7			jade dune zulu iris amber delta umber was used in this chat. Manage your Gems. [files: view]
+56	gemini-apps	2030-06-25T20:03	14			zephyr cedar hotel whiskey delta river harbor cedar zulu delta zulu grove willow lumen lima fern pebble yarrow november foxtrot pebble yankee xray was used in t
+57	gemini-apps	2030-06-26T04:20	5			xray alpha river cedar oscar echo thistle kilo oscar echo alpha yarrow kelp thistle river lumen zulu pebble echo whiskey ember sierra basil was used in this cha
+58	gemini-apps	2030-06-26T14:41	2			cedar india grove basil quebec sierra hotel mike umber india sage was used in this chat. Manage your Gems. Attached 1 file. kelpcedar whiskey jade [files: view,
+59	gemini-apps	2030-06-26T22:40	7			juliet mike thistle sierra romeo fern delta jade amber tango foxtrot charlie echo basil iris was used in this chat. Manage your Gems. [files: view]
+60	gemini-apps	2030-06-27T08:59	1			未 bravo alpha 庚 午 grove oscar 戌 乙 november basil sierra xray juliet yarrow uniform alpha sierra november whiskey foxtrot juliet [files: 299]
+61	gemini-apps	2030-06-27T13:57	2			alpha iris kilo papa onyx whiskey delta juliet umber lima cedar alpha delta bravo cedar willow uniform thistle zephyr lumen uniform river umber was used in this
+62	gemini-apps	2030-06-27T15:17	2			kilo romeo yankee hotel delta hotel ember quartz alpha willow umber hotel thistle kelp india cedar jade alpha nectar was used in this chat. Manage your Gems. [f
+63	gemini-apps	2030-06-27T20:25	6			echo cedar harbor november onyx dune yarrow iris uniform ember umber victor alpha lumen vale jade kilo uniform grove willow was used in this chat. Manage your G
+64	gemini-apps	2030-06-28T05:54	2			november romeo willow quebec lima charlie cedar ember hotel lumen lima foxtrot umber hotel was used in this chat. Manage your Gems. [files: view]
+65	gemini-apps	2030-06-28T10:17	2			lima nectar onyx sage quebec vale amber umber delta jade cedar harbor romeo sage dune golf bravo harbor vale dune foxtrot cedar river iris echo pebble ember umb
+66	gemini-apps	2030-06-28T15:02	1			onyx quartz basil india grove kelp pebble jade sage zulu nectar amber yankee jade umber onyx november zulu fern whiskey maple kelp tango thistle kilo maple char
+67	gemini-apps	2030-06-28T18:37	13			yarrow harbor yankee umber amber thistle zulu sage bravo charlie pebble romeo river echo basil foxtrot onyx harbor hotel dune quartz papa thistle amber sage sie
+68	gemini-apps	2030-06-29T05:27	1			quebec willow onyx river dune zephyr lumen cedar hotel onyx thistle uniform harbor onyx lima golf papa was used in this chat. Manage your Gems. [files: view]
+69	gemini-apps	2030-06-29T11:10	1			sage amber fern hotel november alpha papa foxtrot harbor kilo november fern basil hotel harbor zephyr dune sage whiskey quebec xray november fern quebec lumen f
+70	gemini-apps	2030-06-29T14:53	17			dune grove hotel sierra whiskey zephyr ember hotel quartz sage delta oscar vale delta grove amber alpha yankee was used in this chat. Manage your Gems. Attached
+71	gemini-apps	2030-06-30T00:11	2			maple romeo yarrow whiskey umber tango fern mike lumen cedar tango uniform jade iris nectar cedar golf mike whiskey quebec quartz lumen lumen jade nectar alpha 
+72	gemini-apps	2030-06-30T04:49	2			bravo vale romeo lima whiskey juliet vale onyx romeo nectar dune lima was used in this chat. Manage your Gems. [files: view]
+73	gemini-apps	2030-06-30T10:13	12			willow fern yankee delta yankee victor romeo uniform nectar hotel quebec oscar dune mike quebec zephyr was used in this chat. Manage your Gems. [files: view]
+74	gemini-apps	2030-06-30T14:02	2			丑 fern tango 丁 lumen yankee Attached 1 file. maplevale lima nectar uniform sage papa nectar [files: file-273-38e0443721663a36.jpg]
+75	gemini-apps	2030-06-30T19:16	4			xray kilo
+76	gemini-apps	2030-06-30T20:16	1			fern cedar willow sierra hotel [files: file-265-213d58e4a8224f8d.wav]
+77	claude	2030-07-25T11:09	1		amber ember uniform jade jade papa quartz vale hotel whiskey	alpha delta maple nectar sierra bravo oscar yankee yarrow yarrow lima
+78	claude	2030-08-12T22:52	1		golf lima willow golf tango	oscar ember yarrow kilo cedar sage dune mike quebec
+79	claude	2030-09-07T22:24	2		sage quartz yarrow zulu mike	charlie delta november kilo quartz pebble hotel foxtrot delta vale papa harbor pebble
+80	claude	2030-10-23T00:30	1		oscar uniform umber juliet oscar kelp	fern ember maple hotel onyx amber kelp alpha
+81	claude	2030-11-15T11:10	1		juliet cedar ember quebec lima foxtrot	umber uniform kilo iris jade jade dune lumen victor alpha quartz
+82	chatgpt	2030-11-29T04:35	1		umber juliet delta cedar	juliet lumen bravo charlie onyx dune grove uniform echo lumen victor xray
+83	chatgpt	2030-12-26T17:12	1		zulu onyx alpha delta grove grove	november pebble sage india juliet romeo november victor harbor zulu sierra river romeo
+84	perplexity	2031-01-10T00:00	1		onyx willow umber nectar lumen	nectar delta kilo november dune xray tango thistle hotel quebec [attachments: file-367.pdf]
+85	claude	2031-01-19T11:50	1		umber mike iris yankee sage whiskey tango romeo	bravo sage romeo fern november yarrow kelp yarrow xray lima ember hotel victor [attachment: file-253.txt] echo pebble vale whiskey lumen jade ember quebec grove
+86	gemini	2031-02-03T10:00	1			november river golf fern onyx zephyr umber river delta sierra maple dune
+87	gemini	2031-02-04T10:00	2			papa tango november umber mike sage mike zephyr zephyr oscar pebble river
+88	perplexity	2031-02-11T00:00	2	amber iris	umber ember charlie golf onyx lumen	charlie uniform grove zephyr onyx quartz thistle pebble yankee [attachments: file-369.pdf]
+89	perplexity	2031-03-12T00:00	3		lumen river zulu umber golf willow	kelp foxtrot bravo river romeo zulu dune maple papa uniform whiskey [attachments: file-371.pdf]
+90	perplexity	2031-04-13T00:00	1	golf oscar	jade mike victor victor alpha papa	nectar jade zulu lumen bravo golf maple papa amber juliet alpha [attachments: file-373.pdf]
+91	chatgpt	2031-04-18T02:41	1		india pebble zephyr river	victor whiskey nectar lima india jade juliet mike sierra umber pebble
+92	perplexity	2031-05-14T00:00	2		thistle nectar juliet bravo echo	thistle delta umber sage uniform oscar harbor jade kilo zulu [attachments: file-375.pdf]
+93	perplexity	2031-06-15T00:00	3	jade kelp mike	zulu amber romeo echo umber juliet	kelp cedar charlie delta kelp river xray charlie xray iris amber [attachments: file-377.pdf]
+94	chatgpt	2031-08-05T12:26	1		戊 sierra	iris 寅 willow kilo
+95	claude	2032-04-10T19:46	1		grove hotel juliet basil oscar	golf lima ember basil vale iris hotel amber harbor nectar golf umber victor
+96	chatgpt	2032-07-01T00:54	1		戊 酉 xray	pebble 亥 丙 子 ember 申 寅 寅 whiskey 戌 victor papa kelp 己 uniform 卯 willow alpha 壬 癸 echo harbor ember 申 丙 tango xray 乙 癸 戊 戊 戌 戌 quebec echo yarrow 甲 kelp 子 寅 辰 辛
+97	chatgpt	2032-12-29T01:05	1		zephyr sierra papa quartz maple	umber maple foxtrot pebble grove river charlie harbor uniform quebec hotel zulu romeo zephyr quebec charlie
+98	chatgpt	2035-01-01T00:01	2		golf cedar november jade cedar	quartz charlie foxtrot yankee yankee zulu papa charlie yankee papa lumen thistle willow pebble
+99	chatgpt	2035-01-01T00:01	1		echo yarrow umber sage river thistle	quartz charlie foxtrot yankee yankee zulu papa charlie yankee papa lumen thistle willow pebble

@@ -53,6 +53,11 @@ git -C "$ROOT" -c core.autocrlf=false archive --format=tar -o "$TMP/engine.tar" 
 git -C "$ROOT" -c core.autocrlf=false archive --format=tar -o "$TMP/skeleton.tar" HEAD:tools/template
 tar xf "$TMP/engine.tar" -C "$DEST"
 tar xf "$TMP/skeleton.tar" -C "$DEST"
+# Stamp the commit exported: "Use this template" squashes the history, so this file is how a
+# Log names its Template version (the issue form, import-chats step 8). Written before the scan,
+# and only from the Template's own source (it has .export-allow): an export from a Log made
+# from the Template keeps the stamp it came with, a commit upstream can look up.
+if [ -f "$ALLOWED" ]; then git -C "$ROOT" rev-parse HEAD > "$DEST/tools/TEMPLATE_VERSION"; fi
 mkdir -p "$DEST/sources/inbox" "$DEST/outputs/applications" "$DEST/outputs/resumes" "$DEST/outputs/reports"
 touch "$DEST/sources/inbox/.gitkeep" "$DEST/outputs/applications/.gitkeep" "$DEST/outputs/resumes/.gitkeep" "$DEST/outputs/reports/.gitkeep"
 # The front page ships in both languages (AGENTS.md › Sharing)

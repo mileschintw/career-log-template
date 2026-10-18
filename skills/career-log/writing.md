@@ -36,7 +36,7 @@ Run this on every draft before the user sees it, then once more on the final tex
 - **Opening verbs** are strong and past tense (built, designed, reduced), not weak (helped, assisted, worked on) and not inflated (spearheaded, orchestrated, leveraged). Vary them within a section. (r/ER)
 - **Bold** sparingly. r/ER advises against bolding keywords inside bullets; follow the user's approved versions if they do. (r/ER)
 - **Dates** sit at the right margin. No summary section unless the user is senior, changing careers or explaining a gap; no references section. (r/ER)
-- **The graduation date** sits where the reader sees it at once. (feedback)
+- **The graduation date**, for a student or recent graduate, sits where the reader sees it at once. (feedback)
 - **A promotion at one employer** shows as two titles with their own dates. Don't merge or hide it. (practice)
 - **Plain-text check:** paste the resume as plain text to check that an ATS reads it in order. (TIH)
 

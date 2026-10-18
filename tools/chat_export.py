@@ -2,7 +2,8 @@
 """Screen and extract AI chat-history exports for the import-chats mode.
 
   chat_export.py index <export path>... --out <work dir> [--gap 45]
-      Find every export under the paths (folders or .zip files), normalise them into
+      Find every export under the paths (folders, .zip and .tar/.tgz archives, archives inside
+      those, any depth of folders), normalise them into
       <work dir>/conversations.json and write <work dir>/index.tsv for screening:
       n, platform, start, user turns, space, title, first prompt.
   chat_export.py show <work dir> <n>...
@@ -16,12 +17,15 @@ Recognised exports: ChatGPT (conversations*.json), Claude.ai (conversations.json
 Gemini in Workspace (Takeout "Conversation History" files), Gemini Apps (Takeout My Activity
 HTML; prompts are grouped into sessions by --gap minutes), and a Perplexity capture
 (perplexity-capture*.json, written in the browser, see skills/career-log/modes/import-web.md).
-Only files named like an export are read; Takeout uploads (a '-<16 hex>' suffix) never are, in any language.
+Only files named like an export are read, plus any other JSON whose first bytes show a known
+shape (a renamed export); Takeout uploads (a '-<16 hex>' suffix) never are, in any language, nor
+macOS archive leftovers (__MACOSX/, ._*). Nested archives are copied into <work dir>/nested while
+they are read and deleted afterwards. A path that yields no export is reported.
 All times are converted to UTC.
 Exports are untrusted data: run with `python3 -I` (Windows: `py -3 -I`) and keep the work
 dir outside the repo. Nothing here sends anything anywhere.
 """
-import argparse, html, json, os, re, sys, zipfile
+import argparse, html, json, os, re, shutil, sys, tarfile, zipfile, zlib
 from datetime import datetime, timedelta, timezone
 
 PLATFORMS = {  # platform: (sources folder, citation key, display name)
@@ -347,30 +351,199 @@ def read_member(z, info, n=-1):
         return f.read(n)
 
 
-def files_under(path, top=None):
-    """Yield (label, name, reader) for every file in a folder or in a .zip found there
-    (zips inside zips are not opened). reader(n) returns the first n bytes, reader() all of them.
-    Uploads are never yielded; they are counted in SKIPPED_UPLOADS, so a wrong skip shows."""
+TAR_EXT = (".tar", ".tgz", ".tar.gz", ".tbz2", ".tar.bz2", ".txz", ".tar.xz")
+OTHER_ARCHIVES = (".7z", ".rar")  # bare .gz/.xz files are not exports, so they are not flagged
+try:
+    import lzma
+    READ_ERRORS = (zipfile.BadZipFile, tarfile.TarError, zlib.error, lzma.LZMAError, EOFError, OSError, RuntimeError)
+except ImportError:
+    READ_ERRORS = (zipfile.BadZipFile, tarfile.TarError, zlib.error, EOFError, OSError, RuntimeError)
+JUNK = re.compile(r"(^|/)(__macosx/|\._[^/]*$|\.ds_store$|thumbs\.db$|desktop\.ini$)")
+MAX_DEPTH = 3  # archives inside archives, at most this deep
+SKIPPED_JUNK = {}  # input path: count of OS leftovers skipped
+NESTED = {"dir": None, "n": 0}  # where nested archives are copied while they are read
+NESTED_MAX = 8 << 30  # a nested archive larger than this is not copied out
+PROBLEM_PATHS = set()  # archives already warned about, so the no-export check does not repeat them
+FAILED_MEMBERS = set()  # archive members whose bytes could not be read
+
+
+class ReadError(Exception):
+    """Reading a file's bytes failed (a broken download, an encrypted or truncated archive).
+    Only reads raise it, so a bug in a reader is never mistaken for a bad file."""
+
+
+def guarded(read):
+    def r(n=-1):
+        try:
+            return read(n)
+        except READ_ERRORS as e:
+            raise ReadError(e) from e
+    return r
+
+
+def archive_kind(low):
+    if low.endswith(".zip"):
+        return "zip"
+    if low.endswith(TAR_EXT):
+        return "tar"
+    if low.endswith(OTHER_ARCHIVES):
+        return "other"
+    return None
+
+
+def is_junk(name):
+    return JUNK.search(name.replace("\\", "/").lower()) is not None
+
+
+def skip_junk(top):
+    SKIPPED_JUNK[top] = SKIPPED_JUNK.get(top, 0) + 1
+
+
+class TarReader:
+    """Reads one tar member forward only, keeping what it has read: a compressed tar can seek
+    backwards only by decompressing again from the start of the archive."""
+
+    def __init__(self, t, m):
+        self.t, self.m, self.f, self.got = t, m, None, b""
+
+    def __call__(self, n=-1):
+        if self.f is None:
+            self.f = self.t.extractfile(self.m)
+        if n < 0:
+            self.got += self.f.read()
+            return self.got
+        if len(self.got) < n:
+            self.got += self.f.read(n - len(self.got))
+        return self.got[:n]
+
+
+def files_under(path, top=None, depth=0):
+    """Yield (label, name, reader) for every file in a folder, any depth, or in an archive found
+    there (.zip, .tar/.tgz), opening archives inside archives up to MAX_DEPTH. reader(n) returns
+    the first n bytes, reader() all of them. Uploads are never yielded; they are counted in
+    SKIPPED_UPLOADS, so a wrong skip shows. OS leftovers are counted in SKIPPED_JUNK."""
     top = top or path
     if os.path.isdir(path):
-        for root, _, names in os.walk(path):
+        for root, dirs, names in os.walk(path):
+            dirs.sort()
             for n in sorted(names):
                 full = os.path.join(root, n)
-                if is_upload(full):
+                if is_junk(full):
+                    skip_junk(top)
+                elif is_upload(full):
                     skip_upload(top, full)
                 else:
-                    yield from files_under(full, top)
-    elif path.lower().endswith(".zip"):
-        with zipfile.ZipFile(path) as z:
-            for info in z.infolist():
-                if info.is_dir():
-                    continue
-                if is_upload(info.filename):
-                    skip_upload(top, info.filename)
-                else:
-                    yield f"{path}!{info.filename}", info.filename, (lambda n=-1, i=info: read_member(z, i, n))
+                    yield from files_under(full, top, depth)
+        return
+    kind = archive_kind(path.lower())
+    if kind is None:
+        yield path, path, guarded(lambda n=-1, p=path: read_file(p, n))
     else:
-        yield path, path, (lambda n=-1, p=path: read_file(p, n))
+        yield from archive_members(path, path, kind, top, depth)
+
+
+def problem(label, text):
+    PROBLEM_PATHS.add(label.split("!", 1)[0])  # the file on disk the problem is in
+    warn(text)
+
+
+def archive_members(label, path, kind, top, depth):
+    if kind == "other":
+        problem(label, f"{label}: this kind of archive cannot be opened; extract it into a new folder and index that")
+        return
+    if depth >= MAX_DEPTH:
+        problem(label, f"{label}: archives nested more than {MAX_DEPTH} deep are not opened; extract it and index the result")
+        return
+    done, last = [0], [None]  # members handled before an error, and the last one reached
+    try:
+        if kind == "zip":
+            with zipfile.ZipFile(path) as z:
+                for info in z.infolist():
+                    if not info.is_dir():
+                        last[0] = f"{label}!{info.filename}"
+                        yield from member(label, info.filename, guarded(lambda n=-1, i=info: read_member(z, i, n)),
+                                          (lambda i=info: z.open(i)), info.file_size, top, depth)
+                        done[0] += 1
+        else:
+            with tarfile.open(path) as t:
+                for m in t:
+                    if m.isfile():
+                        last[0] = f"{label}!{m.name}"
+                        yield from member(label, m.name, guarded(TarReader(t, m)), (lambda m=m: t.extractfile(m)),
+                                          m.size, top, depth)
+                        done[0] += 1
+    except READ_ERRORS as e:
+        if last[0] in FAILED_MEMBERS:
+            return  # the member being read when the archive broke was already reported: the same damage
+        if done[0]:
+            problem(label, f"{label}: read {done[0]} file(s), then the rest could not be read ({e}); "
+                           "it may be truncated, so download it again")
+        else:
+            problem(label, f"skipped {label}: not a readable archive ({e})")
+
+
+class CopyError(Exception):
+    pass
+
+
+def copy_out(src, path):
+    """Copy a nested archive out. A failure to read src is the archive's (ReadError);
+    a failure to write is ours (CopyError)."""
+    try:
+        dst = open(path, "wb")
+    except OSError as e:
+        raise CopyError(e)
+    with dst:
+        while True:
+            try:
+                chunk = src.read(1 << 20)
+            except READ_ERRORS as e:
+                raise ReadError(e) from e
+            if not chunk:
+                return
+            try:
+                dst.write(chunk)
+            except OSError as e:
+                raise CopyError(e)
+
+
+def member(label, name, read, stream, size, top, depth):
+    if is_junk(name):
+        skip_junk(top)
+        return
+    if is_upload(name):
+        skip_upload(top, name)
+        return
+    full = f"{label}!{name}"
+    kind = archive_kind(name.lower())
+    if kind is None:
+        yield full, name, read
+        return
+    if kind == "other":
+        yield from archive_members(full, None, kind, top, depth)
+        return
+    free = shutil.disk_usage(NESTED["dir"]).free
+    if size > NESTED_MAX or size * 1.1 > free:
+        problem(full, f"{full}: this nested archive ({size >> 20} MB) is too large to copy into the work dir "
+                      f"({free >> 20} MB free); extract it by hand into a new folder and index that")
+        return
+    NESTED["n"] += 1
+    copy = os.path.join(NESTED["dir"], f"{NESTED['n']}.{kind}")
+    try:
+        with stream() as src:
+            copy_out(src, copy)
+    except (CopyError, ReadError) as e:
+        if isinstance(e, CopyError):
+            problem(full, f"{full}: could not copy it into the work dir to open it ({e}); free some space, or extract it by hand")
+        else:
+            problem(full, f"skipped {full}: this nested archive could not be read ({e}); download the export again")
+        if os.path.exists(copy):
+            os.remove(copy)
+        return
+    try:
+        yield from archive_members(full, copy, kind, top, depth + 1)
+    finally:
+        os.remove(copy)
 
 
 # Files in a known export that are not conversations: never read, never warned about
@@ -391,13 +564,27 @@ def candidate(low):
     return low.endswith(".json") and EXPORT_NAME.search(base) is not None
 
 
+KNOWN_SHAPE = re.compile(rb'"(mapping|chat_messages|conversation_turns)"\s*:')
+
+
+def renamed_export(low, read):
+    """A JSON export under another name: its first bytes show a known shape
+    (ChatGPT, Claude.ai, Gemini in Workspace, or a Perplexity capture's slug and entries)."""
+    base = low.rsplit("/", 1)[-1]
+    if not low.endswith(".json") or base in COMPANIONS:
+        return False
+    head = read(1 << 16)
+    return KNOWN_SHAPE.search(head) is not None or (b'"slug"' in head and b'"entries"' in head)
+
+
 def detect(name, read):
     """(conversations, Gemini Apps records) from one file."""
     norm = name.replace("\\", "/")
     low = norm.lower()
-    if not candidate(low):
+    is_html = low.endswith(".html")
+    if not is_html and not candidate(low) and not renamed_export(low, read):
         return [], []
-    if low.endswith(".html"):
+    if is_html:
         if in_gemini_folder(low):
             text = read().decode("utf-8", "replace")
             if 'class="outer-cell' not in text:
@@ -405,7 +592,9 @@ def detect(name, read):
                      "the page format may have changed, see the Format notes in import-chats.md")
                 return [], []
             return [], read_gemini_apps(text)
-        head = read(1 << 20)
+        if not candidate(low) and low.rsplit("/", 1)[-1] == "chat.html":
+            return [], []  # ChatGPT's own rendering of its export, never an activity page
+        head = read(1 << 18 if not candidate(low) else 1 << 20)
         if b'class="outer-cell' not in head:
             return [], []  # not a My Activity page
         records = head.split(b'class="outer-cell')[1:]
@@ -414,6 +603,10 @@ def detect(name, read):
         if sum(b"Gemini" in r for r in records) * 2 < len(records):
             print(f"{norm}: My Activity page for another product, skipped", file=sys.stderr)
             return [], []
+        if not candidate(low):
+            # Outside any Takeout folder (zipped or moved on its own): only its content can say what it is
+            print(f"{norm}: read as the Gemini Apps activity page by its content", file=sys.stderr)
+            return [], read_gemini_apps(read().decode("utf-8", "replace"))
         warn(f"{norm} is a My Activity page in a folder not known as Gemini Apps. If it is the Gemini Apps page "
              "in another language, add its folder name to GEMINI_FOLDERS; it was skipped")
         return [], []
@@ -496,11 +689,60 @@ class Pick:
         return (self.by_updated if self.all_updated else self.by_recency).copy
 
 
+def group_of(p, label):
+    """The first folder or archive under an input path that a file came from."""
+    path = label.split("!", 1)[0]
+    rel = os.path.relpath(path, p) if os.path.isdir(p) else os.path.basename(p)
+    first = rel.replace("\\", "/").split("/", 1)[0]
+    return os.path.join(p, first) if os.path.isdir(p) else p
+
+
+def groups(paths):
+    """The folders and archives to report on: each input archive, and each folder or archive
+    directly inside an input folder."""
+    for p in paths:
+        if os.path.isdir(p):
+            for n in sorted(os.listdir(p)):
+                full = os.path.join(p, n)
+                if not is_junk(full) and (os.path.isdir(full) or archive_kind(n.lower())):
+                    yield full
+        elif os.path.exists(p) and archive_kind(p.lower()):
+            yield p
+
+
 def cmd_index(a):
     picks, gemini_files = {}, []
+    os.makedirs(a.out, exist_ok=True)
+    NESTED["dir"] = os.path.join(a.out, "nested")
+    os.makedirs(NESTED["dir"], exist_ok=True)
+    try:
+        found = scan(a, picks, gemini_files)
+    finally:
+        shutil.rmtree(NESTED["dir"], ignore_errors=True)
+    for g in groups(a.paths):
+        seen, hits = found.get(g, (0, 0))
+        if not hits and not any(x == g or x.startswith(g + os.sep) for x in PROBLEM_PATHS):
+            warn(f"{g}: no export found ({seen} file(s) read; uploads and OS leftovers are not read). "
+                 "If one is an export, see import-chats.md step 2")
+    write_index(a, picks, gemini_files)
+
+
+def scan(a, picks, gemini_files):
+    found = {}  # group: [files seen, files with an export]
     for p in a.paths:
+        if not os.path.exists(p):
+            warn(f"{p}: no such file or folder")
+            continue
         for label, name, read in files_under(p):
-            got, recs = detect(name, read)
+            try:
+                got, recs = detect(name, read)
+            except ReadError as e:
+                FAILED_MEMBERS.add(label)
+                problem(label, f"skipped {label}: could not be read ({e}); download the export again")
+                got, recs = [], []
+            g = found.setdefault(group_of(p, label), [0, 0])
+            g[0] += 1
+            g[1] += bool(got or recs)
             if got:
                 print(f"{label}: {len(got)} {got[0]['platform']}", file=sys.stderr)
             if recs:
@@ -509,6 +751,10 @@ def cmd_index(a):
             for c in got:
                 k = (c["platform"], c["id"])
                 picks.setdefault(k, Pick()).add(c)
+    return found
+
+
+def write_index(a, picks, gemini_files):
     best = {k: p.best() for k, p in picks.items()}
     if gemini_files:
         for c in gemini_sessions(gemini_files, a.gap):
@@ -520,7 +766,6 @@ def cmd_index(a):
         else:
             empty[c["platform"]] = empty.get(c["platform"], 0) + 1
     convs.sort(key=lambda c: (c["start"] or "9999", c["platform"]))
-    os.makedirs(a.out, exist_ok=True)
     with open(os.path.join(a.out, "conversations.json"), "w", encoding="utf-8") as f:
         json.dump(convs, f, ensure_ascii=False)
     with open(os.path.join(a.out, "meta.json"), "w", encoding="utf-8") as f:
@@ -530,8 +775,8 @@ def cmd_index(a):
         for n, c in enumerate(convs):
             users = [m for m in c["messages"] if m["role"] == "user"]
             first = re.sub(r"\s+", " ", users[0]["text"] if users else "")[:160]
-            f.write(f"{n}\t{c['platform']}\t{c['start'][:16]}\t{len(users)}\t{c['space']}\t"
-                    f"{re.sub(r'\s+', ' ', c['title'])}\t{first}\n")
+            title = re.sub(r"\s+", " ", c["title"])  # outside the f-string: before 3.12, a backslash there is a syntax error
+            f.write(f"{n}\t{c['platform']}\t{c['start'][:16]}\t{len(users)}\t{c['space']}\t{title}\t{first}\n")
     by = {}
     for c in convs:
         by[c["platform"]] = by.get(c["platform"], 0) + 1
@@ -539,6 +784,8 @@ def cmd_index(a):
         also = f"; not an image: {other}" if other and other != first else ""
         print(f"{top}: skipped {count} file(s) as Takeout uploads (e.g. {first}{also}); if one is an export, rename it",
               file=sys.stderr)
+    for top, count in SKIPPED_JUNK.items():
+        print(f"{top}: skipped {count} operating-system leftover(s) (__MACOSX, ._*, .DS_Store)", file=sys.stderr)
     for shape, count in BAD_TIMES.items():
         print(f"{count} timestamp(s) of the form {shape!r} were left empty", file=sys.stderr)
     print(f"{len(convs)} conversations {by} -> {a.out}" + (f"; skipped as empty: {empty}" if empty else ""))

@@ -1,0 +1,40 @@
+{
+ "conversation_turns": [
+  {
+   "user_turn": {
+    "prompt": "papa tango november umber mike sage mike zephyr zephyr oscar pebble river",
+    "turn_last_modified": "2031-02-04T10:00:00Z"
+   }
+  },
+  {
+   "system_turn": {
+    "text": [
+     {
+      "data": "mike lumen grove basil sage hotel whiskey amber sierra kelp alpha yarrow alpha charlie ember juliet maple bravo whiskey kelp uniform maple amber uniform"
+     },
+     {
+      "data": "iris willow kilo charlie victor golf thistle hotel"
+     }
+    ]
+   }
+  },
+  {
+   "user_turn": {
+    "prompt": "tango xray bravo golf romeo umber umber dune kilo lumen dune pebble onyx",
+    "turn_last_modified": "2031-02-04T11:00:00Z"
+   }
+  },
+  {
+   "system_turn": {
+    "text": [
+     {
+      "data": "fern lumen vale grove mike kilo maple charlie delta india sage river charlie vale nectar grove maple oscar hotel amber iris sage yankee juliet quebec golf"
+     },
+     {
+      "data": "jade river victor uniform grove basil fern grove charlie"
+     }
+    ]
+   }
+  }
+ ]
+}

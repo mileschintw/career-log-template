@@ -162,6 +162,8 @@ The missing-package case can fail only while lipsum is not installed. If the run
 python3 -c "import subprocess, sys; sys.path.insert(0, 'tools'); import resume; subprocess.run([resume.find_tex_bin('tlmgr'), 'remove', 'lipsum'], check=True)"
 ```
 
+After a change to `tools/chat_export.py` or `tools/tests/`, also run the chat-export tests: `python3 -I tools/tests/test_chat_export.py` (`py -3 -I` on Windows). **Check:** the last line is `OK`.
+
 ## How `tools/resume.py` finds its tools
 
 The lookup order is:

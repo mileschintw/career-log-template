@@ -6,7 +6,11 @@ Citation keys are defined in [sources/keys.md](sources/keys.md). Applications an
 
 ## Target roles, ranked
 
+- **Target roles:** GAP: which roles are you aiming for, best first (for example backend engineer, then platform engineer)?
+
 ## Employer preferences
+
+- **Sorting order for ranking employers:** GAP: after your hard constraints, what decides which employers come first (domain fit, size, pay, location, ...)?
 
 ## Career-fair tactics
 <!-- What worked or failed at past fairs: queues, on-site interviews, entry times. -->
@@ -15,6 +19,9 @@ Citation keys are defined in [sources/keys.md](sources/keys.md). Applications an
 <!-- Job trackers, boards, anything outside this repo the skill should not duplicate. -->
 
 ## Constraints
+Hard constraints: a role or employer that breaks one is out. A line still marked `GAP:` has no answer yet; answer it in chat, or replace the whole `GAP: …` text here, including any `(skipped, …)` note, with your answer followed by `(user, YYYY-MM-DD)`. "None" is an answer too.
+
+- **Work authorisation:** GAP: does any role need sponsorship, a citizenship or a clearance you lack? Which visa, if any, must an employer sponsor?
 
 ## What to emphasise, by target
 
@@ -29,3 +36,7 @@ The rules every user shares are in [writing.md](skills/career-log/writing.md). T
 How the skill commits to this repo.
 
 - **Bulk changes as pull requests:** off. (default; change it here) When on, every import and every edit across several entries lands on a `data/` branch as a pull request you review before it reaches the default branch. Needs `gh` and a GitHub remote; see [SKILL.md › Commits](skills/career-log/SKILL.md).
+
+## First-session setup
+
+- **Settings round:** not offered yet. (The first session that isn't a quick log offers one round of questions for the settings above (the `GAP:` lines, the record language and bulk changes as pull requests), then records the date here; see [SKILL.md › Settings](skills/career-log/SKILL.md#settings).)

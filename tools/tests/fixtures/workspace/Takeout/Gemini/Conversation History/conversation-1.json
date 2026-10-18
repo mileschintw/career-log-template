@@ -1,0 +1,22 @@
+{
+ "conversation_turns": [
+  {
+   "user_turn": {
+    "prompt": "november river golf fern onyx zephyr umber river delta sierra maple dune",
+    "turn_last_modified": "2031-02-03T10:00:00Z"
+   }
+  },
+  {
+   "system_turn": {
+    "text": [
+     {
+      "data": "yankee dune maple kilo tango romeo zulu november thistle fern lumen zulu zulu whiskey juliet zephyr juliet yankee willow iris delta umber river basil uniform"
+     },
+     {
+      "data": "iris yarrow grove ember cedar river kelp iris uniform"
+     }
+    ]
+   }
+  }
+ ]
+}

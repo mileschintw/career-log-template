@@ -16,6 +16,7 @@ body:
         - ChatGPT
         - Claude.ai
         - Gemini Apps
+        - Gemini in Workspace
         - Perplexity
         - Other
     validations:
@@ -47,4 +48,4 @@ body:
     id: version
     attributes:
       label: Template version
-      description: The commit your repo was created from, or "unknown".
+      description: The commit in your repo's `tools/TEMPLATE_VERSION`. If that file is missing, the date of your repo's first commit.
