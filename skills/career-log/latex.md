@@ -42,7 +42,7 @@ A first resume starts from [assets/resume-blank.tex](assets/resume-blank.tex); r
 
 Fix the words before the layout. In order:
 
-1. **Bullet over two lines, or a dangling last line:** rewrite the bullet. Cut a clause, swap a long phrase for a shorter one the entry supports, or add a few words to fill a dangling line. Every rewrite still passes `write.md` step 5.
+1. **Bullet over two lines, or a dangling last line:** rewrite the bullet. Cut a clause, swap a long phrase for a shorter one the entry supports, or add a few words to fill a dangling line. Every rewrite still passes [write.md](modes/write.md) › *Check the draft claim by claim*.
 2. **Over one page:** cut by relevance to the target, not by section: the weakest bullet for this posting goes first, wherever it sits. `direction.md › What to emphasise` decides what is weak.
 3. **Only then layout:** a `\vspace` nudge copied from the existing pattern. Margins, font size, font and the `itemsep`/`topsep` settings stay as they are; they are the template's identity across versions.
 

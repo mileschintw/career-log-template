@@ -5,7 +5,7 @@ A git repo of one person's raw career records, plus the skill and tools that tur
 ## Language
 
 **Engine**:
-The parts of the repo that work for anyone: the `career-log` skill, `tools/`, and the setup instructions.
+The parts of the repo that run a Log rather than record it: the `career-log` skill, `tools/`, the setup and agent instructions, and the other paths [AGENTS.md › Changes](AGENTS.md#changes) lists.
 _Avoid_: framework, code, the skill (when the tools are meant too)
 
 **Log**:

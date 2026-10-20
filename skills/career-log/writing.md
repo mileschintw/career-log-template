@@ -12,7 +12,7 @@ Each rule names where it comes from:
 
 ## AI-tell check
 
-Run this on every draft before the user sees it, then once more on the final text.
+Run this on every draft before the user sees it, and after a review on the text the review changed ([review.md › Apply the review](modes/review.md#apply-the-review)).
 
 1. **No em dashes** (—) in sentences. Use a comma, a colon, parentheses or two sentences. Date ranges keep their en dash (`--` in LaTeX). (humanizer)
 2. **No inflated significance.** No "pivotal", "testament to", "plays a crucial role", "in today's fast-paced world". Say what happened. (humanizer)
@@ -24,7 +24,11 @@ Run this on every draft before the user sees it, then once more on the final tex
 8. **No filler.** Cut any sentence whose removal loses nothing. (humanizer)
 9. **No repeating what the form or resume already shows**: GPA, school name, timeline, program name. Spend the words on what the reader cannot see elsewhere. Across one application (the resume and every answer the same reader sees), each number appears once: give each artifact its own evidence. (practice)
 
-**Second layer.** If the `humanizer` skill is available in this session, run it on the final text of every employer-facing output after the check above. If it is not available, the check above is the whole pass; do not stop or ask for it.
+**Second layer.** If the `humanizer` skill is available in this session, run it on every employer-facing output after the check above: in [write](modes/write.md) step 7, and after a review on the text the review changed. If it is not available, the check above is the whole pass; do not stop or ask for it. Start one subagent for it, with three things set in the call, as for the reviewer ([write](modes/write.md) step 8): a read-only agent type (in Claude Code: `Explore`); the model, named: the session's (the one your system prompt names) or the one the user asked for (in Claude Code the Agent tool's `model` parameter); and the prompt: this line, word for word, with its slot filled by the nine rules above, each with its number, followed by the text:
+
+`Call the Skill tool with the humanizer skill first, then run it on the text below. Keep every fact, its length and these AI-tell rules: <the check's rules, by number>. Edit no file. Reply with the edited text only.`
+
+Before the call, write `Humanizer call: model <model name>` in the conversation, and check that the call's model parameter is the model it names. Its reply is the tool result: keep its edits that change no fact, and go on with the step that ran this check. An agent without subagents runs the skill itself, then goes on with that step.
 
 ## Resumes
 

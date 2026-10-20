@@ -32,11 +32,10 @@ Talk to your agent in any language. Records are written in English by default (c
 ## Features
 
 - **Career log / brag document**: one Markdown file per job, project or course, with dated notes waiting to be merged into it, plus a bank of stories for behavioural interview questions.
-- **Tailored resumes**: one-page LaTeX resumes (ATS-friendly PDF), built and layout-checked by `tools/resume.py`. Make one for a single job posting, one per target role, or a general version; a second agent reviews each (where your agent can, in the background, so you see the draft as soon as it builds), and nothing is saved until the review has passed. The first time you ask for a role, the agent asks what that version should lead with and saves your answer in `direction.md`.
-- **Fit check**: paste a posting URL and get a go / no-go before any writing: your hard constraints (work authorisation, for one) against the posting, where the role ranks among your targets, and each stated requirement mapped to the record that proves it, or marked as a gap. Ask for the fit alone and it stops there.
-- **Job applications**: answers to the form's free-text questions, drawn from your records. Your own tools fill in the rest of the form and track the application. A resume made for one posting is saved with the posting and the answers. For a reusable version you upload yourself, git history and the application date recover the exact file (keep its file name when you upload it).
+- **Tailored resumes**: one-page LaTeX resumes (ATS-friendly PDF), built and layout-checked by `tools/resume.py`. Make one for a single job posting (the agent looks up what the company builds and runs on, to choose what the resume leads with), one per target role, or a general version; a second agent reviews each (where your agent can, in the background, so you see the draft as soon as it builds), and nothing is saved until the review has passed. The first time you ask for a role, the agent asks what that version should lead with and saves your answer in `direction.md`.
+- **Fit check and skill gaps**: ask how well you fit a posting and get a go / no-go without any writing: your hard constraints (work authorisation, for one) against the posting, where the role ranks among your targets, and each stated requirement and duty sorted into proven by a record, shallow, claimed but unproven, or a gap. Then, if you want it, a project-first learning plan for its gaps. For a batch of postings, a gap heatmap and the same kind of plan.
+- **Job applications**: "apply to <posting URL>" goes straight to the resume, plus answers to the form's free-text questions, drawn from your records. Paste the questions, or the agent finds them on the posting's own page (Ashby, Greenhouse); when they sit behind a multi-step apply flow (Workday and the like), it asks you to paste them. Your own tools fill in the rest of the form and track the application. A resume made for one posting is saved with the posting and the answers. For a reusable version you upload yourself, git history and the application date recover the exact file (keep its file name when you upload it).
 - **Interview prep**: a prep pack from what the employer will read, then a mock interview.
-- **Skill gap analysis**: for one dream posting or a batch of them, a gap heatmap that separates skills your records prove from skills you only claim, and a project-first learning plan. The fit check decides whether to apply; this decides what to learn.
 - **Employer ranking**: sort a career fair roster or job list by your hard constraints, then your own sorting order (domain fit, size, pay, ...).
 - **Import**: merge old resumes and CVs (PDF, Word, LaTeX), bios, reports, LinkedIn exports, AI chat histories (ChatGPT, Claude.ai, Gemini, Perplexity) and logged-in websites into one entry per experience. Reading a website, and Perplexity, which has no export, needs an agent with a browser tool.
 - **Provenance**: every output ships with a table linking each claim to its source record.
@@ -69,6 +68,15 @@ The skill is designed for **English resumes in the North American style**: one p
 
 Other languages and resume styles depend on three planned features: custom resume templates, Typst templates, and CJK (Chinese, Japanese, Korean) resumes. Even after those land, resumes in other languages or styles **may not work as well** as North American English ones. Those features will extend the design built and tested for this style, and none of them adds rules tuned for other markets.
 
+**Models.** How `write` (resumes and application answers) did in testing with Claude models in Claude Code:
+
+| Model | `write` |
+|---|---|
+| Opus, Sonnet | Tested. Sonnet or above is recommended. |
+| Haiku | Works, but the humanizer step is unreliable (skipped in 2 of 3 test runs, even at extra-high effort), and its subagents are often set up wrong at medium and high effort. |
+
+On every model, the agent sometimes skips the one-line note it writes before starting a review or humanizer subagent; the subagent itself still runs. Sonnet also sometimes sets up a subagent wrong, less often than Haiku.
+
 ## How to use
 
 Invoke the skill and say what you want. The `career-log` skill (in [`skills/career-log/`](skills/career-log/SKILL.md)) works from any session of those agents once it is linked into the skill folder your agent reads (see [SETUP.md](SETUP.md) step 4), and it picks the mode from your request. The table shows what you can ask for. The quoted phrases are examples; any wording works.
@@ -78,9 +86,9 @@ Invoke the skill and say what you want. The `career-log` skill (in [`skills/care
 | "log this to my career log" | **log**: add a dated line to an entry's pending notes |
 | "consolidate the <project> entry" | **consolidate**: fill every section, interviewing you on the gaps |
 | "prep me for the <company> interview" | **interview**: prep pack from what they read, then a mock interview |
-| "what should I learn for these postings", "how do I close the gap to <posting URL>" | **upskill**: evidence-based gap heatmap and a project-first learning plan |
-| "rank these career fair employers" | **rank**: tiers by your hard constraints and your sorting order, with an opening line for each top employer |
-| "apply to <posting URL>", "how well do I fit <posting URL>", "write a backend engineer resume" | **write**: a fit call on a posting; a resume for that posting, a target role or a general version; form answers and cover letters. Employer-facing drafts get a second-agent review and a provenance table |
+| "how well do I fit <posting URL>", "what should I learn for these postings" | **fit**: a go / no-go on one posting, each requirement mapped to the record that proves it; or a gap heatmap across several. A project-first learning plan for the gaps on request |
+| "rank these career fair employers" | **rank**: tiers by your hard constraints and your sorting order, with an opening line for every employer it does not rule out |
+| "apply to <posting URL>", "write a backend engineer resume" | **write**: a resume for that posting, a target role or a general version, plus answers to the posting's free-text questions. Employer-facing drafts get a second-agent review and a provenance table |
 | "import my old resumes" (files in `sources/inbox/`, or a logged-in site through the agent's browser) | **import**: merge old documents into entries |
 | "import my ChatGPT history" (or Claude, Gemini, Perplexity) | **import**: tells you how to export it, screens every conversation, and copies only the ones you pick; the raw export stays out of git |
 | "audit my career log" | **audit**: report missing stories, gaps and conflicts |
@@ -95,8 +103,8 @@ Some of what the skill does depends on who you are, not on general resume rules:
 
 | Setting | What it changes | Where it lives | Until you set it |
 |---|---|---|---|
-| Target roles | Where a posting's role ranks among your targets in the fit check, and what employer ranking measures domain fit against | `direction.md › Target roles, ranked` | Asked the first time a fit check, a ranking or a skill gap analysis needs them. Skipped: the fit check gives no rank, ranking goes by the areas your records show, and skill gap analysis weighs every posting the same |
-| Work authorisation | The fit check's go / no-go, and what employer ranking researches (sponsorship, citizenship, clearance) | `direction.md › Constraints` | Asked the first time a posting, a ranking or interview prep needs it. No gate meanwhile: the fit check lists the posting's requirement for you to check |
+| Target roles | Where a posting's role ranks among your targets in the fit check, and what employer ranking measures domain fit against | `direction.md › Target roles, ranked` | Asked the first time a fit check or a ranking needs them. Skipped: the fit check gives no rank and weighs every posting in a batch the same, and ranking goes by the areas your records show |
+| Work authorisation | The fit check's go / no-go, and what employer ranking researches (sponsorship, citizenship, clearance) | `direction.md › Constraints` | Asked the first time a fit check, a ranking or interview prep needs it. No gate meanwhile: the fit check lists the posting's requirement for you to check. A resume for a posting never stops on it: it quotes the posting's sponsorship language for you to check |
 | Other hard constraints (location, start date, role level) | The same go / no-go | `direction.md › Constraints` | No limit; add one whenever you like |
 | Employer sorting order | How `rank` orders employers after your hard constraints | `direction.md › Employer preferences` | Asked on your first ranking, proposing domain fit, then size and pay |
 | What a resume version leads with | Which records each target version puts first, what it leaves out, and how far back it reaches (about five years by default) | `direction.md › What to emphasise, by target` | Asked the first time you ask for that target |

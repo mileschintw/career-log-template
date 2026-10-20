@@ -145,9 +145,9 @@ OK
 
 Also check that `.build/verify/resume-1.png` shows one whole page. `.build/` is ignored by git, so the folder can stay.
 
-## 7. Self-test after changing `tools/`
+## 7. Self-test after an Engine change
 
-Run on every platform you use after any change to `tools/` (step 6 first). Each case edits its own copy of the example resume in `.build/selftest/`; delete the folder afterwards.
+After a change to `tools/`, run the cases below on every platform you use (step 6 first). Each case edits its own copy of the example resume in `.build/selftest/`; delete the folder afterwards.
 
 | Case | How to make it | Expected |
 |---|---|---|
@@ -162,7 +162,10 @@ The missing-package case can fail only while lipsum is not installed. If the run
 python3 -c "import subprocess, sys; sys.path.insert(0, 'tools'); import resume; subprocess.run([resume.find_tex_bin('tlmgr'), 'remove', 'lipsum'], check=True)"
 ```
 
-After a change to `tools/chat_export.py` or `tools/tests/`, also run the chat-export tests: `python3 -I tools/tests/test_chat_export.py` (`py -3 -I` on Windows). **Check:** the last line is `OK`.
+Whatever changed, also run the checks that match it (`py -3 -I` for `python3 -I` on Windows):
+- any Engine change: `sh tools/export-template.sh <scratch>/export`, to a new folder. **Check:** the last line is `OK`.
+- `tools/chat_export.py` or `tools/tests/`: `python3 -I tools/tests/test_chat_export.py`. **Check:** the last line is `OK`.
+- `skills/`, `tools/template/`, `SETUP.md`, `AGENTS.md`, `CLAUDE.md`, `GLOSSARY.md`, `tools/skill_lint.py` or `tools/tests/test_skill_lint.py`: `python3 -I tools/tests/test_skill_lint.py`, then `python3 -I tools/skill_lint.py`. **Check:** the first's last line is `OK`, and the second prints `skill lint: ok`.
 
 ## How `tools/resume.py` finds its tools
 
