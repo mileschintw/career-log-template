@@ -14,21 +14,30 @@ Each rule names where it comes from:
 
 Run this on every draft before the user sees it, and after a review on the text the review changed ([review.md › Apply the review](modes/review.md#apply-the-review)).
 
-1. **No em dashes** (—) in sentences. Use a comma, a colon, parentheses or two sentences. Date ranges keep their en dash (`--` in LaTeX). (humanizer)
-2. **No inflated significance.** No "pivotal", "testament to", "plays a crucial role", "in today's fast-paced world". Say what happened. (humanizer)
-3. **No stock AI words.** Delve, leverage (as a verb for "use"), seamless, robust, showcase, foster, spearhead, harness, tapestry, landscape. (humanizer)
-4. **No forced groups of three.** List as many items as there are. (humanizer)
-5. **No bold mini-headings** inside prose answers, and no "**Label:** text" lists where a sentence would do. (humanizer)
-6. **No chatbot closers or openers.** No "I hope this helps", "Great question", "In conclusion". (humanizer)
-7. **No not-X-but-Y contrasts** set up only to knock down. (humanizer)
-8. **No filler.** Cut any sentence whose removal loses nothing. (humanizer)
-9. **No repeating what the form or resume already shows**: GPA, school name, timeline, program name. Spend the words on what the reader cannot see elsewhere. Across one application (the resume and every answer the same reader sees), each number appears once: give each artifact its own evidence. (practice)
+1. **Join clauses with a comma, a colon, parentheses or two sentences,** never an em dash (—). Date ranges keep their en dash (`--` in LaTeX). (humanizer)
+2. **Say what happened,** at its real size: no "pivotal", "testament to", "plays a crucial role", "in today's fast-paced world". (humanizer)
+3. **Plain words** in place of stock AI words: delve, leverage (as a verb for "use"), seamless, robust, showcase, foster, spearhead, harness, tapestry, landscape. (humanizer)
+4. **List as many items as there are,** not a forced group of three. (humanizer)
+5. **Sentences in prose answers,** with no bold mini-headings and no "**Label:** text" lists where a sentence would do. (humanizer)
+6. **Start with the answer and stop when it is given,** with no chatbot openers or closers ("Great question", "I hope this helps", "In conclusion"). (humanizer)
+7. **State the point directly,** with no not-X-but-Y contrast set up only to knock down. (humanizer)
+8. **Every sentence carries something:** cut any sentence whose removal loses nothing. (humanizer)
+9. **Spend the words on what the reader cannot see elsewhere,** not on what the form or resume already shows: GPA, school name, timeline, program name. Across one application (the resume and every answer the same reader sees), each number appears once: give each artifact its own evidence. (practice)
 
-**Second layer.** If the `humanizer` skill is available in this session, run it on every employer-facing output after the check above: in [write](modes/write.md) step 7, and after a review on the text the review changed. If it is not available, the check above is the whole pass; do not stop or ask for it. Start one subagent for it, with three things set in the call, as for the reviewer ([write](modes/write.md) step 8): a read-only agent type (in Claude Code: `Explore`); the model, named: the session's (the one your system prompt names) or the one the user asked for (in Claude Code the Agent tool's `model` parameter); and the prompt: this line, word for word, with its slot filled by the nine rules above, each with its number, followed by the text:
+**Second layer.** If the `humanizer` skill is available in this session, run it on every employer-facing output after the check above: in [write](modes/write.md) step 7, and after a review on the text the review changed. If it is not available, the check above is the whole pass; do not stop or ask for it. Start one subagent for it, as [SKILL.md › Subagents](SKILL.md#rules-for-every-mode) says. Its prompt is this line, word for word, with `<root>` replaced by the log root path, followed by the text:
 
-`Call the Skill tool with the humanizer skill first, then run it on the text below. Keep every fact, its length and these AI-tell rules: <the check's rules, by number>. Edit no file. Reply with the edited text only.`
+`Read <root>/skills/career-log/writing.md and follow only its section "Humanizer subagent" on the text below.`
 
-Before the call, write `Humanizer call: model <model name>` in the conversation, and check that the call's model parameter is the model it names. Its reply is the tool result: keep its edits that change no fact, and go on with the step that ran this check. An agent without subagents runs the skill itself, then goes on with that step.
+Before the call, write `Humanizer call: model <model name>` in the conversation, and check that the call's model parameter is the model it names. Its reply is the tool result: keep its edits that change no fact, and go on with the step that ran this check. An agent without subagents does the [Humanizer subagent](#humanizer-subagent) work itself, then goes on with that step.
+
+### Humanizer subagent
+
+This section is the whole task of the subagent the second layer starts.
+
+1. Call the Skill tool with the `humanizer` skill, then run it on the text the prompt gives.
+2. Keep every fact, the text's length, and every one of the nine rules in [AI-tell check](#ai-tell-check), by number.
+
+Done when the reply holds only the edited text.
 
 ## Resumes
 
@@ -37,7 +46,7 @@ Before the call, write `Humanizer call: model <model name>` in the conversation,
 Every other resume rule works inside these three, and the review pass checks them.
 
 1. **The page never shows weakness.** A resume has to pass the screen before anyone can ask a follow-up question, so nothing on it hedges: no caveats, negative results, known bugs or "showed no gain". Never fabricate. A claim may be framed at its strongest true reading, one the user can explain and defend in an interview; a measured range stays whole (Keep a range, below). Caveats go to interview prep instead: the risks section saved with the resume ([write](modes/write.md) step 10), which [interview](modes/interview.md) starts from, and, for a known bug or negative result that any resume using the claim would carry, `profile.md › Interview prep list`. (practice)
-2. **A project shows what was built and learned.** List the techniques the user implemented, including ones that did not win an evaluation: building them is still a skill. Never claim a technique beat another when the evaluation says it did not, and leave a losing comparison off the page. A tool that was only evaluated, never built, gets no bullet; the Skills section rules decide whether it is listed. (practice)
+2. **A project shows what was built and learned.** List the techniques the user implemented, including ones that did not win an evaluation: building them is still a skill. Never claim a technique beat another when the evaluation says it did not, and leave off the page any losing comparison and any mention that a technique was dropped, rejected or replaced: those stories go to interviews and form answers. A tool that was only evaluated, never built, gets no bullet, and neither does a feature that was never built: spend the line on more of the system instead. The Skills section rules decide whether such a tool is listed. (practice)
 3. **`Settled: do not use` blocks a false claim, not a topic.** Its why-clause names the claim that is false. A technique or system the line mentions may still appear, stated truthfully. (practice)
 
 Never fabricate, and Principle 3, apply to every output. The rest applies to resumes: a form answer follows its question (one that asks about a failure gets the failure), and may keep a caveat where the question invites it.
@@ -46,7 +55,9 @@ Never fabricate, and Principle 3, apply to every output. The rest applies to res
 
 - **Template:** the r/EngineeringResumes LaTeX template, single column, no icons or graphics. Editing and building: [latex.md](latex.md). (r/ER)
 - **One page**, unless the user has 10+ years of experience. (r/ER)
+- **Over one page:** cut by relevance to the target, not by section: the weakest bullet for this posting or target goes first, wherever it sits. `direction.md › What to emphasise` decides what is weak. (practice)
 - **Bullets** are one sentence and at most 2 lines, and a wrapped bullet's last line is not a fragment of 1–4 words. `tools/resume.py` checks the lines. No personal pronouns, no trailing periods. (r/ER)
+- **A long bullet**, one over the **Bullets** limits, is fixed in its words: cut a clause, swap a long phrase for a shorter one the entry supports, or add a few words to fill a short last line. (practice)
 - **Opening verbs** are strong and past tense (built, designed, reduced), not weak (helped, assisted, worked on) and not inflated (spearheaded, orchestrated, leveraged). Vary them within a section. (r/ER)
 - **Bold** sparingly. r/ER advises against bolding keywords inside bullets; follow the user's approved versions if they do. (r/ER)
 - **Dates** sit at the right margin. No summary section unless the user is senior, changing careers or explaining a gap; no references section. (r/ER)
@@ -61,7 +72,6 @@ Never fabricate, and Principle 3, apply to every output. The rest applies to res
 - **Keep a range** when the measurement is a range ("2–10x"), not its best case. (practice)
 - **A metric's label names the exact quantity measured**: "p95 queue wait", not "p95 latency", when the number is how long jobs waited in the queue. (practice)
 - **An outcome metric beats a caught-failure metric** on the page. A skimmer reads "checkout conversion 2.1% → 2.6%" as a result; "caught 312 of 400 requests timing out" reads as "the system was broken". Caught-failure stories go to interviews. (practice)
-- **The page shows what was built and what worked, never what failed.** "Dropped", "rejected" and "showed no gain" read weak, like confessing a mistake. A technique the user built stays on the page as built (Principle 2); that it lost, was dropped or was replaced does not. A feature that was never built, or a tool that was only tried, gets no line: spend it on more of the system instead. Those stories go to interviews and form answers. (practice)
 - **Recency.** Experience that ended more than about five years ago stays off by default; "ended" is the end of the entry's `period`, and an `ongoing` entry is current. It goes back on when it is the only evidence for a requirement: a stated requirement of the posting in a posting run, or what the target's `direction.md › What to emphasise` line asks for in a target run. Education is not experience: the degree stays whatever its date. `direction.md › What to emphasise` can set another window for one target or for all of them, and its line wins. (practice)
 - **Plain words for what was done.** "Compared each change on held-out data with settings fixed in advance" reads as work; "pre-registered, paired, Holm-corrected evaluation" reads as buzzwords and makes the number beside it less believable. The method names are for the interview. (practice)
 - **A tool named in a bullet claims what it implies.** "Prometheus histograms" says a Prometheus server ran. When only a format, client library or exporter was used, name what was done ("per-stage latency histograms"). (practice)

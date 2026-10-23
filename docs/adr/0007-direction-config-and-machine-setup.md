@@ -1,0 +1,19 @@
+# Direction, Config and Machine setup are kept apart; no setup, no run
+
+What a mode does for one user used to come from "settings": lines in `direction.md` with four states (unanswered, skipped, default, answered), a first-session round, and one-off questions a mode asked at the point of need. Agents had to judge each line's state and when to ask, and tests across three platforms kept failing on exactly that judgement: a question asked under a standing answer, an install check skipped, a wording fix voiding earlier runs. So the state is split by what it is and where it lives, and a script checks it on every trigger:
+
+- **Direction** is what the user wants (target roles, sorting order, work authorisation and other hard constraints, emphasis per target). It is Log content in `direction.md`, with sources and no defaults: an item with no line, or only a `GAP:` line, is empty.
+- **Config** is how the Engine runs for this Log (record language, reading signed-in interviewer profiles, front page). It lives in `config.toml` at the Log root, committed, so it follows the Log to every clone; a field left out takes its default, kept in the Engine (`tools/config.default.toml`), never in the Log skeleton.
+- **Machine setup** is which optional tools the user wants on one machine, in `~/.career-log/machine.toml`, outside every repo; whether a tool is installed is detected each run, never stored.
+
+A new state file follows the same test: if it follows the Log, it goes at the Log root, committed; if it follows the machine, under `~/.career-log/`. Paths a tool dictates (its skill folder, its config folder) stay where the tool puts them.
+
+**No setup, no run.** The trigger-time check stops every mode until `config.toml` exists, and a check that cannot start because Python is missing counts as setup not done. The setup mode writes Config and Direction, quick (one round, every item preselected or skippable) or advanced (every item, current values preselected). Every later change goes through it: a request, however vague, is mapped onto field names a script validates, shown before and after, and written on the user's yes, one field at a time. A mode acts on what is recorded; only a statement scoped to the current request changes one run, and it is not written back. Import lists the Direction and Config values it finds and writes none of them.
+
+**Installs.** Setup installs for the user's account where it can. A step that needs administrator rights asks through the operating system's own dialog, during setup, while the user is at the machine: UAC on Windows, an `osascript` password prompt on macOS (setup installs Homebrew when it is missing). Before any dialog the user is told which steps will ask, why, what the dialog looks like, and that the password goes to the operating system, never to the chat. Linux prints the `sudo` command for the user to run; it is supported for testing (WSL, Docker), not polished. An unattended run never opens a dialog: it names what is missing and stops. TinyTeX, with poppler, is required, so setup installs it with no question; `machine.toml` records only the optional tools.
+
+## Considered options
+
+- **Keep one settings file with states**: everything in `direction.md`, judged line by line. It is one file to read, but a state is a judgement the agent makes each run, which is the failure the tests kept finding.
+- **Ship `config.toml` in the Log skeleton with a `setup = false` field**: the defaults would sit where the user reads them, but a fresh Log would then hold the file whose absence means "not set up", and the check would read a flag instead of a file's existence.
+- **Ask at the point of need**: no setup round, each mode asks when it first needs an answer. It interrupts the work the user came for, and each mode's wording of the question becomes one more thing to test.

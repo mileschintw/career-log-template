@@ -1,0 +1,27 @@
+# How the Engine runs for this Log (Config, GLOSSARY.md). Setup copies this file to the Log root
+# as config.toml; change a value there through setup (skills/career-log/modes/setup.md).
+# A field left out takes the default below.
+
+# The language Log files are written in.
+record_language = "English"
+
+# Interviewer profiles only signed-in members can see (LinkedIn): "never" or "always".
+interviewer_profiles = "never"
+
+# "full" (the Template's page, both languages) or "trimmed" (a personal index).
+front_page = "full"
+
+# scan (skills/career-log/modes/scan.md): collect only postings posted in the last `window` days
+# (1 to 90); an unattended run uses `scheduled_window` instead ("window": the same as window).
+window = 7
+scheduled_window = "window"
+
+# scan: screen at most `screen_budget` captured postings (1 to 100); the top `fit_budget` of them
+# (1 to 50, never above screen_budget) get a full fit, and the ranking shows the top `n` (1 to 50).
+screen_budget = 40
+fit_budget = 15
+n = 10
+
+# scan: "on" drafts a resume and answers for the top `m` (1 to 20); "off" drafts none.
+auto_write = "off"
+m = 5

@@ -11,7 +11,7 @@ Fails (exit 1, one line per problem) when, in any .md file under skills/career-l
 - a mode name appears that is not in SKILL.md's modes table: a retired name anywhere, or any name
   in a mode context (`X` mode, **X** mode, modes/X.md). A line that names it as old ("older upskill
   reports") is allowed.
-<root> defaults to the repo this script is in. Standard library only, Python 3.9+.
+<root> defaults to the repo this script is in. Standard library only, Python 3.11+.
 
 There is no list of problems to ignore: a new check that finds breaks fixes them in the same pull
 request, or lands after the fix.
@@ -240,6 +240,9 @@ class Linter:
 def main(argv):
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if "-h" in argv[1:] or "--help" in argv[1:]:
+        print(__doc__.rstrip())
+        return 0
     root = argv[1] if len(argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
     problems = Linter(root).run()
     for f, n, msg in problems:

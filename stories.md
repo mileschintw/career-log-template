@@ -1,6 +1,6 @@
 # Story index
 
-Behavioural question types → where the story lives. A row with no entry is a missing story. Rows marked *(raw)* point at imported facts that still need consolidating into a story.
+Behavioural question types → where the story lives. A row with no entry is a missing story. Stories marked *(raw)* point at imported facts that still need consolidating into a story, *(pending)* at facts still in an entry's pending notes, and *(core)* at one of your 3–5 core stories (one marked item per entry is enough). Once you confirm Talking points for a type (the `stories` mode), its name links the file in `stories/`.
 
 | Question type | Stories |
 |---|---|

@@ -13,6 +13,21 @@
       and <date>-<label>-prompts.md (the user's turns only), one pair per platform.
       Refuses to overwrite: pass a new --label for a second extract on the same day.
 
+Claude Code session transcripts (one session each, ~/.claude/projects/<folder>/<session id>.jsonl):
+  chat_export.py turns [<transcript>] [--show U3,A3:2-4] [--cwd <dir>] [--projects <dir>]
+      Number the session's turns: U<k>, the k-th turn the user typed, and A<k>, the assistant's text
+      after it, with its paragraph count. --show prints those turns whole, with [p<n>] paragraph marks.
+      With no transcript, reads the newest one for --cwd (default: the current directory).
+  chat_export.py excerpt <transcript> --keep U3,A3:2-4 --slug <slug> --out <log>/sources [--title <t>]
+      Write the kept turns to sources/claude-code/<session's first day, UTC>-<slug>.md: user turns whole,
+      assistant turns whole or only the paragraphs given, secrets redacted (a count goes to stderr).
+      Run again with the same transcript and slug to add turns; a turn already there never changes.
+      A file of the same session and slug under another date (an older key) is added to, its name kept.
+  chat_export.py find <phrase>... [--projects <dir>] [--folder=<glob>]...
+      List the user turns, in every transcript (or only those in the project folders a --folder glob
+      matches), that contain a phrase (case and spacing ignored), one line each: the phrase's number,
+      the transcript, the turn, its time. Give every phrase in one run.
+
 Recognised exports: ChatGPT (conversations*.json), Claude.ai (conversations.json),
 Gemini in Workspace (Takeout "Conversation History" files), Gemini Apps (Takeout My Activity
 HTML; prompts are grouped into sessions by --gap minutes), and a Perplexity capture
@@ -25,7 +40,7 @@ All times are converted to UTC.
 Exports are untrusted data: run with `python3 -I` (Windows: `py -3 -I`) and keep the work
 dir outside the repo. Nothing here sends anything anywhere.
 """
-import argparse, html, json, os, re, shutil, sys, tarfile, zipfile, zlib
+import argparse, fnmatch, html, json, os, re, shutil, sys, tarfile, zipfile, zlib
 from datetime import datetime, timedelta, timezone
 
 PLATFORMS = {  # platform: (sources folder, citation key, display name)
@@ -904,6 +919,395 @@ def cmd_extract(a):
         print(f"{base}-threads.md / -prompts.md: {len(cs)} conversations; key `{key} T<n>.U<k>`")
 
 
+# Claude Code session transcripts: excerpts of the perishable sources an entry cites
+
+AGENT = "claude-code"  # the sources folder and the key prefix
+# User-role text that is not the user's own words: tool output, app and session events, summaries
+NOT_TYPED = re.compile(r"\s*(?:<(?:task-notification|side-sessions-event|ci-monitor-event|cross-session-message"
+                       r"|local-command-(?:stdout|stderr|caveat)|bash-(?:stdout|stderr))\b"
+                       r"|\[Request interrupted|This session is being continued from a previous conversation)")
+# kind, pattern; a match is replaced by [redacted: kind], after the text of a <keep> group. Short values and
+# quoted values with spaces get through: the agent reads every kept turn before committing (excerpts.md)
+SECRETS = [
+    ("private key", r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|\Z)"),
+    ("GitHub token", r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})"),
+    ("API key", r"\b(?:sk|rk)[-_](?:live_|test_|ant-|proj-)?[A-Za-z0-9_-]{20,}"),
+    ("GitLab token", r"\bglpat-[A-Za-z0-9_-]{20,}"),
+    ("npm token", r"\bnpm_[A-Za-z0-9]{30,}"),
+    ("Hugging Face token", r"\bhf_[A-Za-z0-9]{30,}"),
+    ("AWS key", r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
+    ("Slack token", r"\bxox[abposr]-[A-Za-z0-9-]{10,}"),
+    ("Google API key", r"\bAIza[0-9A-Za-z_-]{35}"),
+    ("JWT", r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
+    ("bearer token", r"(?P<keep>(?i:\b(?:bearer|basic))\s+)[A-Za-z0-9._~+/=-]{16,}"),
+    ("URL password", r"(?P<keep>://[^/\s:@]+:)[^/\s@]+(?=@)"),
+    ("secret value", r"(?P<keep>(?i:\b[A-Za-z0-9_]*(?:password|passwd|secret|token|api[_-]?key|access[_-]?key))"
+                     r"['\"]?\s*[:=]\s*)['\"]?[^\s'\",;]{6,}['\"]?"),
+]
+SECRETS = [(kind, re.compile(p, re.S)) for kind, p in SECRETS]
+
+
+def redact(text, counts):
+    for kind, rx in SECRETS:
+        def sub(m):
+            counts[kind] = counts.get(kind, 0) + 1
+            return (m.group("keep") if "keep" in rx.groupindex else "") + f"[redacted: {kind}]"
+        text = rx.sub(sub, text)
+    return text
+
+
+def projects_dir(given):
+    if given:
+        return given
+    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    return os.path.join(base, "projects")
+
+
+def fold(name):
+    return name.lower() if os.name == "nt" else name  # a Windows drive letter's case varies
+
+
+def project_folder(projects, cwd):
+    """Claude Code's folder for a working directory: every character outside [A-Za-z0-9] becomes '-';
+    a long path is cut and given a suffix, so fall back to the folders that start with its first 200."""
+    slug = re.sub(r"[^A-Za-z0-9]", "-", os.path.abspath(cwd))
+    names = os.listdir(projects) if os.path.isdir(projects) else []
+    exact = [n for n in names if fold(n) == fold(slug)]
+    if exact:
+        return os.path.join(projects, exact[0])
+    near = sorted(n for n in names if len(slug) > 200 and fold(n).startswith(fold(slug[:200])))
+    if near:
+        return os.path.join(projects, near[0])
+    sys.exit(f"no Claude Code transcripts for {cwd} under {projects}; pass the transcript's path")
+
+
+def user_text(content):
+    """The text of a user-role message the user typed, or None when it is not the user's words."""
+    if isinstance(content, str):
+        parts = [content]
+    else:
+        if all(b.get("type") == "tool_result" for b in content):
+            return None
+        parts = [b.get("text", "") if b.get("type") == "text" else "[image]" if b.get("type") == "image"
+                 else "[file]" for b in content if b.get("type") != "tool_result"]
+    text = re.sub(r"<system-reminder>.*?</system-reminder>", "", "\n\n".join(parts), flags=re.S).strip()
+    if not text or NOT_TYPED.match(text):
+        return None
+    cmd = re.search(r"<command-name>(.*?)</command-name>", text, re.S)
+    if cmd:  # a slash command: what the user typed, without the app's wrapper
+        args = re.search(r"<command-args>(.*?)</command-args>", text, re.S)
+        text = f"{cmd.group(1).strip()} {args.group(1).strip() if args else ''}".strip()
+    return text
+
+
+def read_transcript(path):
+    """A Claude Code transcript as {session, start, turns}. U<k> is the session's k-th turn the user typed
+    (origin `human`, or no origin in an older transcript; never another session's or the app's message,
+    a tool result, a meta or summary message, or a subagent's), each line counted once by its uuid; A<k> is the text the assistant wrote
+    after U<k> (A0 before the first), never its thinking or tool calls."""
+    start, turns, u, seen = "", [], 0, set()
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for n, line in enumerate(f, 1):
+            try:
+                o = json.loads(line)
+            except ValueError:
+                warn(f"{path}:{n}: not a JSON line, skipped")
+                continue
+            if not isinstance(o, dict) or o.get("type") not in ("user", "assistant") or o.get("isSidechain"):
+                continue
+            if o.get("uuid"):  # a resumed or compacted session copies earlier lines again
+                if o["uuid"] in seen:
+                    continue
+                seen.add(o["uuid"])
+            t = iso(o.get("timestamp"))
+            start = start or t
+            m = o.get("message") or {}
+            content = m.get("content") or ""
+            if o["type"] == "user":
+                if (o.get("isMeta") or o.get("isCompactSummary") or o.get("turnOrigin", "human") != "human"
+                        or (o.get("origin") or {}).get("kind", "human") != "human"):
+                    continue
+                text = user_text(content)
+                if text is not None:
+                    u += 1
+                    turns.append({"label": f"U{u}", "time": t, "text": text})
+                continue
+            if o.get("isApiErrorMessage"):
+                continue
+            texts = [content] if isinstance(content, str) else [b.get("text", "") for b in content if b.get("type") == "text"]
+            text = "\n\n".join(x.strip() for x in texts if x.strip())
+            if not text:
+                continue
+            if turns and turns[-1]["label"] == f"A{u}":
+                turns[-1]["text"] += "\n\n" + text
+            else:
+                turns.append({"label": f"A{u}", "time": t, "text": text})
+    if not turns:
+        sys.exit(f"{path}: no turns found; is it a Claude Code session transcript?")
+    # The file names the session: a forked session copies its parent's sessionId but numbers its own turns
+    return {"session": os.path.splitext(os.path.basename(path))[0], "start": start, "turns": turns}
+
+
+def paragraphs(text):
+    """Blank-line separated paragraphs; a fenced code block stays one paragraph."""
+    out, cur, fenced = [], [], False
+    for line in text.split("\n"):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        if not line.strip() and not fenced:
+            if cur:
+                out.append("\n".join(cur))
+            cur = []
+        else:
+            cur.append(line)
+    if cur:
+        out.append("\n".join(cur))
+    return out
+
+
+def parse_keep(s, tr):
+    """'U3,A3:2-4,U7' -> {label: None (whole turn) or a set of paragraph numbers}."""
+    by = {t["label"]: t for t in tr["turns"]}
+    keep = {}
+    for part in filter(None, (p.strip() for p in s.split(","))):
+        m = re.fullmatch(r"([UA]\d+)(?::(\d+)(?:-(\d+))?)?", part)
+        if not m:
+            sys.exit(f"--keep: cannot read {part!r}; use turns like U3,A3,A5:2-4 (paragraphs of an assistant turn)")
+        label = m.group(1)
+        if label not in by:
+            sys.exit(f"--keep: {label} is not in this transcript; `turns` lists them")
+        if m.group(2) is None:
+            keep[label] = None
+            continue
+        if label[0] == "U":
+            sys.exit(f"--keep: {part}: a user turn is kept whole, verbatim")
+        lo, hi, count = int(m.group(2)), int(m.group(3) or m.group(2)), len(paragraphs(by[label]["text"]))
+        if not 1 <= lo <= hi <= count:
+            sys.exit(f"--keep: {part}: {label} has paragraphs 1-{count}")
+        if label not in keep or keep[label] is not None:
+            keep[label] = (keep.get(label) or set()) | set(range(lo, hi + 1))
+    if not keep:
+        sys.exit("--keep: no turns given")
+    return keep
+
+
+def spans(nums):
+    nums, out = sorted(nums), []
+    for n in nums:
+        if out and n == out[-1][1] + 1:
+            out[-1][1] = n
+        else:
+            out.append([n, n])
+    return ", ".join(f"{a}-{b}" if a != b else str(a) for a, b in out)
+
+
+def turn_block(t, paras, counts):
+    """One turn as the excerpt holds it; the paragraphs left out of an assistant turn are marked […]."""
+    if t["label"][0] == "U":
+        return f"## {t['label']} — User ({t['time'][:16].replace('T', ' ')})\n\n" + fence(redact(t["text"], counts))
+    ps = paragraphs(t["text"])
+    if paras is None or len(paras) == len(ps):
+        return f"## {t['label']} — Assistant\n\n" + fence(redact(t["text"], counts))
+    parts, last = [], 0
+    for n in sorted(paras):
+        if n != last + 1:
+            parts.append("[…]")
+        parts.append(ps[n - 1])
+        last = n
+    if last < len(ps):
+        parts.append("[…]")
+    return (f"## {t['label']} — Assistant (paragraphs {spans(paras)} of {len(ps)})\n\n"
+            + fence(redact("\n\n".join(parts), counts)))
+
+
+def split_excerpt(text):
+    """An excerpt file as (head, {label: block}); a heading inside a turn's fenced text is not a turn."""
+    head, blocks, label, ticks = [], {}, None, None
+    for line in text.split("\n"):
+        m = re.match(r"## ([UA]\d+) — ", line)
+        if ticks is None and m:
+            label = m.group(1)
+            blocks[label] = []
+        elif ticks is None and re.fullmatch(r"`{4,}text", line):
+            ticks = line[:-4]
+        elif ticks is not None and line == ticks:
+            ticks = None
+        (blocks[label] if label else head).append(line)
+    return "\n".join(head), {k: "\n".join(v).rstrip("\n") + "\n" for k, v in blocks.items()}
+
+
+def order(label):
+    return int(label[1:]), label[0] == "A"
+
+
+def transcript_path(a):
+    if a.transcript:
+        return a.transcript
+    folder = project_folder(projects_dir(a.projects), a.cwd or os.getcwd())
+    found = sorted((os.path.getmtime(p), p) for p in (os.path.join(folder, n) for n in os.listdir(folder)) if p.endswith(".jsonl"))
+    if not found:
+        sys.exit(f"no transcripts in {folder}")
+    print(f"transcript: {found[-1][1]} (the newest of {len(found)} in {folder}; pass another one's path to read it)")
+    return found[-1][1]
+
+
+def cmd_turns(a):
+    path = transcript_path(a)
+    tr = read_transcript(path)
+    print(f"session {tr['session']}, started {tr['start'][:16]} UTC")
+    if a.show:
+        for label, paras in parse_keep(a.show, tr).items():
+            t = next(t for t in tr["turns"] if t["label"] == label)
+            ps = paragraphs(t["text"]) if label[0] == "A" else [t["text"]]
+            print(f"===== {label} ({t['time'][:16]})")
+            for n, p in enumerate(ps, 1):
+                if paras is None or n in paras:
+                    print((f"[p{n}] " if label[0] == "A" else "") + p + "\n")
+        return
+    for t in tr["turns"]:
+        extra = f"{len(paragraphs(t['text']))} paragraphs" if t["label"][0] == "A" else t["time"][:16]
+        print(f"{t['label']}\t{extra}\t{one_line(t['text'])[:200]}")
+
+
+def excerpt_name(folder, slug, session, start):
+    """The excerpt's file name: the session's first day (UTC) and the slug. When the session already has
+    files, their date wins, so one session keeps one date even where an earlier rule or a hand-written
+    file chose another; and a file with this slug is added to under its own name, never renamed."""
+    names = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+    dates = []
+    for n in names:
+        m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})-([a-z0-9-]+)\.md", n)
+        if m:
+            with open(os.path.join(folder, n), encoding="utf-8", errors="replace") as f:
+                if f"- Session: `{session}`" in f.read():
+                    if m.group(2) == slug:
+                        return n[:-3]
+                    dates.append(m.group(1))
+    return f"{min(dates) if dates else start[:10]}-{slug}"
+
+
+def cmd_excerpt(a):
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", a.slug):
+        sys.exit("--slug: lowercase letters, digits and single hyphens, like api-retry-design")
+    tr = read_transcript(a.transcript)
+    keep = parse_keep(a.keep, tr)
+    name = excerpt_name(os.path.join(a.out, AGENT), a.slug, tr["session"], tr["start"])  # skills/career-log/excerpts.md
+    date = name[:10]
+    key = f"{AGENT}-{name}"
+    path = os.path.join(a.out, AGENT, name + ".md")
+    counts, blocks = {}, {}
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            old = f.read()
+        if f"- Session: `{tr['session']}`" not in old:
+            sys.exit(f"{path} excerpts another session: pass a new --slug")
+        head, blocks = split_excerpt(old)
+    else:
+        head = (f"# Claude Code session {date}: {redact(one_line(a.title or a.slug), counts)}\n\n"
+                f"Excerpted from a Claude Code session transcript by `tools/chat_export.py excerpt`: the transcript is "
+                "deleted after about 30 days, and this file keeps the turns entries cite. Turn numbers are the "
+                "session's own, so a gap is a turn left out. **User** turns are the user's own words, verbatim; "
+                "**Assistant** turns are AI output kept as context, leads only. Times are UTC. Secrets the tool "
+                f"recognises are replaced by `[redacted: <kind>]`. Cite as `{key} U<k>` (the k-th turn the user "
+                "typed) or `A<k>` (the assistant's reply to it).\n\n"
+                f"- Session: `{tr['session']}`\n- Started: {tr['start'][:16].replace('T', ' ')} UTC\n"
+                f"- Key date: {'session start (UTC)' if date == tr['start'][:10] else 'another excerpt of the session'}\n\n")
+    by = {t["label"]: t for t in tr["turns"]}
+    added = []
+    for label, paras in keep.items():
+        if label in blocks:  # an excerpt's turns are only added to: the file's copy stays, hand redactions included
+            print(f"{label} is already in {path}; kept as it is", file=sys.stderr)
+            continue
+        blocks[label] = turn_block(by[label], paras, counts)
+        added.append(label)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(head.rstrip("\n") + "\n\n" + "\n".join(blocks[k] for k in sorted(blocks, key=order)))
+    if counts:
+        print("redacted: " + ", ".join(f"{n} {k}" for k, n in counts.items()), file=sys.stderr)
+    print(f"{path}: added {', '.join(added) or 'nothing (already there)'}; key `{key} U<k>`")
+
+
+def search_roots(projects, globs):
+    """The project folders `find` reads: all of them, or those whose name a --folder glob matches."""
+    if not globs:
+        return [projects]
+    names = sorted(os.listdir(projects)) if os.path.isdir(projects) else []
+    roots = [os.path.join(projects, n) for n in names
+             if os.path.isdir(os.path.join(projects, n)) and any(fnmatch.fnmatchcase(fold(n), fold(g)) for g in globs)]
+    if not roots:
+        sys.exit(f"no project folder under {projects} matches {' or '.join(globs)}")
+    return roots
+
+
+# Whitespace in a transcript's raw bytes: as it is (UTF-8), or as JSON escapes it, lowercased
+RAW_SPACE = (rb"(?:\s|\\[bfnrt]|\\u[0-9a-f]{4}|\xc2[\x85\xa0]|\xe1\x9a\x80|\xe2\x80[\x80-\x8a\xa8\xa9\xaf]"
+             rb"|\xe2\x81\x9f|\xe3\x80\x80)+")
+
+
+RAW_CHECK_MAX = 4  # phrases: each scans every file, and above this the scans cost more than the parsing they save
+
+
+def raw_phrases(phrases):
+    """For each phrase, (its words' forms, a pattern) that a transcript's raw bytes, ASCII letters
+    lowercased, match when a user turn contains it: the words in order, each as it is or as JSON escapes it
+    (a quote or backslash, or \\uXXXX when non-ASCII is escaped), with whitespace between them in any form.
+    The whole phrase, not one word: a long transcript holds nearly every common word.
+    None, so every file is parsed, above RAW_CHECK_MAX phrases, for a phrase the reader may have made (a
+    slash command, an [image] or [file] mark), or when a word has a non-ASCII letter with a case (lowering
+    bytes leaves its other case as it was). Still missed: a phrase across two content blocks or a removed
+    reminder, a turn whose K or İ sign lowers to ASCII, and a writer that escapes '/' (Claude Code writes
+    UTF-8, unescaped)."""
+    if len(phrases) > RAW_CHECK_MAX or any(one_line(p).startswith("/") or re.search(r"\[(?:image|file)\]", p)
+                                           for p in phrases):
+        return None
+    out = []
+    for p in phrases:
+        words = one_line(p).lower().split(" ")
+        if any(ord(c) > 127 and c.lower() != c.upper() for c in one_line(p)):
+            return None
+        forms = [{f.encode() for f in (w, json.dumps(w, ensure_ascii=False)[1:-1], json.dumps(w)[1:-1])} for w in words]
+        out.append((forms, re.compile(RAW_SPACE.join(b"(?:" + b"|".join(map(re.escape, f)) + b")" for f in forms))))
+    return out
+
+
+def may_hold(low, phrases):
+    """Whether lowered raw bytes can hold a phrase; the quick word test runs before the pattern."""
+    return any(all(any(f in low for f in forms) for forms in words) and rx.search(low) for words, rx in phrases)
+
+
+def cmd_find(a):
+    wants = [one_line(p).lower() for p in a.phrases]
+    raws = raw_phrases(a.phrases)
+    projects = projects_dir(a.projects)
+    hits, seen = 0, set()
+    for root, _, names in (w for r in search_roots(projects, a.folder) for w in os.walk(r)):
+        for n in sorted(names):
+            if not n.endswith(".jsonl") or os.sep + "subagents" in root:
+                continue
+            p = os.path.join(root, n)
+            if raws is not None:  # parsing is the slow part: skip a file no phrase can be in
+                with open(p, "rb") as f:
+                    if not may_hold(f.read().lower(), raws):
+                        continue
+            try:
+                tr = read_transcript(p)  # read again, as text: the file is cached by now
+            except SystemExit:
+                continue
+            for t in tr["turns"]:
+                if t["label"][0] != "U":
+                    continue
+                text = one_line(t["text"]).lower()
+                for k, want in enumerate(wants, 1):
+                    if want in text and (k, t["time"], t["text"]) not in seen:  # a resumed session copies turns
+                        seen.add((k, t["time"], t["text"]))
+                        hits += 1
+                        print(f"{k}\t{p}\t{t['label']}\t{t['time'][:16]}\t{one_line(t['text'])[:120]}")
+    if not hits:
+        sys.exit(f"no user turn under {projects}{' in the folders --folder matches' if a.folder else ''} "
+                 "contains any of the phrases")
+
+
 def minutes(s):
     n = int(s)
     if n < 1:
@@ -933,6 +1337,25 @@ def main():
     p.add_argument("--out", required=True)
     p.add_argument("--label", default="chats")
     p.set_defaults(fn=cmd_extract)
+    p = sub.add_parser("turns")
+    p.add_argument("transcript", nargs="?")
+    p.add_argument("--show")
+    p.add_argument("--cwd")
+    p.add_argument("--projects")
+    p.set_defaults(fn=cmd_turns)
+    p = sub.add_parser("excerpt")
+    p.add_argument("transcript")
+    p.add_argument("--keep", required=True)
+    p.add_argument("--slug", required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--title")
+    p.set_defaults(fn=cmd_excerpt)
+    p = sub.add_parser("find")
+    p.add_argument("phrases", nargs="+")
+    p.add_argument("--projects")
+    p.add_argument("--folder", action="append", help="only project folders whose name matches this glob; "
+                   "repeatable; write --folder=<glob> when it starts with '-'")
+    p.set_defaults(fn=cmd_find)
     a = ap.parse_args()
     a.fn(a)
 

@@ -130,6 +130,12 @@ class SkillLint(unittest.TestCase):
         p = subprocess.run([sys.executable, "-I", TOOL], capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
 
+    def test_help(self):
+        for flag in ("--help", "-h"):
+            p = subprocess.run([sys.executable, "-I", TOOL, flag], capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(p.returncode, 0, flag)
+            self.assertEqual(p.stdout.splitlines(), skill_lint.__doc__.splitlines(), flag)
+
 
 if __name__ == "__main__":
     unittest.main()

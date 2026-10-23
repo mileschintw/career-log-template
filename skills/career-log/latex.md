@@ -5,7 +5,7 @@ How to edit, build and check a resume `.tex` locally. Read before touching any `
 ## Toolchain
 
 - **Engine: pdfLaTeX**, from TinyTeX. The templates call `\pdfgentounicode`, a pdfTeX primitive, so XeLaTeX, LuaLaTeX and Tectonic cannot build them. Overleaf's default (pdfLaTeX) matches.
-- **Install:** [SETUP.md](../../SETUP.md) step 5 (TinyTeX, the packages in `tools/tex-packages.txt`, poppler), checked by step 6. TinyTeX is not put on `PATH`; `tools/resume.py` finds it itself, in the order SETUP.md › How `tools/resume.py` finds its tools gives.
+- **Install:** through the trigger check ([SKILL.md](SKILL.md)), whose `next:` lines run [SETUP.md](../../SETUP.md) step 5's script for TinyTeX, the packages in `tools/tex-packages.txt` and poppler; step 6 checks the result. TinyTeX is not put on `PATH`; `tools/resume.py` finds it itself, in the order SETUP.md › How `tools/resume.py` finds its tools gives.
 - **New package:** when a build stops on `File '<x>.sty' not found`, rerun with `--install-missing`, then add the package name to `tools/tex-packages.txt` so the next machine gets it.
 
 ## The loop
@@ -34,7 +34,7 @@ Build from a copy, never in `sources/resumes/` or `outputs/`: originals in `sour
 
 A first resume starts from [assets/resume-blank.tex](assets/resume-blank.tex); replace every `<...>` placeholder with facts from the entries.
 
-- One bullet is one `\item` inside the entry's `itemize`. Bold sparingly: r/ER advises against bolding keywords inside bullets ([writing.md](writing.md)), so bold with `\textbf{}` only where the user's approved versions already do.
+- One bullet is one `\item` inside the entry's `itemize`. Bold is `\textbf{}`, used only as [writing.md](writing.md) › Format allows (where the user's approved versions already bold).
 - Escape `& % $ # _ { } ~ ^ \` in text: `C\#`, `\&`, `\%`. Use `--` for date ranges, as every version does; the checker notes en dashes because some ATS imports drop them, which is a known trade-off, not a failure.
 - Spacing between blocks uses the `\vspace{…}` values already in the file; copy a neighbouring entry's pattern instead of inventing values.
 
@@ -42,8 +42,8 @@ A first resume starts from [assets/resume-blank.tex](assets/resume-blank.tex); r
 
 Fix the words before the layout. In order:
 
-1. **Bullet over two lines, or a dangling last line:** rewrite the bullet. Cut a clause, swap a long phrase for a shorter one the entry supports, or add a few words to fill a dangling line. Every rewrite still passes [write.md](modes/write.md) › *Check the draft claim by claim*.
-2. **Over one page:** cut by relevance to the target, not by section: the weakest bullet for this posting goes first, wherever it sits. `direction.md › What to emphasise` decides what is weak.
+1. **Bullet over two lines, or a dangling last line:** rewrite the bullet as [writing.md](writing.md) › Format › *A long bullet* says. Every rewrite still passes [write.md](modes/write.md) › *Check the draft claim by claim*.
+2. **Over one page:** cut as [writing.md](writing.md) › Format › *Over one page* says.
 3. **Only then layout:** a `\vspace` nudge copied from the existing pattern. Margins, font size, font and the `itemsep`/`topsep` settings stay as they are; they are the template's identity across versions.
 
 Done when `tools/resume.py` exits 0 and the PNG reads cleanly.

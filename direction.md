@@ -5,20 +5,16 @@ What the user wants next: target roles, preferences, constraints and how to rank
 Citation keys are defined in [sources/keys.md](sources/keys.md). Applications and contacts live in [applications.md](applications.md).
 
 ## Target roles, ranked
-
-- **Target roles:** GAP: which roles are you aiming for, best first (for example backend engineer, then platform engineer)?
+<!-- A numbered list, best first. Setup fills it; empty until then. -->
 
 ## Employer preferences
-
-- **Sorting order for ranking employers:** GAP: after your hard constraints, what decides which employers come first (domain fit, size, pay, location, ...)?
+<!-- The sorting order for ranking employers, on a line `- **Sorting order:** …` (after your hard constraints: domain fit, size, pay, location, ...), and any other preference about employers. -->
 
 ## Tools the user already uses
 <!-- Job trackers, boards, anything outside this repo the skill should not duplicate. -->
 
 ## Constraints
-Hard constraints: a role or employer that breaks one is out. A line still marked `GAP:` has no answer yet; answer it in chat, or replace the whole `GAP: …` text here, including any `(skipped, …)` note, with your answer followed by `(user, YYYY-MM-DD)`. "None" is an answer too.
-
-- **Work authorisation:** GAP: does any role need sponsorship, a citizenship or a clearance you lack? Which visa, if any, must an employer sponsor?
+Hard constraints: a role or employer that breaks one is out. One bullet each, work authorisation first (`- **Work authorisation:** …`), each followed by its source, `(user, YYYY-MM-DD)`. "None" is an answer too. Change one by saying so: setup shows it before and after and writes it on your yes.
 
 ## What to emphasise, by target
 <!-- One line per resume target (`general` included): the entries to lead with and what to leave out. Experience that ended more than about five years ago stays off resumes by default (writing.md › Recency); a line here changes that window for one target or for all of them, for example "Recency: ten years, every target" or "Backend: keep <entry> despite its age". -->
@@ -27,14 +23,4 @@ Hard constraints: a role or employer that breaks one is out. A line still marked
 
 ## Writing preferences for applications
 The rules every user shares are in [writing.md](skills/career-log/writing.md). This section holds the user's own preferences; where they disagree with writing.md, these win.
-
-- **Languages:** record language English. (default; change it here)
-
-## Repo workflow
-How the skill commits to this repo.
-
-- **Bulk changes as pull requests:** off. (default; change it here) When on, every import and every edit across several entries lands on a `data/` branch as a pull request you review before it reaches the default branch. Needs `gh` and a GitHub remote; see [SKILL.md › Commits](skills/career-log/SKILL.md).
-
-## First-session setup
-
-- **Settings round:** not offered yet. (The first session that isn't a quick log offers one round of questions for the settings above (the `GAP:` lines, the record language and bulk changes as pull requests), then records the date here; see [SKILL.md › Settings](skills/career-log/SKILL.md#settings).)
+<!-- The record language is in config.toml. -->

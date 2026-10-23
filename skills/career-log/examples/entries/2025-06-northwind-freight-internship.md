@@ -7,7 +7,7 @@ my_role: Software Engineering Intern; owned the quote-latency fix and the invoic
 collaborators: Priya (senior engineer, mentor) — co-designed the rollout; Sam (manager) — set the latency goal
 tags: [go, python, postgresql, redis, kafka, feature-flags, latency]
 visibility: public
-links: [https://git.example.com/northwind/quotes/pull/412, https://git.example.com/northwind/reconciler]
+links: [https://git.example.com/northwind/quotes, https://git.example.com/northwind/reconciler]
 last_updated: 2025-10-02
 ---
 
@@ -41,7 +41,7 @@ Cut the shipment-quote API's p95 latency from 820 ms to 210 ms and automated inv
 | Metric | Value | How measured | Caveat | Source |
 |---|---|---|---|---|
 | Quote API p95 latency | 820 ms → 210 ms | Production dashboard, one week before vs one week after | Week after included a holiday with lower traffic | PR #412 comment; (user, 2025-10-02) |
-| Invoices flagged by the reconciler | 3% of 40k per month (August 2025: 40,212 invoices) | Reconciler report, August 2025 | One month only | reconciler repo `reports/2025-08.md` |
+| Invoices flagged by the reconciler | 3% of 40k per month (August 2025: 40,212 invoices) | Reconciler report, August 2025 | One month only | `reconciler@3f9c2a1:reports/2025-08.md:14` |
 | Rate-cache rollout | Four sales regions over two weeks, zero rollbacks | Deploy log | — | (user, 2025-10-02) |
 
 ## People
@@ -56,9 +56,9 @@ Cut the shipment-quote API's p95 latency from 820 ms to 210 ms and automated inv
 - *How did you know the latency gain was real and not the holiday?* GAP: whether the gain held in a normal-traffic week.
 
 ## Past phrasings
-- "Cut shipment-quote API p95 latency from 820 ms to 210 ms by replacing per-request PostgreSQL lookups with a Redis rate cache refreshed every five minutes" (backend; examples/resume.tex)
-- "Built a Kafka consumer in Go that reconciles carrier invoices nightly, flagging 3% of 40k monthly invoices for review and removing a manual spreadsheet step" (backend; examples/resume.tex)
-- "Co-designed a feature-flag rollout with a senior engineer, rolling out the new rate cache to all four sales regions over two weeks with zero rollbacks" (backend; examples/resume.tex)
+- **backend:** "Cut shipment-quote API p95 latency from 820 ms to 210 ms by replacing per-request PostgreSQL lookups with a Redis rate cache refreshed every five minutes" (examples/resume.tex)
+- **backend:** "Built a Kafka consumer in Go that reconciles carrier invoices nightly, flagging 3% of 40k monthly invoices for review and removing a manual spreadsheet step" (examples/resume.tex)
+- **backend:** "Co-designed a feature-flag rollout with a senior engineer, rolling out the new rate cache to all four sales regions over two weeks with zero rollbacks" (examples/resume.tex)
 
 ## Conflicts
 - Settled: use "from 820 ms to 210 ms", not "5x faster" (820 / 210 is 3.9x). (sources/resumes/2025-09-draft.tex; PR #412 comment)

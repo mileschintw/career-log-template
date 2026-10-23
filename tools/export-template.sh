@@ -7,7 +7,8 @@
 # uncommitted edits or untracked files.
 # Then scans every exported file name and file for the patterns in .export-deny
 # (one extended regex per line, whole words, case-insensitive; that file stays here)
-# and fails on any hit. See docs/adr/0001 and 0002.
+# and fails on any hit. See docs/adr/0001 and 0002. Before that, in the Template's source only,
+# tools/deny_coverage.py fails when .export-deny misses an employer or project name the Log records.
 set -eu
 ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 DEST=${1:?usage: tools/export-template.sh <dest>}
@@ -40,6 +41,18 @@ while IFS= read -r pat || [ -n "$pat" ]; do
 done < "$DENY"
 if [ "$NPAT" -eq 0 ]; then
   echo "refusing: $DENY has no patterns. Add your name, email, schools, employers and projects, one per line"; exit 1
+fi
+# The scan below is only as good as .export-deny, so check that it covers every employer and
+# project name the Log records (tools/deny_coverage.py; names cleared for export are in
+# .export-cleared). Only in the Template's own source (it has .export-allow): its Engine is the one
+# written beside this Log, so an example in it can name an employer the Log records.
+if [ -f "$ALLOWED" ]; then
+  if python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' >/dev/null 2>&1; then PY=python3
+  elif py -3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' >/dev/null 2>&1; then PY="py -3"
+  else echo "FAIL: tools/deny_coverage.py needs Python 3.11 or later (python3, or py -3 on Windows)"; exit 1
+  fi
+  # shellcheck disable=SC2086
+  $PY -I "$ROOT/tools/deny_coverage.py" "$ROOT" || { echo "FAIL: export stopped by tools/deny_coverage.py; follow its output above, then export again"; exit 1; }
 fi
 
 # The export is built and checked in $OUT and copied to DEST only once every check passes, so

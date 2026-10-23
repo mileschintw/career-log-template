@@ -19,11 +19,5 @@ What Alex wants next. Like an entry, every line carries its source.
 - **Platform:** Tidepool first. (user, 2025-10-01)
 
 ## Writing preferences for applications
-- **Languages:** record language English. Resumes and applications in English. (user, 2025-10-01)
+- **Languages:** resumes and applications in English. (user, 2025-10-01)
 - Prefers "built" over "developed". (user, 2025-10-02)
-
-## Repo workflow
-- **Bulk changes as pull requests:** off. (default; change it here)
-
-## First-session setup
-- **Settings round:** offered 2025-10-01.

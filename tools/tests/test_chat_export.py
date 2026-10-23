@@ -624,6 +624,272 @@ class Commands(Base):
         self.assertIn("at least 1 minute", err)
 
 
+def line(kind, content, t, stamp=None, ascii=True, **extra):
+    """One made-up Claude Code transcript line; `ascii=False` writes non-ASCII as it is, as Claude Code does."""
+    n = line.count = getattr(line, "count", 0) + 1
+    return json.dumps({"type": kind, "uuid": f"u{n}", "sessionId": "sess-1", "isSidechain": False,
+                       "timestamp": stamp or f"2030-01-02T03:{t:02d}:00.000Z", "message": {"role": kind, "content": content},
+                       **extra}, ensure_ascii=ascii)
+
+
+def transcript():
+    """Every kind of line the turn filter sorts, with made-up words."""
+    text = lambda s: [{"type": "text", "text": s}]
+    lines = [
+        line("user", "Background (from the session that started this one): relayed brief", 0, turnOrigin="sdk"),
+        line("assistant", text("Reading the brief first."), 1),
+        line("user", "<system-reminder>injected</system-reminder>\nwe chose the plum queue because retries lagged", 2,
+             turnOrigin="human"),
+        line("assistant", [{"type": "thinking", "thinking": "hidden thoughts"}, {"type": "tool_use", "name": "Bash", "input": {}}], 3),
+        line("user", [{"type": "tool_result", "content": "AKIAABCDEFGHIJKLMNOP file contents"}], 4),
+        line("assistant", text("First paragraph.\n\n```\ncode\n\nmore code\n```\n\nThird paragraph."), 5),
+        line("assistant", text("Fourth paragraph."), 6),
+        line("user", "<task-notification>a subagent finished</task-notification>", 7, turnOrigin="task_notification"),
+        line("user", "Another Claude session sent a message", 8, turnOrigin="peer", isMeta=True),
+        line("user", "Base directory for this skill: somewhere", 9, isMeta=True),
+        line("user", "This session is being continued from a previous conversation.", 10, isCompactSummary=True),
+        line("user", "<local-command-stdout>output</local-command-stdout>", 11),
+        line("user", text("[Request interrupted by user for tool use]"), 12),
+        line("user", "subagent prompt", 13, isSidechain=True),
+        line("user", "<command-message>review</command-message>\n<command-name>/review</command-name>\n"
+                     "<command-args>high</command-args>", 14, turnOrigin="human"),
+        line("user", text("older client, no origin: token=abcdef123456 and ghp_" + "a" * 36), 15),
+        line("user", "/compact", 16, origin={"kind": "plugin"}),
+        line("user", "a heading in my text:\n## U9 — User (fake)\nend", 17, turnOrigin="human"),
+    ]
+    lines.append(lines[2])  # a resumed session copies a line again
+    return "\n".join(lines + ["not json"]) + "\n"
+
+
+class Transcript(Base):
+    def setUp(self):
+        super().setUp()
+        self.jsonl = self.path("projects", "D--work-repo", "sess-1.jsonl")
+        os.makedirs(os.path.dirname(self.jsonl))
+        with open(self.jsonl, "w", encoding="utf-8") as f:
+            f.write(transcript())
+
+    def excerpt(self, keep, slug="plum-queue"):
+        return run("excerpt", self.jsonl, "--keep", keep, "--slug", slug, "--out", self.path("sources"))
+
+    def test_turns_are_only_what_the_user_typed(self):
+        code, out, err = run("turns", self.jsonl)
+        self.assertEqual(code, 0, err)
+        rows = [r.split("\t") for r in out.splitlines()[1:]]
+        self.assertEqual([r[0] for r in rows], ["A0", "U1", "A1", "U2", "U3", "U4"])
+        self.assertEqual(rows[1][2], "we chose the plum queue because retries lagged")
+        self.assertEqual(rows[2][1], "4 paragraphs")  # two assistant lines, one turn; the code block is one paragraph
+        self.assertEqual(rows[3][2], "/review high")
+        self.assertNotIn("hidden thoughts", out)
+        self.assertNotIn("AKIA", out)
+
+    def test_turns_default_to_the_newest_transcript_of_the_cwd(self):
+        cwd = self.path("work", "repo")
+        # the folder name is the absolute path with every character outside [A-Za-z0-9] a hyphen
+        os.rename(os.path.dirname(self.jsonl), self.path("projects", re.sub(r"[^A-Za-z0-9]", "-", cwd)))
+        code, out, err = run("turns", "--cwd", cwd, "--projects", self.path("projects"))
+        self.assertEqual(code, 0, err)
+        self.assertIn("the newest of 1", out)
+        self.assertIn("U1\t2030-01-02T03:02", out)
+
+    def test_show_marks_paragraphs(self):
+        code, out, err = run("turns", self.jsonl, "--show", "A1:3")
+        self.assertEqual(code, 0, err)
+        self.assertIn("[p3] Third paragraph.", out)
+        self.assertNotIn("First paragraph", out)
+
+    def test_excerpt_format_and_redaction(self):
+        code, out, err = self.excerpt("U1,A1:1,A1:4,U3")
+        self.assertEqual(code, 0, err)
+        self.assertIn("redacted: 1 GitHub token, 1 secret value", err)
+        self.assertIn("key `claude-code-2030-01-02-plum-queue U<k>`", out)
+        text = read(self.path("sources", "claude-code", "2030-01-02-plum-queue.md"))
+        self.assertIn("- Session: `sess-1`", text)
+        self.assertIn("- Key date: session start (UTC)", text)
+        self.assertIn("## U1 — User (2030-01-02 03:02)\n\n````text\nwe chose the plum queue because retries lagged\n````", text)
+        self.assertIn("## A1 — Assistant (paragraphs 1, 4 of 4)", text)
+        self.assertIn("First paragraph.\n\n[…]\n\nFourth paragraph.", text)
+        self.assertIn("token=[redacted: secret value] and [redacted: GitHub token]", text)
+        self.assertNotIn("ghp_", text)
+
+    def test_excerpt_only_adds(self):
+        self.excerpt("U3")
+        target = self.path("sources", "claude-code", "2030-01-02-plum-queue.md")
+        before = read(target)
+        code, out, err = self.excerpt("U1,U3")
+        self.assertEqual(code, 0, err)
+        self.assertIn("added U1", out)
+        after = read(target)
+        self.assertLess(after.index("## U1"), after.index("## U3"))
+        self.assertTrue(after.endswith(before[before.index("## U3"):]))
+        # a turn already there stays as the file has it, a hand redaction included, while new turns are added
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(after.replace("plum queue", "[redacted: password]"))
+        code, out, err = self.excerpt("U1,A1:2,U4")
+        self.assertEqual(code, 0, err)
+        self.assertIn("U1 is already in", err)
+        self.assertIn("added A1, U4", out)
+        again = read(target)
+        self.assertIn("we chose the [redacted: password] because", again)
+        self.assertNotIn("plum queue", again)
+        code, out, err = self.excerpt("U2")  # U4's text holds a turn heading: the file still splits at real turns only
+        self.assertEqual(code, 0, err)
+        self.assertEqual(read(target).count("## U9 — User (fake)"), 1)
+        self.assertEqual(re.findall(r"^## ([UA]\d+) — ", read(target), re.M)[:5], ["U1", "A1", "U2", "U3", "U4"])
+
+    def test_redaction_patterns(self):
+        spec = importlib.util.spec_from_file_location("chat_export_under_test", TOOL)
+        chat_export = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(chat_export)
+        cases = ["GITHUB_TOKEN=ghx0123456789abcdef", "DB_PASSWORD=hunter2hunter2", '"password": "s3cr3tpass"',
+                 "sk_live_" + "b" * 24, "glpat-" + "c" * 20, "npm_" + "d" * 36, "hf_" + "e" * 34,
+                 "Authorization: Basic dXNlcjpwYXNzd29yZDEyMw==", "https://me:pw12345@example.com/x",
+                 "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----", "AKIA" + "Z" * 16]
+        for c in cases:
+            counts = {}
+            out = chat_export.redact(c, counts)
+            self.assertIn("[redacted: ", out, c)
+            self.assertTrue(counts, c)
+        self.assertEqual(chat_export.redact("max_tokens: 4096 and the secret of good tests", {}),
+                         "max_tokens: 4096 and the secret of good tests")
+
+    def test_excerpt_of_another_session_refused(self):
+        self.excerpt("U1")
+        target = self.path("sources", "claude-code", "2030-01-02-plum-queue.md")
+        with open(target, encoding="utf-8") as f:
+            text = f.read().replace("sess-1", "sess-0")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(text)
+        code, _, err = self.excerpt("U2")
+        self.assertNotEqual(code, 0)
+        self.assertIn("another session", err)
+
+    def test_excerpt_of_a_fork_refused(self):
+        """A forked session's file copies the parent's sessionId but numbers its own turns."""
+        self.excerpt("U1")
+        fork = self.path("projects", "D--work-repo", "sess-2.jsonl")
+        shutil.copy(self.jsonl, fork)
+        code, _, err = run("excerpt", fork, "--keep", "U2", "--slug", "plum-queue", "--out", self.path("sources"))
+        self.assertNotEqual(code, 0)
+        self.assertIn("another session", err)
+
+    def test_bad_keep_refused(self):
+        for keep, says in (("U1:1", "kept whole"), ("U9", "not in this transcript"), ("A1:5", "paragraphs 1-4"), ("X1", "cannot read")):
+            code, _, err = self.excerpt(keep)
+            self.assertNotEqual(code, 0, keep)
+            self.assertIn(says, err)
+        code, _, err = self.excerpt("U1", slug="Bad Slug")
+        self.assertIn("--slug", err)
+
+    def test_find_names_the_turn(self):
+        code, out, err = run("find", "no such words", "PLUM   queue", "--projects", self.path("projects"))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.split("\t")[0], "2")
+        self.assertEqual(out.split("\t")[2:4], ["U1", "2030-01-02T03:02"])
+        code, _, _ = run("find", "relayed brief", "--projects", self.path("projects"))
+        self.assertNotEqual(code, 0)  # another session's message is not the user's turn
+
+    def other_project(self, folder, *lines):
+        p = self.path("projects", folder, "sess-9.jsonl")
+        os.makedirs(os.path.dirname(p))
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        return p
+
+    def test_find_folder_limits_the_search(self):
+        self.other_project("-home-me-log--claude-worktrees-a", line("user", "plum tree in the worktree", 30))
+        self.other_project("-home-me-other", line("user", "plum tree elsewhere", 31))
+        projects = self.path("projects")
+        code, out, err = run("find", "plum tree", "--projects", projects, "--folder=-home-me-log*")
+        self.assertEqual(code, 0, err)
+        self.assertIn("in the worktree", out)
+        self.assertNotIn("elsewhere", out)
+        code, out, err = run("find", "plum", "--projects", projects, "--folder", "D--work*", "--folder=-home-me-other")
+        self.assertEqual(code, 0, err)  # repeatable; a glob is matched against the whole folder name
+        self.assertIn("plum queue", out)
+        self.assertIn("elsewhere", out)
+        self.assertNotIn("in the worktree", out)
+        code, _, err = run("find", "plum", "--projects", projects, "--folder=-home-me")
+        self.assertNotEqual(code, 0)
+        self.assertIn("no project folder", err)
+        if os.name == "nt":  # a Windows drive letter's case varies, so the match ignores case there
+            code, out, err = run("find", "plum", "--projects", projects, "--folder", "d--WORK*")
+            self.assertEqual(code, 0, err)
+            self.assertIn("plum queue", out)
+        code, _, err = run("find", "pear", "--projects", projects, "--folder=-home-me-log*")
+        self.assertNotEqual(code, 0)
+        self.assertIn("in the folders --folder matches", err)
+
+    def test_find_skips_files_without_the_words(self):
+        self.other_project("D--junk", "unreadable line about pears")
+        code, out, err = run("find", "plum queue", "about plums", "pears about", "--projects", self.path("projects"))
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("D--junk", err)  # never parsed (no phrase in it, its words in order): parsing it would warn
+        code, out, err = run("find", "bout pea", "--projects", self.path("projects"))
+        self.assertIn("D--junk", err)  # its raw text holds the phrase, so it is parsed
+        code, out, err = run("find", "plum queue", *[f"word{n}" for n in range(3)], "--projects", self.path("projects"))
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("D--junk", err)  # 4 phrases: still checked
+        code, out, err = run("find", "plum queue", *[f"word{n}" for n in range(4)], "--projects", self.path("projects"))
+        self.assertEqual(code, 0, err)
+        self.assertIn("D--junk", err)  # over 4 phrases the raw check costs more than it saves: every file is parsed
+        code, out, err = run("find", "/review high", "--projects", self.path("projects"))
+        self.assertEqual(code, 0, err)  # a slash command the reader rebuilt from its tags: every file is parsed
+        self.assertEqual(out.split("\t")[2], "U2")
+        self.assertIn("D--junk", err)
+
+    def test_find_through_json_escapes(self):
+        self.other_project("D--escapes",
+                           line("user", 'she said "plum" twice', 40),  # the quote is \" in the raw text
+                           line("user", "同意 這個做法", 41),  # \uXXXX in the raw text
+                           line("user", "核准 下一步", 42, ascii=False),  # U+2028 written raw ends no line
+                           line("user", "PLUM Tree in capitals", 43),
+                           line("user", "Été comme hiver", 44),  # É: a lowered phrase cannot match its escape
+                           line("user", "the plum\n\t queue　next", 45, ascii=False))  # \n and \t escaped, U+3000 raw
+        projects = self.path("projects")
+        for phrase, label in (('"plum" twice', "U1"), ("同意 這個", "U2"), ("核准 下一步", "U3"), ("plum tree", "U4"),
+                              ("été comme", "U5"), ("plum queue next", "U6")):
+            code, out, err = run("find", phrase, "--projects", projects, "--folder", "D--escapes")
+            self.assertEqual(code, 0, phrase + err)
+            self.assertEqual(out.split("\t")[2], label, phrase)
+
+    def test_key_date_is_the_sessions_first_day(self):
+        """A session that spans midnight UTC: every turn's excerpt lands under the day it started."""
+        jsonl = self.other_project("D--night", line("user", "late plum", 0, stamp="2030-01-01T23:55:00.000Z"),
+                                   line("user", "after midnight plum", 0, stamp="2030-01-02T00:10:00.000Z"))
+        out_dir = self.path("sources")
+        code, out, err = run("excerpt", jsonl, "--keep", "U2", "--slug", "night-plum", "--out", out_dir)
+        self.assertEqual(code, 0, err)
+        self.assertIn("key `claude-code-2030-01-01-night-plum U<k>`", out)
+        code, out, err = run("excerpt", jsonl, "--keep", "U1", "--slug", "night-plum", "--out", out_dir)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(os.listdir(os.path.join(out_dir, "claude-code")), ["2030-01-01-night-plum.md"])
+
+    def test_an_older_key_is_added_to(self):
+        """A file of this session and slug under another date (an earlier rule's, or hand-written) keeps its name."""
+        old = self.path("sources", "claude-code", "2030-01-05-plum-queue.md")
+        os.makedirs(os.path.dirname(old))
+        with open(old, "w", encoding="utf-8") as f:
+            f.write("# Claude Code session 2030-01-05: plum queue\n\nWritten by hand.\n\n- Session: `sess-1`\n\n"
+                    "## U3 — User (2030-01-05 08:00)\n\n````text\nan older copy\n````\n")
+        code, out, err = self.excerpt("U1,U3")
+        self.assertEqual(code, 0, err)
+        self.assertIn("key `claude-code-2030-01-05-plum-queue U<k>`", out)
+        self.assertIn("added U1", out)
+        self.assertEqual(os.listdir(os.path.dirname(old)), ["2030-01-05-plum-queue.md"])
+        text = read(old)
+        self.assertIn("Written by hand.", text)
+        self.assertIn("an older copy", text)
+        self.assertLess(text.index("## U1"), text.index("## U3"))
+        with open(self.path("sources", "claude-code", "2030-01-07-other-topic.md"), "w", encoding="utf-8") as f:
+            f.write("# Claude Code session 2030-01-07: other\n\n- Session: `sess-1`\n")
+        code, out, err = self.excerpt("U2", slug="review-level")  # another topic: the earliest of the session's dates
+        self.assertEqual(code, 0, err)
+        self.assertIn("key `claude-code-2030-01-05-review-level U<k>`", out)
+        self.assertIn("- Key date: another excerpt of the session",
+                      read(self.path("sources", "claude-code", "2030-01-05-review-level.md")))
+
+
 def update():
     work = tempfile.mkdtemp(prefix="chat_export_update-")
     try:

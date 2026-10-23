@@ -43,10 +43,11 @@ BULLET = "•"
 
 WINDOWS = os.name == "nt"
 SETUP_HINT = "Run tools\\setup.ps1 first." if WINDOWS else "Run tools/setup.sh first."
-# The python3 alias that the Windows Python install manager adds does not see %APPDATA%\TinyTeX,
-# though py -3 starts the same python.exe and does.
-ALIAS_HINT = (" If setup already ran, start Python with py -3, not python3: the python3 alias"
-              " cannot see %APPDATA%\\TinyTeX.") if WINDOWS else ""
+# A packaged app (the Claude desktop app) keeps a folder its processes create in %APPDATA% in its own
+# store, where a process started outside the package (its PowerShell tool, the python3 alias) does not
+# see it as %APPDATA%; the store path itself works from anywhere (#152). The glob matches every
+# packaged app's store, so the Engine names no product.
+APPDATA_STORE = "%LOCALAPPDATA%/Packages/*/LocalCache/Roaming/"
 
 
 def _search(name, env_var, patterns, usable=lambda path: True):
@@ -54,7 +55,7 @@ def _search(name, env_var, patterns, usable=lambda path: True):
     names = [name + ext for ext in (".exe", ".bat", ".cmd")] if WINDOWS else [name]
     dirs = [os.environ[env_var]] if os.environ.get(env_var) else []
     for pattern in patterns:
-        dirs += sorted(glob.glob(os.path.expandvars(os.path.expanduser(pattern))))
+        dirs += map(os.path.normpath, sorted(glob.glob(os.path.expandvars(os.path.expanduser(pattern)))))
     dirs += os.environ.get("PATH", "").split(os.pathsep)
     for d in filter(None, dirs):
         for n in names:
@@ -66,25 +67,40 @@ def _search(name, env_var, patterns, usable=lambda path: True):
 
 def _has_bbox_layout(pdftotext):
     """poppler's pdftotext has -bbox-layout; xpdf's (Git for Windows ships one) does not."""
-    run = subprocess.run([pdftotext, "-h"], capture_output=True, text=True, errors="replace")
+    try:
+        run = subprocess.run([pdftotext, "-h"], capture_output=True, text=True, errors="replace", timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
     return "-bbox-layout" in run.stdout + run.stderr
 
 
-def find_tex_bin(name):
-    found = _search(name, "TINYTEX_BIN", [
+def tex_bin(name):
+    """The TeX binary tools/resume.py would use, or None."""
+    return _search(name, "TINYTEX_BIN", [
         "~/Library/TinyTeX/bin/*/", "~/.TinyTeX/bin/*/",
-        "%APPDATA%/TinyTeX/bin/windows/", "%ProgramData%/TinyTeX/bin/windows/"])
+        APPDATA_STORE + "TinyTeX/bin/windows/", "%APPDATA%/TinyTeX/bin/windows/", "%ProgramData%/TinyTeX/bin/windows/"])
+
+
+def poppler_bin(name):
+    """The poppler binary tools/resume.py would use, or None."""
+    return _search(name, "POPPLER_BIN", [
+        "%LOCALAPPDATA%/Microsoft/WinGet/Packages/*Poppler*/*/Library/bin/",
+        "%LOCALAPPDATA%/Microsoft/WinGet/Packages/*Poppler*/*/bin/",
+        "~/scoop/apps/poppler/current/Library/bin/", "~/scoop/apps/poppler/current/bin/",
+        "%ProgramData%/chocolatey/bin/",
+        # Homebrew's, which setup may have just installed: not on PATH in a shell opened before it
+        "/opt/homebrew/bin/", "/usr/local/bin/"], _has_bbox_layout if name == "pdftotext" else lambda path: True)
+
+
+def find_tex_bin(name):
+    found = tex_bin(name)
     if not found:
-        sys.exit(f"{name} not found. {SETUP_HINT}{ALIAS_HINT}")
+        sys.exit(f"{name} not found. {SETUP_HINT}")
     return found
 
 
 def find_poppler_bin(name):
-    found = _search(name, "POPPLER_BIN", [
-        "%LOCALAPPDATA%/Microsoft/WinGet/Packages/*Poppler*/*/Library/bin/",
-        "%LOCALAPPDATA%/Microsoft/WinGet/Packages/*Poppler*/*/bin/",
-        "~/scoop/apps/poppler/current/Library/bin/", "~/scoop/apps/poppler/current/bin/",
-        "%ProgramData%/chocolatey/bin/"], _has_bbox_layout if name == "pdftotext" else lambda path: True)
+    found = poppler_bin(name)
     if not found:
         sys.exit(f"{name} (poppler) not found. {SETUP_HINT}")
     return found
@@ -108,7 +124,7 @@ def build(tex, outdir, install_missing):
     on_purpose = chosen and os.path.normcase(os.path.dirname(os.path.abspath(pdflatex))) == \
         os.path.normcase(os.path.abspath(chosen))
     if not on_purpose and "tinytex" not in os.path.realpath(pdflatex).lower():
-        print(f"warning: building with {pdflatex}, not TinyTeX. {SETUP_HINT}{ALIAS_HINT}"
+        print(f"warning: building with {pdflatex}, not TinyTeX. {SETUP_HINT}"
               " To use this TeX on purpose, set TINYTEX_BIN to its bin folder.")
     outdir = os.path.abspath(outdir)  # pdflatex runs from the .tex folder, so a relative path would point elsewhere
     os.makedirs(outdir, exist_ok=True)

@@ -2,4 +2,5 @@
 # (tools/export-template.sh). One extended regex per line, matched as whole
 # words, case-insensitive. Add your name, email, phone, schools, employers,
 # projects and anything else that identifies you; the export refuses an empty
-# list. import and log append new employer and project names. Not exported.
+# list. The import, log and consolidate modes append new employer and project
+# names. Not exported.

@@ -1,0 +1,27 @@
+# Excerpts of perishable sources
+
+Read this when a fact you are writing into an entry cites an agent session: the user's words in it, or a decision reached in it ([SKILL.md › Provenance](SKILL.md#rules-for-every-mode)). The transcript is perishable (Claude Code deletes it after about 30 days), so the passages the fact cites are copied into `sources/<agent>/<YYYY-MM-DD>-<slug>.md`, one file per session and topic (a forked session is a session of its own), and from then on the excerpt is the durable source the entry cites.
+
+## The key's date
+
+An excerpt's key is `<agent>-<YYYY-MM-DD>-<slug>`, its file's name, and one session keeps one date in all its files, whether the tool or you write them:
+
+- **A known session that already has a file** in `sources/<agent>/`, its `- Session:` line naming the session's id: a file with the same slug keeps its name and is added to, and a new slug takes the earliest of the session's files' dates, whatever rule chose them. So an older key is read as written; one without a `- Key date:` line was named before this rule.
+- **A known session with no file yet:** its first day in UTC, the same on every machine and in every time zone. A session is known when its transcript, or an excerpt of it, gives its id and first day.
+- **Otherwise** (the transcript is gone and no file names the session): the quote's own day, from its `(user, YYYY-MM-DD)`, a day in this machine's time zone.
+
+The file's `- Key date:` line says which it used: `another excerpt of the session`, `session start (UTC)` or `quote (session unknown)`. The `(user, YYYY-MM-DD)` beside a key is the turn's day in this machine's time zone, so it can be a day off the key's date.
+
+## Claude Code
+
+`<tool>` is `python3 -I <root>/tools/chat_export.py` (`py -3 -I` on Windows).
+
+1. **Find the transcript.** `<tool> turns` reads the newest transcript of the current directory, usually the session you are in: check that its `U<k>` lines are this session's user turns. For another session, pass `--cwd <the directory it ran in>` or the transcript's path. For the sessions behind quotes or session citations already in an entry, `<tool> find "<a few words of one sentence the user typed>" "<of another>" ... "--folder=<root folder>*"` prints each one's transcript and turn; give them all in one run. `<root folder>` is Claude Code's name for the folder of the Log's main checkout: its absolute path with every character outside `A-Za-z0-9` turned into `-` (`-Users-me-career-log` for `/Users/me/career-log`, `D--logs-career` for `D:\logs\career`), and the `*` takes in the worktrees under it. Write `--folder=` and the glob as one quoted argument, since the name can start with `-`. For the phrases it does not find, run `find` once more without `--folder`: those sessions ran in another directory. Done when you have the transcript path and the turns' labels, or that second run found nothing either and the quote goes to [Other agents and lost transcripts](#other-agents-and-lost-transcripts).
+2. **Choose the turns.** `U<k>` is the k-th turn the user typed; `A<k>` is the assistant's text after it. Keep the user turns the fact cites, whole. Keep an assistant turn only when a kept user turn cannot be understood without it, and then only its paragraphs that give the context (`A<k>:<n>-<m>`; `<tool> turns <transcript> --show <turns>` prints the turns with their paragraph numbers). Done when every kept turn is one a fact cites or one it needs for context.
+3. **Write the excerpt.** `<tool> excerpt <transcript> --keep <turns> --slug <topic> --out <root>/sources`, with a slug naming the topic (`retry-queue-design`). It writes the file, or adds the turns to the file with that slug from the same session, and prints the key `claude-code-<YYYY-MM-DD>-<slug>`, dated as [The key's date](#the-keys-date) says. A turn already in the file stays as it is, so choose an assistant turn's paragraphs once. The turns' times are UTC. Done when the tool has printed the key.
+4. **Read the file.** The tool replaces the secrets it recognises with `[redacted: <kind>]` and prints a count. Read every kept turn for a credential, token or password it missed, and replace each one the same way by hand: that is the only edit an excerpt takes. Done when no kept turn holds a secret.
+5. **Cite it** in the entry, as Provenance says, and commit the excerpt in the same commit as the line that cites it. Done when both are in one commit.
+
+## Other agents and lost transcripts
+
+An agent the tool does not read, or a quote whose transcript is already gone, gets its excerpt written by hand in the tool's format. A level-1 heading `# <agent> session <YYYY-MM-DD>: <title>` comes first. A paragraph follows it, saying where the turns came from and that only `User` turns are the user's words. Then a ``- Session: `<id or unknown>` `` line; a `- Started: <YYYY-MM-DD HH:MM> UTC` line when the session's first turn's time is known; and the `- Key date:` line. Each turn follows as a `## U<k> — User (<YYYY-MM-DD HH:MM>)` or `## A<k> — Assistant` heading over a fenced `text` block (times in UTC). For a quote copied from an entry, the paragraph says the transcript is gone and the text is the entry's quote; when the session is unknown, each quote gets its own file. Its turns are headed `## Q1 — User (<YYYY-MM-DD>)`, `## Q2 …`, cited as `<key> Q1`. Date the file as [The key's date](#the-keys-date) says, with a slug no file of the session has yet: an excerpt takes no hand edit but a redaction. The folder is the agent's name in lowercase (`codex`, `cursor`).

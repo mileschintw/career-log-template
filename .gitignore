@@ -8,6 +8,12 @@ outputs/**/*.png
 __pycache__/
 *.pyc
 
+# Browser capture: playwright-cli's skill and its output stay local (SETUP.md step 5)
+.claude/skills/playwright-cli/
+.agents/skills/playwright-cli/
+.playwright/
+.playwright-cli/
+
 # Raw chat exports stay local; only picked threads move to sources/<origin>/
 sources/inbox/*
 !sources/inbox/.gitkeep
