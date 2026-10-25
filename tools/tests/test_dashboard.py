@@ -6,6 +6,7 @@
 import importlib.util, io, json, os, shutil, subprocess, sys, tempfile, unittest
 from contextlib import redirect_stdout
 
+sys.dont_write_bytecode = True   # the tool loaded below leaves no tools/__pycache__
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.join(HERE, "..", "dashboard.py")
 spec = importlib.util.spec_from_file_location("dashboard", TOOL)
@@ -211,6 +212,17 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual(self.run_tool()[1][-1], "artifact: none")
         self.write(dashboard.ARTIFACT, "# Dashboard\n\nArtifact: https://claude.ai/artifact/abc\n")
         self.assertEqual(self.run_tool()[1][-1], "artifact: https://claude.ai/artifact/abc")
+
+    def test_artifact_writes_the_line(self):
+        url = "https://claude.ai/artifact/abc"
+        self.assertEqual(self.run_tool("--artifact", url),
+                         (0, ["wrote: outputs/dashboard/artifact.md", "artifact: " + url, "commit: dashboard: artifact"]))
+        with open(os.path.join(self.root, dashboard.ARTIFACT), encoding="utf-8", newline="") as f:
+            self.assertEqual(f.read(), "Artifact: %s\n" % url)
+        self.assertEqual(self.run_tool("--artifact", url), (0, ["unchanged: outputs/dashboard/artifact.md", "artifact: " + url]))
+        self.assertEqual(self.run_tool()[1][-1], "artifact: " + url)
+        self.assertEqual(self.run_tool("--artifact", "not-a-url")[0], 1)
+        self.assertEqual(self.run_tool("--artifact", url, "--check")[0], 2)
 
     def test_bad_declined_file(self):
         self.write("outputs/reports/scan-declined.jsonl", "not json\n")

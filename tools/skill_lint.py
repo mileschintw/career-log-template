@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Check the pointers and mode names in the skill (skills/career-log/).
+"""Check the pointers and mode names in the skill (skills/career-log/), docs/guide.md and the
+Template's front page (tools/template/README*.md).
 
   python3 -I tools/skill_lint.py [<root>]
 
@@ -11,12 +12,18 @@ Fails (exit 1, one line per problem) when, in any .md file under skills/career-l
 - a mode name appears that is not in SKILL.md's modes table: a retired name anywhere, or any name
   in a mode context (`X` mode, **X** mode, modes/X.md). A line that names it as old ("older upskill
   reports") is allowed.
+It also fails when tools/check.py's mode lists disagree with the skill: MODES is the modes table but
+NO_CHECK (the modes with no Trigger check), and NEEDS's modes with playwright-cli, but setup (which
+installs it) and browser (browser.md's own check), are the modes whose files link browser.md (a file
+modes/<mode>-<part>.md counts for <mode>).
+In docs/guide.md it also fails on a generated block that is stale or missing, or a bad row of the
+flows table (`tools/guide.py check`; `tools/guide.py write` regenerates the blocks).
 <root> defaults to the repo this script is in. Standard library only, Python 3.11+.
 
 There is no list of problems to ignore: a new check that finds breaks fixes them in the same pull
 request, or lands after the fix.
 """
-import os, re, sys
+import ast, os, re, sys
 
 SKILL = "skills/career-log"
 
@@ -24,6 +31,8 @@ SKILL = "skills/career-log"
 # here when it is removed. A name that is also an ordinary word (a removed `apply` mode) stays out:
 # the mode-context check below still catches it.
 RETIRED = ("upskill",)
+# Modes that run no Trigger check (SKILL.md › Trigger check), so tools/check.py has no MODES entry
+NO_CHECK = ("guide", "upgrade")
 
 OLD = re.compile(r"\b(old|older|former|formerly|renamed|retired|removed)\b", re.I)
 # Bare names of files that live outside the skill: the Log skeleton files in the Template, and the
@@ -124,14 +133,21 @@ class Linter:
     def add(self, path, lineno, msg):
         self.problems.append((os.path.relpath(path, self.root).replace(os.sep, "/"), lineno, msg))
 
-    def resolve_href(self, here, href):
-        """The file a relative link points at, or None for links this lint does not check."""
+    def resolve_href(self, here, href, real=None):
+        """The file a relative link points at, or None for links this lint does not check. A link
+        from a file served at `here` but kept at `real` (tools/template/) may point at another file
+        of the Template's skeleton, which the export overlays at the root."""
         if re.match(r"[a-z][a-z0-9+.-]*:", href, re.I) or "<" in href:
             return None
         path = href.split("#", 1)[0]
         if not path:
-            return here
-        return os.path.normpath(os.path.join(os.path.dirname(here), *path.split("/")))
+            return real or here
+        p = os.path.normpath(os.path.join(os.path.dirname(here), *path.split("/")))
+        if real and real != here:   # the skeleton's own file wins, as the export overlays it
+            q = os.path.normpath(os.path.join(os.path.dirname(real), *path.split("/")))
+            if os.path.exists(q):
+                return q
+        return p
 
     def resolve_name(self, here, name):
         """The file a bare name such as `direction.md` or `fit.md` means."""
@@ -148,15 +164,18 @@ class Linter:
                 return p
         return None
 
-    def target(self, here, lineno, m):
+    def target(self, here, path, lineno, m):
         if m.group("href"):
-            return self.resolve_href(here, m.group("href"))
+            return self.resolve_href(here, m.group("href"), path)
         p = self.resolve_name(here, m.group("name"))
         if p is None:
-            self.add(here, lineno, "%s: no such file" % m.group("name"))
+            self.add(path, lineno, "%s: no such file" % m.group("name"))
         return p
 
-    def check_file(self, path):
+    def check_file(self, path, at=None):
+        """Lint path; its links resolve from `at`, where the file is served (the Template's
+        front page in tools/template/ sits at the root)."""
+        here = at or path
         modes = self.modes
         fenced = False
         for lineno, line in enumerate(read(path).splitlines(), 1):
@@ -168,7 +187,7 @@ class Linter:
                 prose = re.sub(r"`[^`]*`", "", line)
                 for m in LINK.finditer(prose):
                     href = m.group(2)
-                    p = self.resolve_href(path, href)
+                    p = self.resolve_href(here, href, path)
                     if p is None:
                         continue
                     if not os.path.exists(p):
@@ -180,7 +199,7 @@ class Linter:
                             self.add(path, lineno, "link %s: no heading with that anchor" % href)
             # file.md › Section, written as a link: check its text against the file
             for m in LINKED_SECTION.finditer(line):
-                p = self.resolve_href(path, m.group("href"))
+                p = self.resolve_href(here, m.group("href"), path)
                 if p and os.path.exists(p) and p.endswith(".md") and not self.doc(p).has_label(m.group("rest"), exact=True):
                     self.add(path, lineno, "%s › %s: no such section" % (m.group("name"), m.group("rest")))
             # file.md › Section, bare or after a link
@@ -188,7 +207,7 @@ class Linter:
             text = LINKED_SECTION.sub(" ", line)
             refs = list(SECTION_REF.finditer(text))
             for i, m in enumerate(refs):
-                p = self.target(path, lineno, m)
+                p = self.target(here, path, lineno, m)
                 if p and os.path.exists(p) and p.endswith(".md"):
                     rest = text[m.end():refs[i + 1].start() if i + 1 < len(refs) else len(text)]
                     exact = bool(m.group("open")) and not m.group("close")
@@ -199,7 +218,7 @@ class Linter:
                         self.add(path, lineno, "%s › %s: no such section" % (m.group("name") or m.group("href"), shown))
             # file.md step N
             for m in STEP_REF.finditer(line):
-                p = self.target(path, lineno, m)
+                p = self.target(here, path, lineno, m)
                 if p and os.path.exists(p) and p.endswith(".md") and int(m.group("n")) not in self.doc(p).steps:
                     self.add(path, lineno, "%s step %s: no such step" % (m.group("name") or m.group("href"), m.group("n")))
             # Mode names
@@ -234,7 +253,56 @@ class Linter:
             for f in sorted(files):
                 if f.endswith(".md"):
                     self.check_file(os.path.join(d, f))
+        # The guide and the Template's front page, where they exist: their links and references,
+        # and the guide's generated blocks and flows table (tools/guide.py)
+        for f in ("README.md", "README.zh-TW.md"):
+            p = os.path.join(self.root, "tools", "template", f)
+            if os.path.exists(p):
+                self.check_file(p, at=os.path.join(self.root, f))
+        self.check_mode_lists()
+        guide_md = os.path.join(self.root, "docs", "guide.md")
+        if os.path.exists(guide_md):
+            self.check_file(guide_md)
+            for f, n, msg in guide_module().problems(self.root):
+                self.add(os.path.join(self.root, *f.split("/")), n, msg)
         return self.problems
+
+
+    def check_mode_lists(self):
+        """tools/check.py's MODES and NEEDS against the modes table and the files that link browser.md."""
+        check_py = os.path.join(self.root, "tools", "check.py")
+        if not self.modes or not os.path.exists(check_py):
+            return
+        found = {}
+        for node in ast.parse(read(check_py)).body:
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and getattr(node.targets[0], "id", None) in ("MODES", "NEEDS"):
+                found[node.targets[0].id] = (node.lineno, ast.literal_eval(node.value))
+        if set(found) != {"MODES", "NEEDS"}:
+            self.add(check_py, 0, "no MODES or NEEDS literal to compare with the modes table")
+            return
+        line, modes = found["MODES"]
+        want = self.modes - set(NO_CHECK)
+        if set(modes) != want:
+            self.add(check_py, line, "MODES differs from SKILL.md's modes table but %s: %s missing, %s extra"
+                     % (", ".join(NO_CHECK), sorted(want - set(modes)) or "none", sorted(set(modes) - want) or "none"))
+        line, needs = found["NEEDS"]
+        browser = {m for m, tools in needs.items() if any(t == "playwright-cli" for t, _ in tools)} - {"setup", "browser"}
+        linking = set()
+        for f in sorted(self.subfiles):
+            if re.search(r"\]\((?:\.\./)?browser\.md[#)]", read(os.path.join(self.skill, "modes", f + ".md"))):
+                linking.add(max((m for m in self.modes if f == m or f.startswith(m + "-")), key=len, default=f))
+        if browser != linking:
+            self.add(check_py, line, "NEEDS's modes with playwright-cli differ from the modes whose files link browser.md:"
+                     " %s only in NEEDS, %s only linking" % (sorted(browser - linking) or "none", sorted(linking - browser) or "none"))
+
+
+def guide_module():
+    """tools/guide.py beside this script: -I leaves this folder off sys.path."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("guide", os.path.join(os.path.dirname(os.path.abspath(__file__)), "guide.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def main(argv):

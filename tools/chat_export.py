@@ -2,16 +2,55 @@
 """Screen and extract AI chat-history exports for the import-chats mode.
 
   chat_export.py index <export path>... --out <work dir> [--gap 45]
-      Find every export under the paths (folders, .zip and .tar/.tgz archives, archives inside
-      those, any depth of folders), normalise them into
-      <work dir>/conversations.json and write <work dir>/index.tsv for screening:
-      n, platform, start, user turns, space, title, first prompt.
+      Find every export under the paths, normalise them into <work dir>/conversations.json and write
+      <work dir>/index.tsv for screening: n, platform, start, user turns, space, title, first prompt.
+      It looks through folders at any depth and inside .zip and .tar/.tgz archives, archives inside
+      archives too, up to {depth} deep (each nested archive is copied into <work dir>/nested while it
+      is read, and deleted afterwards). It opens files named like an export, and any other JSON whose
+      first bytes show a known shape, so a renamed export is still found; an activity page outside any
+      Takeout folder is recognised by its content. It never opens Takeout uploads, zipped or not, in any
+      language (Takeout names every upload with a '-<16 hex>' suffix), nor what operating systems leave
+      in archives: {junk}. It prints how many of each it skipped.
+      All times are converted to UTC.
+      When the same conversation is in two exports, it keeps the copy the platform changed last (its own
+      update time, when every copy has one), then the one with the later last message, then the one
+      with more messages; overlapping Takeouts keep each Gemini Apps record once, and an empty answer
+      never replaces a real one. Each warning ends with the kind of problem: [packing] (how the files
+      were packed or downloaded), [disk] (the work dir's disk) or [parser] (part of an export was
+      skipped: the parser needs a fix).
   chat_export.py show <work dir> <n>...
       Print conversations as plain text, for reading during screening.
+  chat_export.py tally <work dir> [--groups] [--date YYYY-MM-DD]
+      Read <work dir>/marks.tsv, the screening's marks: one row per conversation, its n, a tab, and
+      either a group, G<k>, or one of the leave-out categories:
+{categories}
+      A group's row adds a tab and its status once the user has answered: picked, not picked, or
+      dropped (the user said it is not theirs or does not count). A conversation with no row counts as
+      "other, not career-relevant". Prints the three lines the import log records for what was not
+      picked (`Dropped:` dated --date, default today); with --groups, each group's conversation
+      numbers and date range instead.
   chat_export.py extract <work dir> --pick 3,7,10-12 --date YYYY-MM-DD --out <log>/sources [--label chats]
+                         [--keys <log>/sources/keys.md]
       Write the picked conversations, verbatim, to sources/<folder>/<date>-<label>-threads.md
-      and <date>-<label>-prompts.md (the user's turns only), one pair per platform.
-      Refuses to overwrite: pass a new --label for a second extract on the same day.
+      and <date>-<label>-prompts.md (the user's turns only), one pair per platform, numbered T<n>.U<k>
+      in date order; Gemini Apps sessions go to sources/gemini/<date>-<label>-apps-*.md. Each extract
+      has its own key, printed: <platform>-<date>, plus -<label> for a label other than chats, since
+      every extract numbers its threads from T1. Refuses to overwrite: pass a new --label for a second
+      extract on the same day. --keys adds each extract's row to the table in that keys.md, unless its
+      key is there already.
+  chat_export.py cut <threads or prompts file> T3.U2,T5,...
+      Remove those turns (T<n>.U<k>, a user turn with the answers after it; T<n>.A<k>, a user turn on
+      another branch) or whole conversations (T<n>) from both files of an extract; every other number
+      stays as it is.
+  chat_export.py leaks <work dir> --pick 3,7,10-12 <import log>
+      Search the import log's last section (from its last level-2 heading) for the title and the first
+      {words} words of the first prompt of every conversation not picked, as fixed text, ignoring case
+      and spacing. Prints each hit with its line; whether a hit describes an unpicked conversation is
+      the reader's call.
+  chat_export.py manifest <claude-manifest-*.json> [--memories]
+      Print the download links of a Claude.ai link file as Markdown links: every part of the
+      conversations, and of the memories with --memories. It writes nothing. A file of another shape
+      prints `unknown shape:` and why.
 
 Claude Code session transcripts (one session each, ~/.claude/projects/<folder>/<session id>.jsonl):
   chat_export.py turns [<transcript>] [--show U3,A3:2-4] [--cwd <dir>] [--projects <dir>]
@@ -19,29 +58,48 @@ Claude Code session transcripts (one session each, ~/.claude/projects/<folder>/<
       after it, with its paragraph count. --show prints those turns whole, with [p<n>] paragraph marks.
       With no transcript, reads the newest one for --cwd (default: the current directory).
   chat_export.py excerpt <transcript> --keep U3,A3:2-4 --slug <slug> --out <log>/sources [--title <t>]
-      Write the kept turns to sources/claude-code/<session's first day, UTC>-<slug>.md: user turns whole,
-      assistant turns whole or only the paragraphs given, secrets redacted (a count goes to stderr).
-      Run again with the same transcript and slug to add turns; a turn already there never changes.
-      A file of the same session and slug under another date (an older key) is added to, its name kept.
-  chat_export.py find <phrase>... [--projects <dir>] [--folder=<glob>]...
-      List the user turns, in every transcript (or only those in the project folders a --folder glob
-      matches), that contain a phrase (case and spacing ignored), one line each: the phrase's number,
-      the transcript, the turn, its time. Give every phrase in one run.
+      Write the kept turns to sources/claude-code/<date>-<slug>.md: user turns whole, assistant turns
+      whole or only the paragraphs given, secrets redacted (a count goes to stderr). Run again with the
+      same transcript and slug to add turns; a turn already there never changes. Prints the key and,
+      for each kept user turn, its citation with the turn's day in this machine's time zone,
+      `(user, YYYY-MM-DD)`, which can be a day off the key's date.
+  chat_export.py quote --agent <name> --slug <slug> --session <id|unknown> [--started 'YYYY-MM-DD HH:MM']
+                       --turns <file> --note <text> --out <log>/sources [--title <t>]
+      Write an excerpt of a session this tool cannot read (another agent's, or one whose transcript is
+      gone) to sources/<agent>/<date>-<slug>.md, in the excerpt format, secrets redacted. --turns holds
+      the turns, each after a line `--- U<k> YYYY-MM-DD HH:MM` (a user turn, its time in UTC), `--- A<k>`
+      (an assistant turn) or `--- Q<n> YYYY-MM-DD` (a quote copied from an entry, dated as its
+      `(user, ...)`); an unknown session takes one quote, Q1, per file. --note is the paragraph saying
+      where the turns came from. --started is the session's first turn, in UTC. A slug the session
+      already has is refused.
+  chat_export.py find <phrase>... [--root <log>] [--projects <dir>] [--folder=<glob>]...
+      List the user turns that contain a phrase (case and spacing ignored), one line each: the phrase's
+      number, the transcript, the turn, its time, its text, and where it was found: `log` (the project
+      folders of the Log's main checkout and its worktrees, searched first) or `elsewhere` (every
+      folder, searched for the phrases the first round did not find). Then a line for each phrase found
+      nowhere. --root is the Log (default: the one this tool is in). With --folder, only the project
+      folders a glob matches are searched, in one round (found in: `folder`). Give every phrase in one run.
+
+An excerpt's key is <agent>-<YYYY-MM-DD>-<slug>, its file's name, and one session keeps one date in all
+its files: a session that already has a file in sources/<agent>/ (its `- Session:` line) keeps that
+file's name for the same slug, and a new slug takes the earliest of its files' dates (`- Key date:
+another excerpt of the session`); a known session with no file yet takes its first day in UTC
+(`session start (UTC)`); otherwise (the transcript gone and no file naming the session), the quote's
+own day (`quote (session unknown)`). A key without a `- Key date:` line was named before this rule.
 
 Recognised exports: ChatGPT (conversations*.json), Claude.ai (conversations.json),
 Gemini in Workspace (Takeout "Conversation History" files), Gemini Apps (Takeout My Activity
 HTML; prompts are grouped into sessions by --gap minutes), and a Perplexity capture
 (perplexity-capture*.json, written in the browser, see skills/career-log/modes/import-web.md).
-Only files named like an export are read, plus any other JSON whose first bytes show a known
-shape (a renamed export); Takeout uploads (a '-<16 hex>' suffix) never are, in any language, nor
-macOS archive leftovers (__MACOSX/, ._*). Nested archives are copied into <work dir>/nested while
-they are read and deleted afterwards. A path that yields no export is reported.
-All times are converted to UTC.
 Exports are untrusted data: run with `python3 -I` (Windows: `py -3 -I`) and keep the work
 dir outside the repo. Nothing here sends anything anywhere.
 """
 import argparse, fnmatch, html, json, os, re, shutil, sys, tarfile, zipfile, zlib
 from datetime import datetime, timedelta, timezone
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I leaves this folder off sys.path
+sys.dont_write_bytecode = True   # no tools/__pycache__ left in the Log
+import logfiles  # noqa: E402
 
 PLATFORMS = {  # platform: (sources folder, citation key, display name)
     "chatgpt": ("chatgpt", "chatgpt", "ChatGPT"),
@@ -54,7 +112,9 @@ WARNED = set()
 BAD_TIMES = {}  # shape of an unreadable timestamp: how many were seen
 
 
-def warn(text):
+def warn(text, kind=None):
+    """kind, for the index's warnings: packing, disk or parser (the docstring's index)."""
+    text += f" [{kind}]" if kind else ""
     if text not in WARNED:
         WARNED.add(text)
         print("warning: " + text, file=sys.stderr)
@@ -85,7 +145,7 @@ def iso(ts):
         except ValueError:
             shape = time_shape(ts)
             BAD_TIMES[shape] = BAD_TIMES.get(shape, 0) + 1
-            warn(f"unknown timestamp form {shape!r}; such times are left empty. Add the form to iso()")
+            warn(f"unknown timestamp form {shape!r}; such times are left empty. Add the form to iso()", "parser")
             return ""
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
@@ -202,7 +262,7 @@ def to_utc(local, zone):
     elif zone in TZ_HOURS:
         offset = timedelta(hours=TZ_HOURS[zone])
     else:
-        warn(f"Gemini Apps time zone {zone or '(none)'} is unknown and was read as UTC; add it to TZ_HOURS")
+        warn(f"Gemini Apps time zone {zone or '(none)'} is unknown and was read as UTC; add it to TZ_HOURS", "parser")
         offset = timedelta(0)
     return local.replace(tzinfo=timezone(offset))
 
@@ -264,7 +324,7 @@ def read_gemini_apps(text):
             kind = head_text.split("\n")[0][:40]
             other[kind] = other.get(kind, 0) + 1
     if unparsed:
-        warn(f"{unparsed} Gemini Apps records had no recognised timestamp; add the locale to TS_*")
+        warn(f"{unparsed} Gemini Apps records had no recognised timestamp; add the locale to TS_*", "parser")
     if other:
         print(f"Gemini Apps records dropped as bookkeeping: {other}", file=sys.stderr)
     return recs
@@ -373,7 +433,9 @@ try:
     READ_ERRORS = (zipfile.BadZipFile, tarfile.TarError, zlib.error, lzma.LZMAError, EOFError, OSError, RuntimeError)
 except ImportError:
     READ_ERRORS = (zipfile.BadZipFile, tarfile.TarError, zlib.error, EOFError, OSError, RuntimeError)
-JUNK = re.compile(r"(^|/)(__macosx/|\._[^/]*$|\.ds_store$|thumbs\.db$|desktop\.ini$)")
+JUNK_NAMES = ("__MACOSX/", "._*", ".DS_Store", "Thumbs.db", "desktop.ini")  # operating-system leftovers in archives
+JUNK = re.compile(r"(^|/)(" + "|".join(re.escape(n.lower()).replace(r"\*", "[^/]*") + ("" if n.endswith("/") else "$")
+                                      for n in JUNK_NAMES) + ")")
 MAX_DEPTH = 3  # archives inside archives, at most this deep
 SKIPPED_JUNK = {}  # input path: count of OS leftovers skipped
 NESTED = {"dir": None, "n": 0}  # where nested archives are copied while they are read
@@ -457,9 +519,9 @@ def files_under(path, top=None, depth=0):
         yield from archive_members(path, path, kind, top, depth)
 
 
-def problem(label, text):
+def problem(label, text, kind="packing"):
     PROBLEM_PATHS.add(label.split("!", 1)[0])  # the file on disk the problem is in
-    warn(text)
+    warn(text, kind)
 
 
 def archive_members(label, path, kind, top, depth):
@@ -540,7 +602,7 @@ def member(label, name, read, stream, size, top, depth):
     free = shutil.disk_usage(NESTED["dir"]).free
     if size > NESTED_MAX or size * 1.1 > free:
         problem(full, f"{full}: this nested archive ({size >> 20} MB) is too large to copy into the work dir "
-                      f"({free >> 20} MB free); extract it by hand into a new folder and index that")
+                      f"({free >> 20} MB free); extract it by hand into a new folder and index that", "disk")
         return
     NESTED["n"] += 1
     copy = os.path.join(NESTED["dir"], f"{NESTED['n']}.{kind}")
@@ -549,7 +611,7 @@ def member(label, name, read, stream, size, top, depth):
             copy_out(src, copy)
     except (CopyError, ReadError) as e:
         if isinstance(e, CopyError):
-            problem(full, f"{full}: could not copy it into the work dir to open it ({e}); free some space, or extract it by hand")
+            problem(full, f"{full}: could not copy it into the work dir to open it ({e}); free some space, or extract it by hand", "disk")
         else:
             problem(full, f"skipped {full}: this nested archive could not be read ({e}); download the export again")
         if os.path.exists(copy):
@@ -604,7 +666,7 @@ def detect(name, read):
             text = read().decode("utf-8", "replace")
             if 'class="outer-cell' not in text:
                 warn(f"{norm} is in a Gemini Apps folder but has no activity records (no outer-cell); "
-                     "the page format may have changed, see the Format notes in import-chats.md")
+                     "the page format may have changed, see the Format notes in import-chats.md", "parser")
                 return [], []
             return [], read_gemini_apps(text)
         if not candidate(low) and low.rsplit("/", 1)[-1] == "chat.html":
@@ -623,11 +685,11 @@ def detect(name, read):
             print(f"{norm}: read as the Gemini Apps activity page by its content", file=sys.stderr)
             return [], read_gemini_apps(read().decode("utf-8", "replace"))
         warn(f"{norm} is a My Activity page in a folder not known as Gemini Apps. If it is the Gemini Apps page "
-             "in another language, add its folder name to GEMINI_FOLDERS; it was skipped")
+             "in another language, add its folder name to GEMINI_FOLDERS; it was skipped", "parser")
         return [], []
     got = read_known(norm, read)
     if got is None:
-        warn(f"{norm} looks like an export but matches no known format; check the Format notes in import-chats.md")
+        warn(f"{norm} looks like an export but matches no known format; check the Format notes in import-chats.md", "parser")
     return got or [], []
 
 
@@ -636,7 +698,7 @@ def read_known(norm, read):
     try:
         data = json.loads(read().decode("utf-8-sig"))
     except (ValueError, UnicodeDecodeError) as e:
-        warn(f"skipped {norm}: not readable JSON ({e})")
+        warn(f"skipped {norm}: not readable JSON ({e})", "parser")
         return []
     if isinstance(data, dict) and "conversation_turns" in data:
         return read_gemini_workspace(data, norm)
@@ -738,7 +800,7 @@ def cmd_index(a):
         seen, hits = found.get(g, (0, 0))
         if not hits and not any(x == g or x.startswith(g + os.sep) for x in PROBLEM_PATHS):
             warn(f"{g}: no export found ({seen} file(s) read; uploads and OS leftovers are not read). "
-                 "If one is an export, see import-chats.md step 2")
+                 "If one is an export, see import-chats.md step 2", "packing")
     write_index(a, picks, gemini_files)
 
 
@@ -746,7 +808,7 @@ def scan(a, picks, gemini_files):
     found = {}  # group: [files seen, files with an export]
     for p in a.paths:
         if not os.path.exists(p):
-            warn(f"{p}: no such file or folder")
+            warn(f"{p}: no such file or folder", "packing")
             continue
         for label, name, read in files_under(p):
             try:
@@ -797,10 +859,11 @@ def write_index(a, picks, gemini_files):
         by[c["platform"]] = by.get(c["platform"], 0) + 1
     for top, (count, first, other) in SKIPPED_UPLOADS.items():
         also = f"; not an image: {other}" if other and other != first else ""
-        print(f"{top}: skipped {count} file(s) as Takeout uploads (e.g. {first}{also}); if one is an export, rename it",
+        print(f"{top}: skipped {count} file(s) as Takeout uploads (e.g. {first}{also}); if one is an export, "
+              "copy it under another name into a new folder in the scratch space and index that too",
               file=sys.stderr)
     for top, count in SKIPPED_JUNK.items():
-        print(f"{top}: skipped {count} operating-system leftover(s) (__MACOSX, ._*, .DS_Store)", file=sys.stderr)
+        print(f"{top}: skipped {count} operating-system leftover(s) ({', '.join(JUNK_NAMES)})", file=sys.stderr)
     for shape, count in BAD_TIMES.items():
         print(f"{count} timestamp(s) of the form {shape!r} were left empty", file=sys.stderr)
     print(f"{len(convs)} conversations {by} -> {a.out}" + (f"; skipped as empty: {empty}" if empty else ""))
@@ -872,6 +935,8 @@ def cmd_extract(a):
     taken = [f"{b}-{s}.md" for b in bases.values() for s in ("threads", "prompts") if os.path.exists(f"{b}-{s}.md")]
     if taken:
         sys.exit("refusing to overwrite " + ", ".join(taken) + ": sources are never edited; pass a new --label")
+    keys = read_keys(a.keys) if a.keys else None
+    rows = []
     for plat, cs in by.items():
         folder, key, title = PLATFORMS[plat]
         # Each extract numbers its threads from T1, so the key names the extract, not just the platform
@@ -917,6 +982,38 @@ def cmd_extract(a):
             with open(f"{base}-{suffix}.md", "x", encoding="utf-8", newline="\n") as f:
                 f.write("\n".join(lines))
         print(f"{base}-threads.md / -prompts.md: {len(cs)} conversations; key `{key} T<n>.U<k>`")
+        rel = "sources/" + os.path.relpath(base, a.out).replace(os.sep, "/")
+        unit = "session" if plat == "gemini-apps" else "conversation"
+        rows.append((key, f"| `{key} T<n>.U<k>` | `{rel}-prompts.md`: {unit} n, user turn k (full exchange: "
+                          f"`{os.path.basename(base)}-threads.md`"
+                          + ("; `T<n>.A<k>`: a user turn on another branch" if plat == "chatgpt" else "") + ") |"))
+    if keys is not None:
+        add_keys(a.keys, keys, rows)
+
+
+def read_keys(path):
+    """keys.md's lines and where its table's last row is; checked before an extract writes anything."""
+    try:
+        lines = logfiles.read_text(path).split("\n")
+    except (OSError, UnicodeDecodeError) as e:
+        sys.exit(f"--keys: cannot read {path} ({e}); nothing was written")
+    head = next((i for i, l in enumerate(lines) if logfiles.md_cells(l)[:1] == ["Key"]), None)
+    if head is None:
+        sys.exit(f"--keys: {path} has no table with a Key column; nothing was written")
+    end = head
+    while end + 1 < len(lines) and lines[end + 1].lstrip().startswith("|"):
+        end += 1
+    return lines, end
+
+
+def add_keys(path, keys, rows):
+    lines, end = keys
+    have = [l.lstrip() for l in lines if l.lstrip().startswith("|")]   # the table's rows, not a citation in its prose
+    new = [row for key, row in rows if not any(l.startswith(f"| `{key} ") for l in have)]
+    for key, _ in rows:
+        print(f"{path}: " + ("added" if any(f"`{key} " in r for r in new) else "already has") + f" the row of `{key}`")
+    if new:
+        logfiles.write_text(path, "\n".join(lines[:end + 1] + new + lines[end + 1:]))
 
 
 # Claude Code session transcripts: excerpts of the perishable sources an entry cites
@@ -956,28 +1053,15 @@ def redact(text, counts):
     return text
 
 
-def projects_dir(given):
-    if given:
-        return given
-    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-    return os.path.join(base, "projects")
-
-
-def fold(name):
-    return name.lower() if os.name == "nt" else name  # a Windows drive letter's case varies
+projects_dir = logfiles.projects_dir
+fold = logfiles.fold
 
 
 def project_folder(projects, cwd):
-    """Claude Code's folder for a working directory: every character outside [A-Za-z0-9] becomes '-';
-    a long path is cut and given a suffix, so fall back to the folders that start with its first 200."""
-    slug = re.sub(r"[^A-Za-z0-9]", "-", os.path.abspath(cwd))
-    names = os.listdir(projects) if os.path.isdir(projects) else []
-    exact = [n for n in names if fold(n) == fold(slug)]
-    if exact:
-        return os.path.join(projects, exact[0])
-    near = sorted(n for n in names if len(slug) > 200 and fold(n).startswith(fold(slug[:200])))
-    if near:
-        return os.path.join(projects, near[0])
+    """Claude Code's folder for a working directory (logfiles.find_project_folder: the rule's one copy)."""
+    found = logfiles.find_project_folder(projects, cwd)
+    if found:
+        return found
     sys.exit(f"no Claude Code transcripts for {cwd} under {projects}; pass the transcript's path")
 
 
@@ -1169,21 +1253,33 @@ def cmd_turns(a):
         print(f"{t['label']}\t{extra}\t{one_line(t['text'])[:200]}")
 
 
-def excerpt_name(folder, slug, session, start):
-    """The excerpt's file name: the session's first day (UTC) and the slug. When the session already has
-    files, their date wins, so one session keeps one date even where an earlier rule or a hand-written
-    file chose another; and a file with this slug is added to under its own name, never renamed."""
+def session_files(folder, session):
+    """The excerpts in folder whose `- Session:` line names the session, as (date, slug) pairs."""
     names = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
-    dates = []
+    out = []
     for n in names:
         m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})-([a-z0-9-]+)\.md", n)
         if m:
             with open(os.path.join(folder, n), encoding="utf-8", errors="replace") as f:
                 if f"- Session: `{session}`" in f.read():
-                    if m.group(2) == slug:
-                        return n[:-3]
-                    dates.append(m.group(1))
-    return f"{min(dates) if dates else start[:10]}-{slug}"
+                    out.append((m.group(1), m.group(2)))
+    return out
+
+
+def excerpt_name(folder, slug, session, start):
+    """The excerpt's file name: the session's first day (UTC) and the slug. When the session already has
+    files, their date wins, so one session keeps one date even where an earlier rule or a hand-written
+    file chose another; and a file with this slug is added to under its own name, never renamed."""
+    files = session_files(folder, session)
+    for date, s in files:
+        if s == slug:
+            return f"{date}-{s}"
+    return f"{min(d for d, _ in files) if files else start[:10]}-{slug}"
+
+
+def local_day(time):
+    """A UTC ISO time's day in this machine's time zone: the date a `(user, YYYY-MM-DD)` citation gives."""
+    return datetime.fromisoformat(time).astimezone().date().isoformat() if time else "unknown"
 
 
 def cmd_excerpt(a):
@@ -1226,6 +1322,9 @@ def cmd_excerpt(a):
     if counts:
         print("redacted: " + ", ".join(f"{n} {k}" for k, n in counts.items()), file=sys.stderr)
     print(f"{path}: added {', '.join(added) or 'nothing (already there)'}; key `{key} U<k>`")
+    for label in sorted(keep, key=order):
+        if label[0] == "U":
+            print(f"`{key} {label}` (user, {local_day(by[label]['time'])})")
 
 
 def search_roots(projects, globs):
@@ -1276,36 +1375,375 @@ def may_hold(low, phrases):
     return any(all(any(f in low for f in forms) for forms in words) and rx.search(low) for words, rx in phrases)
 
 
-def cmd_find(a):
-    wants = [one_line(p).lower() for p in a.phrases]
-    raws = raw_phrases(a.phrases)
-    projects = projects_dir(a.projects)
-    hits, seen = 0, set()
-    for root, _, names in (w for r in search_roots(projects, a.folder) for w in os.walk(r)):
+claude_folder = logfiles.claude_folder
+folder_of = logfiles.folder_of
+
+
+def log_folders(projects, root):
+    """The project folders of the Log's checkouts: its main checkout's, each worktree's that git lists, and any
+    for a folder under one of the main checkout's hidden folders (.claude/worktrees/, .worktrees/), since a
+    worktree's transcripts outlive it."""
+    try:
+        paths = logfiles.checkouts(root)
+    except logfiles.LogError:
+        paths = [os.path.abspath(root)]
+    slugs = [claude_folder(p) for p in paths]
+    names = sorted(os.listdir(projects)) if os.path.isdir(projects) else []
+    return [os.path.join(projects, n) for n in names if os.path.isdir(os.path.join(projects, n))
+            and (any(folder_of(n, s) for s in slugs)
+                 or any(fold(n).startswith(fold(slugs[0] + h)) for h in ("--claude-worktrees-", "--worktrees-")))]
+
+
+def transcripts(roots, skip=()):
+    """The session transcripts under the folders, subagents' left out, and none under a folder in skip."""
+    for root, _, names in (w for r in roots for w in os.walk(r)):
+        if os.sep + "subagents" in root or any(root == s or root.startswith(s + os.sep) for s in skip):
+            continue
         for n in sorted(names):
-            if not n.endswith(".jsonl") or os.sep + "subagents" in root:
-                continue
-            p = os.path.join(root, n)
-            if raws is not None:  # parsing is the slow part: skip a file no phrase can be in
-                with open(p, "rb") as f:
-                    if not may_hold(f.read().lower(), raws):
-                        continue
-            try:
-                tr = read_transcript(p)  # read again, as text: the file is cached by now
-            except SystemExit:
-                continue
-            for t in tr["turns"]:
-                if t["label"][0] != "U":
+            if n.endswith(".jsonl"):
+                yield os.path.join(root, n)
+
+
+def search(files, wants, where, found, seen):
+    """Print each user turn of the files that holds one of wants ({phrase number: lowered phrase}), and note the
+    numbers found."""
+    raws = raw_phrases(list(wants.values()))
+    for p in files:
+        if raws is not None:  # parsing is the slow part: skip a file no phrase can be in
+            with open(p, "rb") as f:
+                if not may_hold(f.read().lower(), raws):
                     continue
-                text = one_line(t["text"]).lower()
-                for k, want in enumerate(wants, 1):
-                    if want in text and (k, t["time"], t["text"]) not in seen:  # a resumed session copies turns
-                        seen.add((k, t["time"], t["text"]))
-                        hits += 1
-                        print(f"{k}\t{p}\t{t['label']}\t{t['time'][:16]}\t{one_line(t['text'])[:120]}")
-    if not hits:
-        sys.exit(f"no user turn under {projects}{' in the folders --folder matches' if a.folder else ''} "
-                 "contains any of the phrases")
+        try:
+            tr = read_transcript(p)  # read again, as text: the file is cached by now
+        except SystemExit:
+            continue
+        for t in tr["turns"]:
+            if t["label"][0] != "U":
+                continue
+            text = one_line(t["text"]).lower()
+            for k, want in wants.items():
+                if want in text and (k, t["time"], t["text"]) not in seen:  # a resumed session copies turns
+                    seen.add((k, t["time"], t["text"]))
+                    found.add(k)
+                    print(f"{k}\t{p}\t{t['label']}\t{t['time'][:16]}\t{one_line(t['text'])[:120]}\t{where}")
+
+
+def cmd_find(a):
+    wants = {k: one_line(p).lower() for k, p in enumerate(a.phrases, 1)}
+    projects = projects_dir(a.projects)
+    found, seen = set(), set()
+    if a.folder:
+        search(transcripts(search_roots(projects, a.folder)), wants, "folder", found, seen)
+    else:
+        mine = log_folders(projects, a.root or logfiles.default_root(__file__))
+        search(transcripts(mine), wants, "log", found, seen)
+        rest = {k: w for k, w in wants.items() if k not in found}
+        if rest:
+            search(transcripts([projects], skip=mine), rest, "elsewhere", found, seen)
+    where = f"{projects}{' in the folders --folder matches' if a.folder else ''}"
+    for k in wants:
+        if k not in found:
+            print(f"{k}\tnot found under {where}")
+    if not found:
+        sys.exit(f"no user turn under {where} contains any of the phrases")
+
+
+# Screening marks (marks.tsv), the import log's three lines, and its leak check (import-chats.md steps 3 and 7)
+
+CATEGORIES = ("health", "finances and investing", "relationships", "housing", "shopping", "travel", "entertainment",
+              "called unimportant by the user", "other, not career-relevant")
+STATUSES = ("picked", "not picked", "dropped")
+LEAK_WORDS = 5  # of a first prompt, searched for as one phrase
+LEAK_SHORTEST = 3  # characters: a shorter title would match nearly every line
+
+
+def index_rows(work):
+    """index.tsv's rows as {n: {column: value}}."""
+    path = os.path.join(work, "index.tsv")
+    if not os.path.isfile(path):
+        sys.exit(f"no {path}: run index first (and keep the work dir until the import is committed)")
+    with open(path, encoding="utf-8") as f:
+        lines = f.read().split("\n")
+    cols = lines[0].split("\t")
+    return {int(r.split("\t")[0]): dict(zip(cols, r.split("\t"))) for r in lines[1:] if r.strip()}
+
+
+def read_marks(work, rows):
+    """marks.tsv as {n: (category or group, status)}; every conversation it leaves out is 'other, not career-relevant'."""
+    path = os.path.join(work, "marks.tsv")
+    if not os.path.isfile(path):
+        sys.exit(f"no {path}: write it while screening (the docstring's tally says how)")
+    marks, bad = {}, []
+    with open(path, encoding="utf-8-sig") as f:
+        for i, line in enumerate(f, 1):
+            cells = [c.strip() for c in line.rstrip("\r\n").split("\t")]
+            if not line.strip() or (i == 1 and not cells[0].isdigit()):
+                continue  # a blank line, or a header row
+            n, mark, status = (cells + ["", ""])[:3]
+            group = re.fullmatch(r"G\d+", mark)
+            why = ("n is not a number" if not n.isdigit() else
+                   "not in index.tsv" if int(n) not in rows else
+                   "marked twice" if int(n) in marks else
+                   f"not a category or a group (categories: {', '.join(CATEGORIES)}; groups: G1, G2, ...)"
+                   if not group and mark not in CATEGORIES else
+                   "only a group's row has a status" if status and not group else
+                   f"status is one of {', '.join(STATUSES)}" if status and status not in STATUSES else
+                   "more than three columns" if len(cells) > 3 else "")
+            if why:
+                bad.append(f"{path}:{i}: {why}: {line.strip()}")
+            else:
+                marks[int(n)] = (mark, status)
+    if bad:
+        sys.exit("\n".join(bad))
+    for n in rows:
+        marks.setdefault(n, ("other, not career-relevant", ""))
+    return marks
+
+
+def plural(n, word):
+    return f"{n} {word}" + ("" if n == 1 else "s")
+
+
+def cmd_tally(a):
+    rows = index_rows(a.work)
+    marks = read_marks(a.work, rows)
+    groups = {}
+    for n, (mark, status) in sorted(marks.items()):
+        if mark not in CATEGORIES:
+            groups.setdefault(mark, []).append((n, status))
+    if a.groups:
+        for g in sorted(groups, key=lambda g: int(g[1:])):
+            ns = [n for n, _ in groups[g]]
+            days = sorted(rows[n]["start_utc"][:10] for n in ns if rows[n]["start_utc"])
+            span = "no dates" if not days else days[0] if days[0] == days[-1] else f"{days[0]} to {days[-1]}"
+            print(f"{g}: {plural(len(ns), 'conversation')} ({spans(ns)}), {span} (UTC)")
+        if not groups:
+            print("no groups in marks.tsv")
+        return
+    open_rows = [f"{g}: {n}" for g, rs in groups.items() for n, status in rs if not status]
+    if open_rows:
+        sys.exit("conversations of a group with no status (picked, not picked or dropped): " + ", ".join(open_rows))
+    counts = {c: sum(m == c for m, _ in marks.values()) for c in CATEGORIES}
+    left = ", ".join(f"{c} {counts[c]}" for c in CATEGORIES if counts[c])
+    unpicked = [g for g, rs in groups.items() if any(s == "not picked" for _, s in rs)]
+    convs = sum(s == "not picked" for _, s in marks.values())
+    dropped = sum(s == "dropped" for _, s in marks.values())
+    print(f"Left out by category: {left or 'none'}")
+    print(f"Groups not picked: {plural(len(unpicked), 'group')}, {plural(convs, 'conversation')}" if unpicked
+          else "Groups not picked: none")
+    print(f"Dropped: {plural(dropped, 'conversation')} (user, {a.date or datetime.now().date().isoformat()})" if dropped
+          else "Dropped: none")
+
+
+def last_section(path):
+    """(line number, lines) of the file's last level-2 section, or of the whole file when it has none."""
+    try:
+        lines = logfiles.read_text(path).split("\n")
+    except (OSError, UnicodeDecodeError) as e:
+        sys.exit(f"cannot read {path}: {e}")
+    starts = [i for i, l in enumerate(lines) if l.startswith("## ")]
+    first = starts[-1] if starts else 0
+    return first + 1, lines[first:]
+
+
+def cmd_leaks(a):
+    rows = index_rows(a.work)
+    picks = parse_pick(a.pick)
+    bad = [n for n in picks if n not in rows]
+    if bad:
+        sys.exit(f"--pick {bad}: index.tsv has conversations 0-{max(rows, default=-1)}")
+    start, lines = last_section(a.log)
+    norm = [one_line(l).lower() for l in lines]
+    hits, short = 0, 0
+    for n, r in sorted(rows.items()):
+        if n in picks:
+            continue
+        needles = [("title", one_line(r.get("title", ""))),
+                   ("first prompt", " ".join(one_line(r.get("first_prompt", "")).split(" ")[:LEAK_WORDS]))]
+        for what, needle in needles:
+            if not needle:
+                continue
+            if len(needle) < LEAK_SHORTEST:
+                short += 1
+                continue
+            for i, l in enumerate(norm):
+                if needle.lower() in l:
+                    hits += 1
+                    print(f"{start + i}: conversation {n}'s {what} \"{needle}\": {one_line(lines[i])[:160]}")
+    where = f"{a.log} from line {start}" + (f" ({one_line(lines[0])[:80]})" if lines and lines[0].startswith("## ") else "")
+    also = f"; {short} title(s) under {LEAK_SHORTEST} characters not searched" if short else ""
+    print(f"{plural(hits, 'hit')} in {where}{also}")
+
+
+def cmd_manifest(a):
+    def unknown(why):
+        print(f"unknown shape: {why}; read {a.file} by hand (import-chats.md step 1)")
+        sys.exit(1)
+    try:
+        data = json.loads(logfiles.read_text(a.file))
+    except (OSError, ValueError, UnicodeDecodeError) as e:
+        unknown(f"not readable JSON ({e})")
+    items = data.get("data_files") if isinstance(data, dict) else None
+    if not isinstance(items, list) or not items:
+        unknown("no data_files list")
+    for i, item in enumerate(items):
+        if not isinstance(item, dict) or not all(isinstance(item.get(k), str) and item[k] for k in ("category", "filename", "export_url")) \
+                or "part" not in item:
+            unknown(f"data_files[{i}] lacks one of category, part, filename, export_url")
+        if not item["export_url"].startswith("https://"):
+            unknown(f"data_files[{i}]'s export_url is not an https link")
+    want = ("conversations", "memories") if a.memories else ("conversations",)
+    got = sorted((want.index(i["category"]), str(i["part"]).zfill(6), i["filename"], i["export_url"])
+                 for i in items if i["category"] in want)
+    if not any(w == 0 for w, *_ in got):
+        unknown("no conversations item")
+    for _, _, name, url in got:
+        print(f"- [{name}]({url})")
+    rest = sorted(i["filename"] for i in items if i["category"] not in want)
+    if rest:
+        print(f"Not needed: {', '.join(rest)}")
+    print("Give the user these links to open in the browser signed in to the same Claude account and save into "
+          "sources/inbox/claude/: each expires 24 hours after the export was made and may work only once. Never "
+          "open or download them yourself, and never write them into the repo or the import log.")
+
+
+# An extract's turns, cut before it is committed (import-chats.md step 5)
+
+EXTRACT_HEADING = re.compile(r"(?:## (T\d+): |### (T\d+\.U\d+) — |### (T\d+): user turns on other branches|#### (T\d+\.A\d+) — )")
+
+
+def extract_blocks(text):
+    """An extract as [label, lines] blocks: the head (None), each conversation's heading (T3), each user turn
+    with the answers after it (T3.U2), the heading of its other branches (T3:other) and each turn on them (T3.A1).
+    A heading inside a turn's fenced text is text."""
+    blocks, ticks = [[None, []]], None
+    for line in text.split("\n"):
+        m = EXTRACT_HEADING.match(line) if ticks is None else None
+        if m:
+            label = m.group(1) or m.group(2) or m.group(4) or m.group(3) + ":other"
+            blocks.append([label, []])
+        elif ticks is None and re.fullmatch(r"`{4,}text", line):
+            ticks = line[:-4]
+        elif ticks is not None and line == ticks:
+            ticks = None
+        blocks[-1][1].append(line)
+    return blocks
+
+
+def conversation(label):
+    return re.match(r"T\d+", label).group(0) if label else None
+
+
+def cmd_cut(a):
+    m = re.fullmatch(r"(.*)-(threads|prompts)\.md", a.file)
+    if not m:
+        sys.exit(f"{a.file}: give an extract's -threads.md or -prompts.md file")
+    files = [m.group(1) + "-threads.md", m.group(1) + "-prompts.md"]
+    labels = [p.strip() for p in a.turns.split(",") if p.strip()]
+    if not labels or any(not re.fullmatch(r"T\d+(?:\.[UA]\d+)?", x) for x in labels):
+        sys.exit(f"{a.turns}: give turns and conversations like T3.U2,T3.A1,T5")
+    out = {}
+    for path in files:
+        try:
+            blocks = extract_blocks(logfiles.read_text(path))
+        except (OSError, UnicodeDecodeError) as e:
+            sys.exit(f"cannot read {path}: {e}")
+        have = {b[0] for b in blocks}
+        missing = [x for x in labels if x not in have]
+        if missing:
+            sys.exit(f"{path} has no {', '.join(missing)}; nothing was cut")
+        kept = [b for b in blocks if b[0] not in labels and conversation(b[0]) not in labels]
+        branches = {conversation(b[0]) for b in kept if b[0] and ".A" in b[0]}
+        kept = [b for b in kept if not (b[0] or "").endswith(":other") or conversation(b[0]) in branches]
+        out[path] = "\n".join(line for b in kept for line in b[1])
+    for path, text in out.items():
+        logfiles.write_text(path, text)
+    print(f"cut {', '.join(labels)} from {files[0]} and {files[1]}; every other number is unchanged")
+
+
+def quote_turns(path):
+    """The --turns file of `quote` as [{label, time, text}]."""
+    head = re.compile(r"--- (?:(U\d+) (\d{4}-\d{2}-\d{2} \d{2}:\d{2})|(A\d+)|(Q\d+) (\d{4}-\d{2}-\d{2}))")
+    try:
+        lines = logfiles.read_text(path).split("\n")
+    except (OSError, UnicodeDecodeError) as e:
+        sys.exit(f"cannot read {path}: {e}")
+    turns = []
+    for i, line in enumerate(lines, 1):
+        m = head.fullmatch(line.rstrip())
+        if m:
+            turns.append({"label": m.group(1) or m.group(3) or m.group(4), "time": m.group(2) or m.group(5) or "",
+                          "lines": []})
+        elif re.match(r"--- [UAQ]\d", line):
+            sys.exit(f"{path}:{i}: write `--- U<k> YYYY-MM-DD HH:MM`, `--- A<k>` or `--- Q<n> YYYY-MM-DD`")
+        elif turns:
+            turns[-1]["lines"].append(line)
+        elif line.strip():
+            sys.exit(f"{path}:{i}: text before the first `--- ` turn line")
+    for t in turns:
+        t["text"] = "\n".join(t.pop("lines")).strip()
+    labels = [t["label"] for t in turns]
+    problems = (["no turns"] if not turns else []) + [f"{t['label']} is empty" for t in turns if not t["text"]] + \
+        [f"{x} twice" for x in sorted(set(labels)) if labels.count(x) > 1]
+    if problems:
+        sys.exit(f"{path}: " + "; ".join(problems))
+    return turns
+
+
+def cmd_quote(a):
+    folder_name = re.sub(r"[^a-z0-9]+", "-", a.agent.lower()).strip("-")
+    if not re.fullmatch(r"[a-z][a-z0-9]*(?:-[a-z][a-z0-9]*)*", folder_name):
+        sys.exit(f"--agent {a.agent!r}: name the agent in letters and digits, starting with a letter (codex, cursor)")
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", a.slug):
+        sys.exit("--slug: lowercase letters, digits and single hyphens, like api-retry-design")
+    if a.started and not re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", a.started):
+        sys.exit("--started: the session's first turn as 'YYYY-MM-DD HH:MM', in UTC")
+    unknown = a.session == "unknown"
+    if unknown and a.started:
+        sys.exit("--started: an unknown session has no known start; leave it out")
+    turns = quote_turns(a.turns)
+    if unknown and [t["label"] for t in turns] != ["Q1"]:
+        sys.exit("--session unknown: each quote gets its own file, so --turns holds one turn, `--- Q1 YYYY-MM-DD`")
+    folder = os.path.join(a.out, folder_name)
+    files = [] if unknown else session_files(folder, a.session)
+    if any(s == a.slug for _, s in files):
+        sys.exit(f"the session already has a file with the slug {a.slug}: pass a new --slug")
+    if files:
+        date, key_date = min(d for d, _ in files), "another excerpt of the session"
+    elif a.started:
+        date, key_date = a.started[:10], "session start (UTC)"
+    else:
+        first = turns[0]
+        date = first["time"][:10] if first["label"][0] == "Q" else \
+            local_day(first["time"].replace(" ", "T") + ":00+00:00") if first["time"] else ""
+        if not date:
+            sys.exit("--turns: the first turn has no date, and neither the session's files nor --started give one")
+        key_date = "quote (session unknown)"
+    name = f"{date}-{a.slug}"
+    path = os.path.join(folder, name + ".md")
+    if os.path.exists(path):
+        sys.exit(f"{path} exists already (another session's): pass a new --slug")
+    key = f"{folder_name}-{name}"
+    counts = {}
+    times = any(t["label"][0] == "U" for t in turns)
+    text = (f"# {one_line(a.agent)} session {date}: {redact(one_line(a.title or a.slug), counts)}\n\n"
+            f"{one_line(a.note)} Only **User** turns are the user's own words; **Assistant** turns are AI output, "
+            f"leads only.{' Times are UTC.' if times else ''} Cite a turn as `{key} <turn>`, such as "
+            f"`{key} {turns[0]['label']}`.\n\n- Session: `{a.session}`\n"
+            + (f"- Started: {a.started} UTC\n" if a.started else "") + f"- Key date: {key_date}\n\n")
+    for t in turns:
+        head = {"U": f"User ({t['time']})", "A": "Assistant", "Q": f"User ({t['time']})"}[t["label"][0]]
+        text += f"## {t['label']} — {head}\n\n" + fence(redact(t["text"], counts)) + "\n"
+    os.makedirs(folder, exist_ok=True)
+    logfiles.write_text(path, text.rstrip("\n") + "\n")
+    if counts:
+        print("redacted: " + ", ".join(f"{n} {k}" for k, n in counts.items()), file=sys.stderr)
+    print(f"{path}: written; key `{key}`")
+    for t in turns:
+        if t["label"][0] == "U":
+            print(f"`{key} {t['label']}` (user, {local_day(t['time'].replace(' ', 'T') + ':00+00:00')})")
+        elif t["label"][0] == "Q":
+            print(f"`{key} {t['label']}` (user, {t['time']})")
 
 
 def minutes(s):
@@ -1315,10 +1753,12 @@ def minutes(s):
     return n
 
 
+__doc__ = __doc__.format(depth=MAX_DEPTH, junk=", ".join(JUNK_NAMES), words=LEAK_WORDS,
+                         categories="\n".join("        " + c for c in CATEGORIES))
+
+
 def main():
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
+    logfiles.utf8_stdout()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("index")
@@ -1336,7 +1776,26 @@ def main():
     p.add_argument("--date", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--label", default="chats")
+    p.add_argument("--keys", help="the Log's sources/keys.md: add each extract's row to its table")
     p.set_defaults(fn=cmd_extract)
+    p = sub.add_parser("cut")
+    p.add_argument("file")
+    p.add_argument("turns")
+    p.set_defaults(fn=cmd_cut)
+    p = sub.add_parser("tally")
+    p.add_argument("work")
+    p.add_argument("--groups", action="store_true")
+    p.add_argument("--date", help="the day the user dropped conversations (default: today)")
+    p.set_defaults(fn=cmd_tally)
+    p = sub.add_parser("leaks")
+    p.add_argument("work")
+    p.add_argument("--pick", required=True)
+    p.add_argument("log", help="sources/import-log.md, its new section last")
+    p.set_defaults(fn=cmd_leaks)
+    p = sub.add_parser("manifest")
+    p.add_argument("file")
+    p.add_argument("--memories", action="store_true")
+    p.set_defaults(fn=cmd_manifest)
     p = sub.add_parser("turns")
     p.add_argument("transcript", nargs="?")
     p.add_argument("--show")
@@ -1350,8 +1809,19 @@ def main():
     p.add_argument("--out", required=True)
     p.add_argument("--title")
     p.set_defaults(fn=cmd_excerpt)
+    p = sub.add_parser("quote")
+    p.add_argument("--agent", required=True)
+    p.add_argument("--slug", required=True)
+    p.add_argument("--session", required=True, help="the session's id, or unknown")
+    p.add_argument("--started", help="the session's first turn, 'YYYY-MM-DD HH:MM' in UTC")
+    p.add_argument("--turns", required=True)
+    p.add_argument("--note", required=True, help="where the turns came from")
+    p.add_argument("--out", required=True)
+    p.add_argument("--title")
+    p.set_defaults(fn=cmd_quote)
     p = sub.add_parser("find")
     p.add_argument("phrases", nargs="+")
+    p.add_argument("--root", help="the Log (default: the one this tool is in)")
     p.add_argument("--projects")
     p.add_argument("--folder", action="append", help="only project folders whose name matches this glob; "
                    "repeatable; write --folder=<glob> when it starts with '-'")

@@ -36,10 +36,10 @@ Before spawning, write the **call line** in the conversation with both slots fil
 1. **Apply the edits.** Apply every Part A edit with reason `grounding`, unless its `new_string` adds a claim the entries do not hold: then delete or narrow the original claim instead. Apply the others by judgement, and skip any that would need a fact the log lacks: ask the user for it instead, then record the answer in the entry. When the review ran in the background:
    - **It returns before the user replies:** apply it. The user's feedback then goes to the next draft.
    - **The user replies first:** wait for the review, then make both changes in one revision, so the review's `old_string` quotes still match. Where both touch the same text, the user's version stands, unless the finding is `grounding`: apply that to the user's version too, or raise it with them.
-2. **Check the changed text.** Run `write` step 7's AI-tell check and its humanizer layer ([../writing.md](../writing.md#ai-tell-check)) on every sentence step 1 changed, and put the result in the draft. The rest of the text passed them in step 7.
+2. **Check the changed text.** With step 1's edits in the draft files, run `write` step 7's **Lint the drafts** again. Then check every sentence step 1 changed, claim by claim, against each item of `write` step 7's list after **Lint the drafts**; a sentence that fails one goes back to what the entry supports, whatever the edit's reason. Then run the AI-tell check and its humanizer layer ([../writing.md](../writing.md#ai-tell-check)) on those sentences, and put the result in the draft; each humanizer call line goes in `write` step 10's `--humanizer` file. The rest of the text passed them in step 7.
 3. **Show the next draft** (`write` step 9), with a line saying what the review changed, and which findings you rejected and why.
 
-Done when every Part A edit is applied or listed as rejected with a reason, every Part B heading is addressed, and every sentence the review changed has passed the AI-tell check and, when the `humanizer` skill is available, been through the humanizer.
+Done when every Part A edit is applied or listed as rejected with a reason, every Part B heading is addressed, the lint is done again on the changed drafts, and every sentence the review changed has passed each item of `write` step 7's list and the AI-tell check and, when the `humanizer` skill is available, been through the humanizer.
 
 ## Reviewer instructions
 

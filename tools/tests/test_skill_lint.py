@@ -125,6 +125,31 @@ class SkillLint(unittest.TestCase):
         self.assertEqual(skill_lint.slug("How `tools/resume.py` finds its tools"), "how-toolsresumepy-finds-its-tools")
         self.assertEqual(skill_lint.slug("4. Skill link"), "4-skill-link")
 
+    def test_template_readme_links_resolve_as_exported(self):
+        """tools/template/README.md is served at the root: its links resolve from there, a skeleton
+        file it names (LICENSE, both.md) from tools/template/ first."""
+        readme = ("[license](LICENSE) [skill](skills/career-log/SKILL.md#modes) [setup](SETUP.md)"
+                  " [gone](missing.md) [here](#entries) [both](both.md#skeleton)\n\n## Entries\n")
+        problems = self.lint("", {"tools/template/README.md": readme, "tools/template/LICENSE": "MIT\n",
+                                  "tools/template/both.md": "## Skeleton\n", "both.md": "## Root\n"})
+        self.assertEqual(problems, [(1, "link missing.md: no such file")])
+
+    def test_check_mode_lists_match_the_skill(self):
+        """check.py's MODES is the modes table but NO_CHECK, and NEEDS's playwright-cli modes are the
+        modes whose files link browser.md, a modes/<mode>-<part>.md counting for <mode> (Finding 13)."""
+        links = "Read [browser.md](../browser.md).\n"
+        check_py = ('MODES = ["log", "fit"%s]\nNEEDS = {"fit": [("playwright-cli", "soft")]%s,'
+                    ' "setup": [("playwright-cli", "soft")], "browser": [("playwright-cli", "soft")]}\n')
+        tree = {"skills/career-log/modes/fit-several.md": links, "skills/career-log/browser.md": "# Browser\n",
+                "tools/check.py": check_py % ("", "")}
+        self.assertEqual(self.lint("", tree), [])
+        problems = self.lint("", dict(tree, **{"tools/check.py": check_py % (', "deploy"', "")}))
+        self.assertTrue(any("MODES differs" in m and "deploy" in m for _, m in problems), problems)
+        problems = self.lint(links, tree)   # log links browser.md, but NEEDS has no log
+        self.assertTrue(any("['log'] only linking" in m for _, m in problems), problems)
+        problems = self.lint("", dict(tree, **{"tools/check.py": check_py % ("", ', "log": [("playwright-cli", "soft")]')}))
+        self.assertTrue(any("['log'] only in NEEDS" in m for _, m in problems), problems)
+
     def test_repo_skill_passes(self):
         """The skill in this repo passes the lint as committed."""
         p = subprocess.run([sys.executable, "-I", TOOL], capture_output=True, text=True, encoding="utf-8")

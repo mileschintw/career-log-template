@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Check that .export-deny covers every employer and project name the Log records.
 
-  python3 -I <root>/tools/deny_coverage.py [<root>]
-  python3 -I <root>/tools/deny_coverage.py line [--to <root>/.export-deny] <name>...
-  python3 -I <root>/tools/deny_coverage.py entry [--to <root>/.export-deny] <entry file>...
+  python3 -I <root>/tools/deny_coverage.py [--root <root>]
+  python3 -I <root>/tools/deny_coverage.py line [--root <root>] [--to <root>/.export-deny] [--commit] <name>...
+  python3 -I <root>/tools/deny_coverage.py entry [--root <root>] [--to <root>/.export-deny] [--commit] <entry file>...
+  python3 -I <root>/tools/deny_coverage.py clear [--root <root>] <name>
+
+<root> is the Log's root, by default the folder above this script's.
 
 tools/export-template.sh runs this before it builds the Template, in the Template's source only
 (the repo with .export-allow): the export scan catches a Log name in an Engine file only when
@@ -11,37 +14,63 @@ tools/export-template.sh runs this before it builds the Template, in the Templat
 them.
 
 Names are read from:
-- the front matter of each entry (tools/entries.py says which files are entries): `org`; the part
-  of `title` before ` — `; each path segment of a GitHub or GitLab URL in `links` (owner, groups,
-  repo) that has a letter or digit;
+- the front matter of each entry (tools/entries.py says which files are entries): `org`; `title`:
+  the part before ` — `, and a title with no ` — ` as one name, unsplit, only when `org` is
+  missing or empty or each of its items is `personal` or a GAP with no name beside it (`none`
+  and `n/a` do not count); each path segment of a GitHub or GitLab URL in `links` (owner, groups, repo) that has
+  a letter or digit. Each value and each list item (inline `[a, "b, c"]` or `  - a`)
+  is read as logfiles.front_matter reads it: a quoted one whole, `#` included (`"Acme #1 Labs"`),
+  an unquoted one up to a ` #` comment;
 - the Company, Employer, Event / company, Organisation and Institution columns (and their Chinese
   headers) of every table in applications.md, profile.md and outputs/reports/*-ranking.md;
 - folder names under outputs/applications/, without the date.
 
-A field holds free text, so it is split at commas, semicolons, parentheses and ` — `, and these
-pieces are dropped: quoted text, a piece that says GAP, `personal`, `none`, `n/a`, and a season and
-year (`Spring 2031`). In a table cell, prose (lowercase plain words, as in `the open day`) is
-dropped too. A leading connector (`sponsored by`, `with`) is cut from a piece.
+A field holds free text, so it is split at commas, semicolons, parentheses and ` — `, except an
+`org` value or list item written in quotes (`"Acme, Inc"`) and a title read whole, each one name.
+These pieces are dropped: quoted text inside a field, a piece that says GAP, `personal`, `none`,
+`n/a`, and a season and year (`Spring 2031`). In a table cell, prose (lowercase plain words, as in
+`the open day`) is dropped too. A leading connector (`sponsored by`, `with`) is cut from a piece.
 
 A name is covered when a .export-deny pattern matches it as the export scan does (whole words,
 case-insensitive), or when it is a line of .export-cleared: names the maintainer has decided are
 safe in the Template, matched exactly, ignoring case. Neither list is exported. A pattern that
 matches only part of a name covers it: `Labs` covers `Acme Labs`.
 
-Prints `OK: .export-deny covers <n> recorded names` (exit 0), or each name it does not cover, with
-the file it was found in and, when it differs from the name, the `deny:` line for .export-deny: one
-that also matches the name with other ASCII separators, or none unless a run is one character
-(`acme-co` and `acmeco` for `Acme & Co`) (exit 1).
+Prints `OK: .export-deny covers <n> recorded names` (exit 0), or a `FAIL:` line, each name it does
+not cover, indented, with the file it was found in and, when it differs from the name, the `deny:`
+line for .export-deny: one that also matches the name with other ASCII separators, or none unless a
+run is one character (`acme-co` and `acmeco` for `Acme & Co`); then a `run:` line, `line --commit`
+with those names (one more for the names that are folders under outputs/applications/, whose
+employer goes in its place), and how to clear a name (exit 1).
 `line` prints the deny: line for each name given, one per line, even when it is the name itself. With
 --to it also adds each one not already there to that file, in UTF-8 with LF line ends (exit 0;
 exit 2 with no name, an empty one, or no such file, and for a name made only of quotes, brackets,
 `*`, `@` and backticks, such as `@`, which leaves no line).
 `entry` prints the deny: line for each name the given entry files record (as above) that the
-.export-deny given by --to (or this script's Log's) and the .export-cleared beside it do not cover;
-with --to it also adds them, as `line` does. The log mode runs it on each entry it creates, the
-import mode on each entry it creates or changes, and the consolidate mode on each entry it creates
-or whose `org`, `title` or `links:` it changes. With nothing to add it prints `OK: ...` (exit 0;
-exit 2 with no entry file, one that is not there, or one not in UTF-8).
+.export-deny given by --to (or <root>'s) and the .export-cleared beside it do not cover; a relative
+<entry file> such as `entries/2031-04-widget.md` that is not a file from the current folder is read
+against <root>; with --to it also adds them, as `line` does. The log mode runs it on each entry it
+creates, the import mode on each entry it creates or changes, and the consolidate mode on each entry
+it creates or whose `org`, `title` or `links:` it changes. With nothing to add it prints `OK: ...`
+(exit 0; exit 2 with no entry file, one that is not there, or one not in UTF-8).
+--commit (`line`, `entry`): adds the lines to <root>'s .export-deny (--to may name only that file),
+then commits that file alone and pushes it through tools/sync.py commit, whose lines it prints after
+its own: subject `export-deny: names from <entry file names, comma-separated>` (`entry`) or
+`export-deny: add <names>` (`line`), or `<n> entries` / `<n> names` for more than three. The last
+line is sync.py's: `sync: ok` (exit 0) or a `next: stop:` line (exit 1). With nothing to add it
+prints `OK: ...` and commits nothing.
+`clear` moves a name the user cleared for export: it adds the name alone to .export-cleared and
+commits and pushes that file (`export-cleared: <name>`), and only then takes out the .export-deny
+lines that are the name or its deny: line and commits that file (`export-deny: clear <name>`), so
+every commit pushed covers the name. A recorded name that only the removed line covered gets its own
+deny: line in that commit (`kept covered: <line>`), or a `note:` to ask the user about clearing it
+too when that line would match the cleared name. It prints sync.py's lines for each commit, and a
+`note:` when another .export-deny line still matches the name; it ends as sync.py does (exit 0 or
+1). Run again after it stopped, it commits and pushes what is left. When no line is the name or its
+deny: line and the name is not in .export-cleared, it prints a `FAIL:` line naming the lines that
+match it and changes nothing (exit 2), or, when no line matches it and the Log records it, only adds
+it to .export-cleared and commits that; when the name is cleared already and nothing is left to commit
+or push, `OK: ...` (exit 0).
 Exit 2: no .export-deny, one that starts with a byte order mark, a pattern this script cannot read as
 grep -E does, or a file not in UTF-8.
 Every failure it checks for prints a line that starts with `FAIL:` and says what is wrong (exit 1
@@ -54,6 +83,9 @@ import os, re, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I leaves this folder off sys.path
 sys.dont_write_bytecode = True   # no tools/__pycache__ left in the Log
 import entries as entry_files
+import logfiles
+# Moved to logfiles.py; kept here under their old names
+from logfiles import URL_END, repo_segments
 
 DENY = ".export-deny"
 CLEARED = ".export-cleared"
@@ -70,11 +102,6 @@ GAP = re.compile(r"\bGAP\b")
 SEASON = re.compile(r"(?i)(?:spring|summer|fall|autumn|winter) \d{4}")
 PROSE = re.compile(r"[a-z0-9 '-]* [a-z0-9 '-]*")
 CONNECTOR = re.compile(r"^(?:(?:the user was at|sponsored by|built for|with|for|at|on|by|via|from) )+(?=\S)")
-URL = re.compile(r"https?://(?:www\.)?(?:github\.com|gitlab\.[^/\s]+)/([^\s,\]#?]+)")
-URL_END = {"-", "tree", "blob", "issues", "pulls", "pull", "wiki", "releases", "commit", "commits",
-           "tags", "actions", "compare"}
-CELL = re.compile(r"(?<!\\)\|")
-DATED = re.compile(r"^\d{4}-\d{2}-\d{2}-")
 # grep -E bracket classes, in Python's syntax
 POSIX = {"[:alpha:]": "a-zA-Z", "[:digit:]": "0-9", "[:alnum:]": "a-zA-Z0-9", "[:upper:]": "A-Z",
          "[:lower:]": "a-z", "[:space:]": r"\s", "[:blank:]": r" \t", "[:punct:]": r"!-/:-@\[-`{-~",
@@ -87,9 +114,10 @@ class Unreadable(Exception):
     pass
 
 
-def pieces(value, prose=False):
-    """The names in one field's text; prose=True also drops lowercase phrases (table cells)."""
-    for piece in SPLIT.split(QUOTED.sub("", value)):
+def pieces(value, prose=False, whole=False):
+    """The names in one field's text; prose=True also drops lowercase phrases (table cells), and
+    whole=True reads the text as one name, unsplit (a quoted value)."""
+    for piece in [value] if whole else SPLIT.split(QUOTED.sub("", value)):
         piece = piece.strip(" *`'\".:@[]")
         if (not re.search(r"[^\W_]", piece) or GAP.search(piece) or piece.lower() in PLACEHOLDERS
                 or SEASON.fullmatch(piece) or (prose and PROSE.fullmatch(piece))):
@@ -97,50 +125,24 @@ def pieces(value, prose=False):
         yield CONNECTOR.sub("", piece).lstrip("@")
 
 
-def front_matter(text):
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return []
-    for i, line in enumerate(lines[1:], 1):
-        if line.strip() == "---":
-            return lines[1:i]
-    return []
-
-
-def unquote(value):
-    value = value.strip()
-    if len(value) > 1 and value[0] == value[-1] and value[0] in "\"'":
-        return value[1:-1]
-    return value
-
-
-def repo_segments(value):
-    names = []
-    for path in URL.findall(value):
-        for i, seg in enumerate(path.split("/")):
-            if i >= 2 and seg in URL_END:
-                break
-            seg = re.sub(r"\.git$", "", seg)
-            if re.search(r"[^\W_]", seg):   # a segment with no letter or digit (`@`) names nothing
-                names.append(seg)
-    return names
+def no_org(items):
+    """Whether an entry's `org` items name no one: none at all, or each one `personal` or a GAP."""
+    return all(value.strip(" *`'\"").lower() in ("", "personal")
+               or (GAP.search(value) and not list(pieces(value, whole=quoted)))
+               for key, value, quoted in items if key == "org")
 
 
 def entry_names(text):
-    names, key = [], None
-    for line in front_matter(text):
-        m = re.match(r"([A-Za-z_]+):\s*(.*)$", line)
-        if m:
-            key, value = m.group(1), m.group(2)
-        elif re.match(r"\s+- ", line):
-            value = line.strip()[2:]
-        else:
-            continue
-        value = unquote(re.sub(r"\s+#.*$", "", value))
+    items = logfiles.front_matter_items(text, closed=True)
+    whole_title = no_org(items)
+    names = []
+    for key, value, quoted in items:
         if key == "org":
-            names += pieces(value)
+            names += pieces(value, whole=quoted)
         elif key == "title" and " — " in value:
             names += pieces(value.split(" — ")[0])
+        elif key == "title" and whole_title:
+            names += pieces(value, whole=True)
         elif key == "links":
             names += repo_segments(value)
     return names
@@ -148,27 +150,19 @@ def entry_names(text):
 
 def table_names(text):
     """The names in a file's tables, and whether any table had a column this script reads."""
-    names, header, read_any = [], None, False
-    for line in text.splitlines():
-        line = line.strip()
-        if not line.startswith("|"):
-            header = None
-            continue
-        cells = [c.strip() for c in CELL.split(line.strip("|"))]
-        if header is None:
-            header = [c.strip("*` ").lower() for c in cells]
-            read_any = read_any or any(h in COLUMNS for h in header)
-        elif not set("".join(cells)) <= set("-: "):
-            for i, h in enumerate(header):
+    names, read_any = [], False
+    for table in logfiles.md_tables(text):
+        read_any = read_any or any(h in COLUMNS for h in table.header)
+        for _, cells in table.rows:
+            for i, h in enumerate(table.header):
                 if h in COLUMNS and i < len(cells):
-                    names += pieces(cells[i].replace("\\|", "|"), prose=True)
+                    names += pieces(cells[i], prose=True)
     return names, read_any
 
 
 def read(path):
     try:
-        with open(path, encoding="utf-8-sig") as f:
-            return f.read()
+        return logfiles.read_text(path)
     except UnicodeDecodeError as e:
         raise Unreadable(f"{path} is not UTF-8 ({e})")
 
@@ -196,8 +190,9 @@ def recorded(root, notes=None):
                              f" ({', '.join(sorted(COLUMNS))})")
     apps = os.path.join(root, APPLICATIONS)
     for name in sorted(os.listdir(apps)) if os.path.isdir(apps) else []:
-        if os.path.isdir(os.path.join(apps, name)) and DATED.sub("", name):
-            add([DATED.sub("", name)], "outputs/applications/" + name)
+        rest = logfiles.split_dated(name)[1]
+        if os.path.isdir(os.path.join(apps, name)) and rest:
+            add([rest], "outputs/applications/" + name)
     return list(found.values())
 
 
@@ -268,7 +263,8 @@ def deny_line(name):
 
 
 def append_lines(path, new):
-    """Add each line the file lacks (ignoring case, as the scan does), as UTF-8 with LF line ends."""
+    """Add each line the file lacks (ignoring case, as the scan does), as UTF-8 with LF line ends; the
+    lines added."""
     with open(path, "rb") as f:
         if f.read(3) == b"\xef\xbb\xbf":
             raise Unreadable(f"{path} starts with a byte order mark; save it as UTF-8 without one")
@@ -278,6 +274,7 @@ def append_lines(path, new):
     if add:
         with open(path, "a", encoding="utf-8", newline="\n") as f:
             f.write(("\n" if text and not text.endswith("\n") else "") + "\n".join(add) + "\n")
+    return add
 
 
 def deny_patterns(deny):
@@ -296,14 +293,45 @@ def deny_patterns(deny):
     return patterns
 
 
-def entry_command(args):
-    """`entry [--to <.export-deny>] <entry file>...`: the deny: lines the entries' uncovered names need."""
-    to = args[1] if args[:1] == ["--to"] and len(args) > 1 else None
-    files = args[2:] if to else args
-    if not files or any(not f.strip() or f.startswith("-") for f in files):
-        print("usage: deny_coverage.py entry [--to <.export-deny>] <entry file>...  (--to first)")
+def options(args):
+    """(the --to file or None, whether --commit was given, the rest), from options before the rest."""
+    to, commit = None, False
+    while args[:1] == ["--commit"] or (args[:1] == ["--to"] and len(args) > 1 and args[1].strip() and to is None):
+        if args[0] == "--commit":
+            commit, args = True, args[1:]
+        else:
+            to, args = args[1], args[2:]
+    return to, commit, args
+
+
+def root_deny(deny, root):
+    return os.path.normcase(os.path.abspath(deny)) == os.path.normcase(os.path.abspath(os.path.join(root, DENY)))
+
+
+def listed(items, many):
+    """Up to three items, comma-separated, or `<n> <many>`: a commit subject's tail."""
+    return ", ".join(items) if len(items) <= 3 else f"{len(items)} {many}"
+
+
+def commit(root, subject, path):
+    """Commit and push the one file through sync.py, which prints its own lines; its exit code."""
+    import sync
+    return sync.main(["sync.py", "--root", root, "commit", subject, "--", path])
+
+
+def entry_command(args, root):
+    """`entry [--to <.export-deny>] [--commit] <entry file>...`: the deny: lines the entries' uncovered
+    names need."""
+    to, commit_too, files = options(args)
+    if (not files or any(not f.strip() or f.startswith("-") for f in files)
+            or (commit_too and to and not root_deny(to, root))):
+        print("usage: deny_coverage.py entry [--root <root>] [--to <.export-deny>] [--commit] <entry file>..."
+              "  (options first; --commit writes <root>'s .export-deny only)")
         return 2
-    deny = to or os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", DENY))
+    deny = to or os.path.join(root, DENY)
+    # A relative path that is no file from the current folder is read against root, as entries.py does
+    files = [f if os.path.isabs(f) or os.path.isfile(f) or not os.path.isfile(os.path.join(root, f))
+             else os.path.join(root, f) for f in files]
     for path in [deny] + files:
         if not os.path.isfile(path):
             print(f"FAIL: no {path}")
@@ -321,8 +349,8 @@ def entry_command(args):
             if line and line.lower() not in seen:
                 seen.add(line.lower())
                 out.append(line)
-        if to and out:
-            append_lines(to, out)
+        if (to or commit_too) and out:
+            append_lines(deny, out)
     except Unreadable as e:
         print(f"FAIL: {e}")
         return 2
@@ -330,44 +358,146 @@ def entry_command(args):
         print(f"OK: {DENY} and {CLEARED} cover the {len(names)} names these entries record")
     for line in out:
         print(line)
+    if commit_too and out:
+        names = [os.path.basename(f) for f in dict.fromkeys(files)]
+        return commit(root, f"export-deny: names from {listed(names, 'entries')}", DENY)
     return 0
 
 
+def line_command(args, root):
+    """`line [--to <.export-deny>] [--commit] <name>...`: each name's deny: line."""
+    to, commit_too, names = options(args)
+    if (not names or any(not n.strip() or n.startswith("-") or re.search(r"[\x00-\x1f\x7f]", n) for n in names)
+            or (commit_too and to and not root_deny(to, root))):
+        print("usage: deny_coverage.py line [--root <root>] [--to <.export-deny>] [--commit] <name>...  (options"
+              " first; --commit writes <root>'s .export-deny only; a name is not empty, does not start with -,"
+              " and has no control character)")
+        return 2
+    deny = to or (os.path.join(root, DENY) if commit_too else None)
+    if deny and not os.path.isfile(deny):
+        print(f"FAIL: no {deny}")
+        return 2
+    out = [deny_line(n) for n in names]
+    empty = [n for n, line in zip(names, out) if not line]
+    if empty:
+        print(f"FAIL: no deny: line for {', '.join(repr(n) for n in empty)}: a name made only of"
+              f" quotes, brackets, `*`, `@` and backticks leaves none. Nothing was added.")
+        return 2
+    added = []
+    if deny:
+        try:
+            added = append_lines(deny, out)
+        except Unreadable as e:
+            print(f"FAIL: {e}")
+            return 2
+    for line in out:
+        print(line)
+    if commit_too and not added:
+        print(f"OK: {DENY} has every line already; nothing to commit")
+    elif commit_too:
+        return commit(root, f"export-deny: add {listed(list(dict.fromkeys(names)), 'names')}", DENY)
+    return 0
+
+
+def clear_command(args, root):
+    """`clear <name>`: the name moves from .export-deny to .export-cleared, one commit for each file."""
+    if len(args) != 1 or not args[0].strip() or args[0].startswith("-") or re.search(r"[\x00-\x1f\x7f]", args[0]):
+        print("usage: deny_coverage.py clear [--root <root>] <name>  (one name: not empty, does not start"
+              " with -, and has no control character)")
+        return 2
+    name = args[0].strip()
+    deny, cleared = os.path.join(root, DENY), os.path.join(root, CLEARED)
+    if not os.path.isfile(deny):
+        print(f"FAIL: no {DENY} in {root}")
+        return 2
+    try:
+        patterns = deny_patterns(deny)
+        text = read(deny)
+        mine = {name.lower(), ere_escape(name).lower(), (deny_line(name) or name).lower()}
+        keep = [l for l in text.splitlines(keepends=True) if l.strip().lower() not in mine]
+        if len(keep) == len(text.splitlines(keepends=True)):
+            if name.lower() in {c.lower() for c in lines(cleared)}:
+                if not pending(root):
+                    print(f"OK: {name} is in {CLEARED} and has no {DENY} line; nothing to commit")
+                    return 0
+                # cleared before, and its line already out: a commit or push that stopped then
+                rc = commit(root, f"export-cleared: {name}", CLEARED)
+                return rc if rc != 0 else commit(root, f"export-deny: clear {name}", DENY)
+            matching = [p for p, c in zip(lines(deny), patterns) if c.search(name)]
+            if not matching and name.lower() in {n.lower() for n, _ in recorded(root)}:
+                # no line denies it: a spelling the clearing of another name left uncovered (`Yahoo!`)
+                if os.path.isfile(cleared):
+                    append_lines(cleared, [name])
+                else:
+                    logfiles.write_text(cleared, name + "\n")
+                return commit(root, f"export-cleared: {name}", CLEARED)
+            print(f"FAIL: no {DENY} line is {name!r} or its deny: line {deny_line(name)!r}"
+                  + (f"; the lines that match it: {', '.join(matching)}" if matching else ", and the Log records"
+                     " no such name") + ". Nothing was changed.")
+            return 2
+        # a name the removed line covered stays covered, by its own deny: line
+        left = [compile_pattern(l.strip()) for l in keep if l.strip() and not l.strip().startswith("#")]
+        was = {n.lower() for n, _ in uncovered(recorded(root), patterns, lines(cleared))}
+        lost = [n for n, _ in uncovered(recorded(root), left, lines(cleared) + [name]) if n.lower() not in was]
+        cover, also = [], []   # a line that matches the cleared name would deny it again
+        for n in lost:
+            line = deny_line(n)
+            if line and line.lower() not in mine and not compile_pattern(line).search(name):
+                cover.append(line)
+            else:
+                also.append(n)
+        cover = list(dict.fromkeys(cover))
+        if os.path.isfile(cleared):
+            append_lines(cleared, [name])
+        else:
+            logfiles.write_text(cleared, name + "\n")
+    except Unreadable as e:
+        print(f"FAIL: {e}")
+        return 2
+    # .export-cleared first, so that every commit pushed covers the name
+    rc = commit(root, f"export-cleared: {name}", CLEARED)
+    if rc != 0:
+        return rc
+    body = "".join(keep)
+    logfiles.write_text(deny, body + ("\n" if body and not body.endswith("\n") else "") + "".join(l + "\n" for l in cover))
+    for line in cover:
+        print(f"kept covered: {line}")
+    for n in also:
+        print(f"note: {n!r} is no longer covered, and its deny: line would match {name!r}: ask the user"
+              f" whether to clear it too (clear {logfiles.shell_arg(n)})")
+    still = [p for p, c in zip(lines(deny), deny_patterns(deny)) if c.search(name)]
+    if still:
+        print(f"note: {DENY} still has {', '.join(still)}, which the export's scan matches against {name!r} too")
+    return commit(root, f"export-deny: clear {name}", DENY)
+
+
+def pending(root):
+    """Whether .export-deny or .export-cleared differs from HEAD, or HEAD is not on its upstream."""
+    if logfiles.git_run(root, "status", "--porcelain", "--", DENY, CLEARED).stdout.strip():
+        return True
+    p = logfiles.git_run(root, "rev-list", "--count", "@{upstream}..HEAD")
+    return p.returncode != 0 or p.stdout.strip() != "0"
+
+
 def main(argv):
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
+    logfiles.utf8_stdout()
     if "-h" in argv[1:] or "--help" in argv[1:]:
         print(__doc__.rstrip())
         return 0
-    if len(argv) > 1 and argv[1] == "line":
-        to = argv[3] if argv[2:3] == ["--to"] and len(argv) > 3 else None
-        names = argv[4:] if to else argv[2:]
-        if not names or any(not n.strip() or n.startswith("-") or re.search(r"[\x00-\x1f\x7f]", n)
-                            for n in names):
-            print("usage: deny_coverage.py line [--to <.export-deny>] <name>...  (--to first; a name is"
-                  " not empty, does not start with -, and has no control character)")
-            return 2
-        if to and not os.path.isfile(to):
-            print(f"FAIL: no {to}")
-            return 2
-        out = [deny_line(n) for n in names]
-        empty = [n for n, line in zip(names, out) if not line]
-        if empty:
-            print(f"FAIL: no deny: line for {', '.join(repr(n) for n in empty)}: a name made only of"
-                  f" quotes, brackets, `*`, `@` and backticks leaves none. Nothing was added.")
-            return 2
-        if to:
-            try:
-                append_lines(to, out)
-            except Unreadable as e:
-                print(f"FAIL: {e}")
-                return 2
-        for line in out:
-            print(line)
-        return 0
-    if len(argv) > 1 and argv[1] == "entry":
-        return entry_command(argv[2:])
-    root = argv[1] if len(argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+    try:
+        root, argv = logfiles.split_root(argv[1:], __file__)
+    except logfiles.LogError as e:
+        print(f"usage: deny_coverage.py [--root <root>]: {e}")
+        return 2
+    argv = ["deny_coverage.py"] + argv
+    commands = {"line": line_command, "entry": entry_command, "clear": clear_command}
+    if len(argv) > 1 and argv[1] in commands:
+        return commands[argv[1]](argv[2:], root)
+    if len(argv) > 1:
+        print("usage: deny_coverage.py [--root <root>] | line [--to <.export-deny>] [--commit] <name>... |"
+              " entry [--to <.export-deny>] [--commit] <entry file>... | clear <name>  (each takes --root"
+              " <root>; the Log's root is given with --root, not on its own)")
+        return 2
     deny = os.path.join(root, DENY)
     if not os.path.isfile(deny):
         print(f"FAIL: no {DENY} in {root}")
@@ -386,17 +516,25 @@ def main(argv):
     if not missing:
         print(f"OK: {DENY} covers {len(names)} recorded names")
         return 0
-    print(f"FAIL: {DENY} does not cover {len(missing)} name(s) the Log records. Show the user the names."
-          f" Add each one's deny: text (the name itself when none is shown) to {DENY} as a new line; for"
-          f" a folder under outputs/applications/, or a phrase that names an employer (its event, its"
-          f" recruiter), add the employer's name instead. Commit {DENY} on its own straight to the"
-          f" default branch and push (AGENTS.md › Sharing). When the export's scan then fails because a"
-          f" line you added matches a common word or a tool's name in Engine text, ask the user whether"
-          f" to clear that name; on a yes, take its line out of {DENY}, add the name alone to {CLEARED},"
-          f" and commit and push both the same way:")
+    script = os.path.abspath(__file__).replace(os.sep, "/")
+    run = f"{logfiles.python_cmd()} -I {logfiles.shell_arg(script)} --root {logfiles.shell_arg(os.path.abspath(root).replace(os.sep, '/'))}"
+    folders = [n for n, where in missing if where.startswith(APPLICATIONS.replace(os.sep, "/") + "/")]
+    print(f"FAIL: {DENY} does not cover {len(missing)} name(s) the Log records. Show the user the names"
+          f" below, then run each run: line below, which adds the names' deny: lines to {DENY} and commits"
+          f" and pushes it. Before running one, put the employer's own name in place of a name that is a"
+          f" phrase naming an employer (its event, its recruiter)"
+          + (", and add the employer's name for each folder under outputs/applications/." if folders else "."))
     for name, where in missing:
         line = deny_line(name)
         print(f"  {name}    ({where})" + (f"    deny: {line}" if line != name else ""))
+    rest = [n for n, _ in missing if n not in folders]
+    if rest:
+        print(f"run: {run} line --commit {' '.join(logfiles.shell_arg(n) for n in rest)}")
+    if folders:
+        print(f"run: {run} line --commit '<employer>'   (for each folder: {', '.join(folders)})")
+    print(f"When the export's scan then fails because a line added matches a common word or a tool's"
+          f" name in Engine text, ask the user whether to clear that name; on a yes, run: {run} clear"
+          f" '<name>', which moves it from {DENY} to {CLEARED} and commits each.")
     return 1
 
 

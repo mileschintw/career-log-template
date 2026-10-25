@@ -7,6 +7,7 @@
 After --update, read the diff of expected/ before committing: it is the parser's behaviour change.
 """
 import contextlib, importlib.util, io, json, os, re, shutil, subprocess, sys, tarfile, tempfile, unittest, zipfile
+from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.join(HERE, "..", "chat_export.py")
@@ -31,8 +32,9 @@ sys.path.insert(0, HERE)
 import make_fixtures  # noqa: E402  (the leak check)
 
 
-def run(*args):
-    p = subprocess.run([sys.executable, "-I", TOOL, *args], capture_output=True, text=True, encoding="utf-8")
+def run(*args, env=None):
+    p = subprocess.run([sys.executable, "-I", TOOL, *args], capture_output=True, text=True, encoding="utf-8",
+                       env=None if env is None else {**os.environ, **env})
     return p.returncode, p.stdout, p.stderr
 
 
@@ -888,6 +890,432 @@ class Transcript(Base):
         self.assertIn("key `claude-code-2030-01-05-review-level U<k>`", out)
         self.assertIn("- Key date: another excerpt of the session",
                       read(self.path("sources", "claude-code", "2030-01-05-review-level.md")))
+
+
+def load_tool():
+    """A fresh copy of chat_export, for tests that call it in-process."""
+    spec = importlib.util.spec_from_file_location("chat_export_under_test", TOOL)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def git(*args, cwd):
+    subprocess.run(["git", "-C", cwd, *args], check=True, capture_output=True)
+
+
+class FindRoot(Base):
+    """find --root: the Log's own project folders first, then every folder for the phrases not found there."""
+
+    def project(self, path, *texts):
+        folder = self.path("projects", re.sub(r"[^A-Za-z0-9]", "-", os.path.realpath(path)))
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, f"s{len(os.listdir(folder))}.jsonl"), "w", encoding="utf-8") as f:
+            f.write("\n".join(line("user", t, i, turnOrigin="human") for i, t in enumerate(texts)) + "\n")
+
+    @unittest.skipUnless(shutil.which("git"), "no git on PATH")
+    def test_two_rounds(self):
+        log = self.path("log")
+        os.makedirs(log)
+        git("init", "-q", cwd=log)
+        git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "x", cwd=log)
+        outside = self.path("outside-tree")
+        git("worktree", "add", "-q", outside, "-b", "topic", cwd=log)
+        self.project(log, "plum alpha in the main checkout")
+        self.project(outside, "plum beta in a worktree outside it")
+        self.project(os.path.join(log, ".claude", "worktrees", "gone"), "plum gamma in a removed worktree")
+        self.project(self.path("log-sibling"), "plum alpha next door", "plum delta next door")
+        self.project(self.path("log - Copy"), "plum alpha in a copy", "plum eta in a copy")
+        code, out, err = run("find", "plum alpha", "plum beta", "plum gamma", "plum delta", "plum zeta", "plum eta",
+                             "--root", outside, "--projects", self.path("projects"))
+        self.assertEqual(code, 0, err)
+        rows = [r.split("\t") for r in out.splitlines()]
+        found = {r[0]: r[-1] for r in rows if len(r) == 6}
+        self.assertEqual(found, {"1": "log", "2": "log", "3": "log", "4": "elsewhere", "6": "elsewhere"})  # a copy is not the Log
+        self.assertNotIn("next door", "".join(r[4] for r in rows if r[0] == "1"))  # found in the Log: not searched again
+        self.assertIn(["5", f"not found under {self.path('projects')}"], rows)
+
+    def test_folder_is_one_round(self):
+        self.project(self.path("a"), "plum one")
+        code, out, err = run("find", "plum one", "--projects", self.path("projects"), "--folder", "*")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.split("\t")[-1].strip(), "folder")
+
+
+class Dates(Base):
+    def test_excerpt_prints_each_user_turn_with_its_local_day(self):
+        jsonl = self.path("projects", "D--night", "s.jsonl")
+        os.makedirs(os.path.dirname(jsonl))
+        with open(jsonl, "w", encoding="utf-8") as f:
+            f.write(line("user", "late plum", 0, stamp="2030-01-01T23:55:00.000Z") + "\n"
+                    + line("assistant", [{"type": "text", "text": "noted"}], 0, stamp="2030-01-01T23:56:00.000Z") + "\n"
+                    + line("user", "after midnight plum", 0, stamp="2030-01-02T00:10:00.000Z") + "\n")
+        code, out, err = run("excerpt", jsonl, "--keep", "U2,A1,U1", "--slug", "night-plum", "--out", self.path("sources"))
+        self.assertEqual(code, 0, err)
+        day = lambda t: datetime.fromisoformat(t).astimezone().date().isoformat()  # this machine's zone, as the tool's
+        self.assertEqual(out.splitlines()[1:], [f"`claude-code-2030-01-01-night-plum U1` (user, {day('2030-01-01T23:55:00+00:00')})",
+                                                f"`claude-code-2030-01-01-night-plum U2` (user, {day('2030-01-02T00:10:00+00:00')})"])
+
+    @unittest.skipIf(os.name == "nt", "TZ sets the zone on macOS and Linux only")
+    def test_a_day_off_the_key(self):
+        # nine hours east of UTC both turns fall on the next day, while the key keeps the session's first day in UTC
+        jsonl = self.path("projects", "D--east", "s.jsonl")
+        os.makedirs(os.path.dirname(jsonl))
+        with open(jsonl, "w", encoding="utf-8") as f:
+            f.write(line("user", "late plum", 0, stamp="2030-01-01T23:55:00.000Z") + "\n"
+                    + line("user", "after midnight plum", 0, stamp="2030-01-02T00:10:00.000Z") + "\n")
+        code, out, err = run("excerpt", jsonl, "--keep", "U1,U2", "--slug", "east-plum", "--out", self.path("sources"),
+                             env={"TZ": "JST-9"})
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines()[1:], ["`claude-code-2030-01-01-east-plum U1` (user, 2030-01-02)",
+                                                "`claude-code-2030-01-01-east-plum U2` (user, 2030-01-02)"])
+
+
+class Quote(Base):
+    def quote(self, turns, *args):
+        path = self.path("turns.txt")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(turns)
+        return run("quote", "--turns", path, "--out", self.path("sources"),
+                   "--note", "Copied from the Codex app's history pane.", *args)
+
+    def test_known_session(self):
+        turns = "--- U1 2030-03-04 05:06\nwe kept the plum cache\n\n--- A1\nAn answer, password=hunter2hunter2\n"
+        code, out, err = self.quote(turns, "--agent", "Codex", "--slug", "plum-cache", "--session", "abc-1",
+                                    "--started", "2030-03-04 05:00", "--title", "Plum cache")
+        self.assertEqual(code, 0, err)
+        self.assertIn("redacted: 1 secret value", err)
+        path = self.path("sources", "codex", "2030-03-04-plum-cache.md")
+        self.assertIn(f"{path}: written; key `codex-2030-03-04-plum-cache`", out)
+        self.assertIn("`codex-2030-03-04-plum-cache U1` (user, ", out)
+        text = read(path)
+        self.assertTrue(text.startswith("# Codex session 2030-03-04: Plum cache\n\nCopied from the Codex app's history pane. "
+                                        "Only **User** turns are the user's own words"))
+        for want in ("- Session: `abc-1`\n- Started: 2030-03-04 05:00 UTC\n- Key date: session start (UTC)\n",
+                     "## U1 — User (2030-03-04 05:06)\n\n````text\nwe kept the plum cache\n````\n",
+                     "## A1 — Assistant\n\n````text\nAn answer, password=[redacted: secret value]\n````\n"):
+            self.assertIn(want, text)
+        # entries.py check reads it as an excerpt: the heading and the turns are what it looks for
+        self.assertRegex(text, r"^# .+ session \d{4}-\d{2}-\d{2}")
+        self.assertEqual(re.findall(r"^## ([UAQ]\d+)\b", text, re.M), ["U1", "A1"])
+        code, out, err = self.quote("--- U4 2030-03-09 10:00\nlater\n", "--agent", "codex", "--slug", "plum-ttl",
+                                    "--session", "abc-1", "--started", "2030-03-09 09:00")
+        self.assertEqual(code, 0, err)  # a new slug of the session: the earliest of its files' dates
+        self.assertIn("key `codex-2030-03-04-plum-ttl`", out)
+        self.assertIn("- Key date: another excerpt of the session", read(self.path("sources", "codex", "2030-03-04-plum-ttl.md")))
+        code, _, err = self.quote("--- U5 2030-03-09 10:00\nmore\n", "--agent", "codex", "--slug", "plum-ttl", "--session", "abc-1")
+        self.assertNotEqual(code, 0)
+        self.assertIn("already has a file with the slug plum-ttl", err)
+
+    def test_unknown_session(self):
+        code, out, err = self.quote("--- Q1 2030-05-06\nwe shipped it on a Friday\n", "--agent", "claude-code",
+                                    "--slug", "friday-ship", "--session", "unknown")
+        self.assertEqual(code, 0, err)
+        self.assertIn("key `claude-code-2030-05-06-friday-ship`", out)
+        self.assertIn("`claude-code-2030-05-06-friday-ship Q1` (user, 2030-05-06)", out)
+        text = read(self.path("sources", "claude-code", "2030-05-06-friday-ship.md"))
+        self.assertIn("- Session: `unknown`\n- Key date: quote (session unknown)\n", text)
+        self.assertIn("## Q1 — User (2030-05-06)\n", text)
+        self.assertNotIn("Times are UTC", text)
+        for turns, args, says in (
+                ("--- Q1 2030-05-06\na\n--- Q2 2030-05-06\nb\n", (), "one turn"),
+                ("--- Q1 2030-05-06\na\n", ("--started", "2030-05-06 01:00"), "no known start"),
+                ("--- U1 2030-05-06\na\n", (), "write `--- U<k> YYYY-MM-DD HH:MM`"),
+                ("stray\n--- Q1 2030-05-06\na\n", (), "text before the first"),
+                ("--- Q1 2030-05-06\n\n", (), "Q1 is empty")):
+            code, _, err = self.quote(turns, "--agent", "codex", "--slug", "other", "--session", "unknown", *args)
+            self.assertNotEqual(code, 0, turns)
+            self.assertIn(says, err)
+        code, _, err = self.quote("--- Q1 2030-05-06\na\n", "--agent", "9lives", "--slug", "x", "--session", "unknown")
+        self.assertIn("--agent", err)
+
+
+class Keys(Base):
+    KEYS = "# Source keys\n\nIntro, citing `claude-ai-2030-01-01-second T1.U1`.\n\n| Key | Points at |\n|---|---|\n| `old T<n>` | `sources/old/a.md` |\n\nAfter the table.\n"
+
+    def setUp(self):
+        super().setUp()
+        self.work, self.out = self.path("work"), self.path("log", "sources")
+        self.convs, _ = index([FIX], self.work)
+        os.makedirs(self.out)
+        self.keys = os.path.join(self.out, "keys.md")
+        with open(self.keys, "w", encoding="utf-8") as f:
+            f.write(self.KEYS)
+
+    def first(self, platform):
+        return str(next(i for i, c in enumerate(self.convs) if c["platform"] == platform))
+
+    def extract(self, pick, *extra):
+        return run("extract", self.work, "--pick", pick, "--date", "2030-01-01", "--out", self.out, "--keys", self.keys, *extra)
+
+    def test_rows(self):
+        code, out, err = self.extract(f"{self.first('chatgpt')},{self.first('gemini-apps')}")
+        self.assertEqual(code, 0, err)
+        self.assertIn(f"{self.keys}: added the row of `chatgpt-2030-01-01`", out)
+        text = read(self.keys)
+        self.assertIn("| `old T<n>` | `sources/old/a.md` |\n| `", text)
+        self.assertTrue(text.endswith(" |\n\nAfter the table.\n"), text)
+        self.assertIn("| `chatgpt-2030-01-01 T<n>.U<k>` | `sources/chatgpt/2030-01-01-chats-prompts.md`: conversation n, "
+                      "user turn k (full exchange: `2030-01-01-chats-threads.md`; `T<n>.A<k>`: a user turn on another "
+                      "branch) |\n", text)
+        self.assertIn("| `gemini-apps-2030-01-01 T<n>.U<k>` | `sources/gemini/2030-01-01-chats-apps-prompts.md`: session n, "
+                      "user turn k (full exchange: `2030-01-01-chats-apps-threads.md`) |\n", text)
+        code, out, err = self.extract(self.first("claude"), "--label", "second")
+        self.assertEqual(code, 0, err)
+        self.assertIn("`claude-ai-2030-01-01-second T<n>.U<k>` | `sources/claude/2030-01-01-second-prompts.md`", read(self.keys))
+        # a key already in keys.md is not added again (its files moved away, say, and extracted anew)
+        shutil.rmtree(os.path.join(self.out, "claude"))
+        code, out, err = self.extract(self.first("claude"), "--label", "second")
+        self.assertEqual(code, 0, err)
+        self.assertIn("already has the row of `claude-ai-2030-01-01-second`", out)
+        self.assertEqual(read(self.keys).count("| `claude-ai-2030-01-01-second "), 1)
+        # entries.py check finds every folder the extracts wrote in keys.md
+        spec = importlib.util.spec_from_file_location("entries_under_test", os.path.join(HERE, "..", "entries.py"))
+        entries = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(entries)
+        os.makedirs(os.path.join(self.out, "unlisted"))
+        with open(os.path.join(self.out, "unlisted", "x.md"), "w", encoding="utf-8") as f:
+            f.write("# x\n")
+        self.assertEqual(entries.source_folder_findings(self.path("log")), ["source folder not in keys.md: sources/unlisted/"])
+
+    def test_keys_checked_before_writing(self):
+        os.remove(self.keys)
+        code, _, err = self.extract(self.first("chatgpt"))
+        self.assertNotEqual(code, 0)
+        self.assertIn("nothing was written", err)
+        with open(self.keys, "w", encoding="utf-8") as f:
+            f.write("# Source keys\n\nNo table yet.\n")
+        code, _, err = self.extract(self.first("chatgpt"))
+        self.assertIn("no table with a Key column", err)
+        self.assertEqual(os.listdir(self.out), ["keys.md"])
+
+
+class Manifest(Base):
+    def manifest(self, data, *args):
+        path = self.path("claude-manifest-x.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        before = sorted(os.listdir(self.tmp))
+        got = run("manifest", path, *args)
+        self.assertEqual(sorted(os.listdir(self.tmp)), before)  # it writes nothing
+        return got
+
+    DATA = {"instructions": "Links expire.", "data_files": [
+        {"category": c, "part": p, "filename": f"{c}-00{p}.zip", "export_url": f"https://example.com/{c}/{p}"}
+        for c, p in (("projects", 0), ("conversations", 1), ("memories", 0), ("conversations", 0))]}
+
+    def test_links(self):
+        code, out, err = self.manifest(self.DATA)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines()[:3], ["- [conversations-000.zip](https://example.com/conversations/0)",
+                                                "- [conversations-001.zip](https://example.com/conversations/1)",
+                                                "Not needed: memories-000.zip, projects-000.zip"])
+        self.assertIn("Never open or download them yourself", out)
+        code, out, err = self.manifest(self.DATA, "--memories")
+        self.assertIn("- [memories-000.zip](https://example.com/memories/0)", out.splitlines()[2])
+
+    def test_unknown_shape(self):
+        for data, why in (({"files": []}, "no data_files list"),
+                          ({"data_files": [{"category": "conversations", "filename": "c.zip", "url": "https://x"}]},
+                           "lacks one of"),
+                          ({"data_files": [dict(self.DATA["data_files"][0], category="memories")]}, "no conversations item")):
+            code, out, _ = self.manifest(data)
+            self.assertEqual(code, 1, data)
+            self.assertTrue(out.startswith("unknown shape: "), out)
+            self.assertIn(why, out)
+            self.assertNotIn("https://", out)
+
+
+class WarningKinds(Base):
+    def test_each_warning_says_its_kind(self):
+        root = self.inbox()
+        write(os.path.join(root, "more.7z"), b"7z\xbc\xaf\x27\x1c")
+        write(os.path.join(root, "chatgpt", "conversations-009.json"), b'[{"something": "else"}]')
+        _, err = index([root], self.path("work"))
+        got = warnings(err)
+        self.assertTrue(any(w.endswith("cannot be opened; extract it into a new folder and index that [packing]") for w in got), got)
+        self.assertTrue(any("matches no known format" in w and w.endswith("[parser]") for w in got), got)
+
+    def test_a_nested_archive_too_large_for_the_disk(self):
+        root = self.path("in")
+        os.makedirs(root)
+        inner = io.BytesIO()
+        with zipfile.ZipFile(inner, "w") as z:
+            z.writestr("conversations.json", "[]")
+        with zipfile.ZipFile(os.path.join(root, "outer.zip"), "w") as z:
+            z.writestr("inner.zip", inner.getvalue())
+        tool, err = load_tool(), io.StringIO()
+        tool.NESTED_MAX = 0
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            tool.cmd_index(tool.argparse.Namespace(paths=[root], out=self.path("work"), gap=45))
+        self.assertIn("too large to copy into the work dir", err.getvalue())
+        self.assertTrue(warnings(err.getvalue())[0].endswith("[disk]"), err.getvalue())
+
+    def test_help_lists_every_leftover_skipped(self):
+        """Finding 20: the help's list of operating-system leftovers is the one the skip uses."""
+        tool = load_tool()
+        _, out, _ = run("--help")
+        for name in tool.JUNK_NAMES:
+            self.assertIn(name, out)
+        for path in ("__MACOSX/a/b.json", "x/._conversations.json", "x/.DS_Store", "x/Thumbs.db", "Desktop.ini"):
+            self.assertTrue(tool.is_junk(path), path)
+        self.assertFalse(tool.is_junk("x/conversations.json"))
+
+
+class Cut(Base):
+    def files(self):
+        threads = ("# ChatGPT: picked conversations\n\nIntro.\n\n## T1: plums\n\n- Platform id: `a`\n\n"
+                   "### T1.U1 — User (2030-01-01T00:00)\n\n````text\nmy landlord again\n````\n\n#### Assistant\n\n````text\nsorry\n````\n\n"
+                   "### T1.U2 — User (2030-01-01T00:05)\n\n````text\nthe plum queue\n### T1.U3 — not a heading\n````\n\n"
+                   "#### Assistant\n\n````text\nok\n````\n\n### T1: user turns on other branches (edited prompts, abandoned follow-ups)\n\n"
+                   "#### T1.A1 — User (2030-01-01T00:01)\n\n````text\nmy landlord, edited\n````\n\n"
+                   "## T2: pears\n\n- Platform id: `b`\n\n### T2.U1 — User (2030-01-02T00:00)\n\n````text\nnot mine\n````\n")
+        prompts = re.sub(r"#### Assistant\n\n````text\n[^`]*````\n\n", "", threads).replace("picked conversations", "prompts")
+        base = self.path("sources", "chatgpt", "2030-01-01-chats")
+        os.makedirs(os.path.dirname(base))
+        for suffix, text in (("threads", threads), ("prompts", prompts)):
+            with open(f"{base}-{suffix}.md", "w", encoding="utf-8") as f:
+                f.write(text)
+        return base
+
+    def test_cut_from_both_files(self):
+        base = self.files()
+        code, out, err = run("cut", base + "-prompts.md", "T1.U1,T1.A1,T2")
+        self.assertEqual(code, 0, err)
+        self.assertIn("every other number is unchanged", out)
+        for suffix in ("threads", "prompts"):
+            text = read(f"{base}-{suffix}.md")
+            self.assertNotIn("landlord", text)
+            self.assertNotIn("other branches", text)  # its last turn on another branch is cut
+            self.assertNotIn("T2", text)
+            self.assertIn("### T1.U2 — User (2030-01-01T00:05)\n\n````text\nthe plum queue\n### T1.U3 — not a heading\n````", text)
+        self.assertNotIn("sorry", read(base + "-threads.md"))  # the cut turn's answer goes with it
+        self.assertIn("ok", read(base + "-threads.md"))
+
+    def test_nothing_cut_unless_every_turn_is_there(self):
+        base = self.files()
+        before = read(base + "-threads.md")
+        for turns, says in (("T1.U1,T1.U3", "has no T1.U3"), ("T1.X1", "give turns"), ("T1.U1:2", "give turns")):
+            code, _, err = run("cut", base + "-threads.md", turns)
+            self.assertNotEqual(code, 0, turns)
+            self.assertIn(says, err)
+        self.assertEqual(read(base + "-threads.md"), before)
+        code, _, err = run("cut", self.path("notes.md"), "T1")
+        self.assertIn("-threads.md or -prompts.md", err)
+
+    def test_a_real_extract(self):
+        work, out = self.path("work"), self.path("sources")
+        convs, _ = index([FIX], work)
+        n = next(i for i, c in enumerate(convs) if c["alt"] and sum(m["role"] == "user" for m in c["messages"]) > 1)
+        code, stdout, err = run("extract", work, "--pick", str(n), "--date", "2030-01-01", "--out", out)
+        self.assertEqual(code, 0, err)
+        base = os.path.join(out, "chatgpt", "2030-01-01-chats")
+        code, _, err = run("cut", base + "-threads.md", "T1.U1,T1.A1")
+        self.assertEqual(code, 0, err)
+        for suffix in ("threads", "prompts"):
+            text = read(f"{base}-{suffix}.md")
+            self.assertNotIn("### T1.U1 —", text)
+            self.assertNotIn("#### T1.A1 —", text)
+            self.assertIn("### T1.U2 —", text)
+
+
+class Tally(Base):
+    def setUp(self):
+        super().setUp()
+        self.work = self.path("work")
+        os.makedirs(self.work)
+        rows = ["n\tplatform\tstart_utc\tuser_turns\tspace\ttitle\tfirst_prompt"] + [
+            f"{n}\tchatgpt\t2030-01-{n + 1:02d}T10:00\t1\t\tTitle {n}\tprompt {n}" for n in range(8)]
+        with open(os.path.join(self.work, "index.tsv"), "w", encoding="utf-8") as f:
+            f.write("\n".join(rows) + "\n")
+
+    def marks(self, text):
+        with open(os.path.join(self.work, "marks.tsv"), "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def test_three_lines_and_groups(self):
+        self.marks("n\tmark\tstatus\n0\thealth\n1\thealth\n2\tG1\tpicked\n3\tG1\tdropped\n4\tG2\tnot picked\n"
+                   "5\tG2\tnot picked\n6\tcalled unimportant by the user\n")
+        code, out, err = run("tally", self.work, "--date", "2030-02-01")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines(), [
+            "Left out by category: health 2, called unimportant by the user 1, other, not career-relevant 1",
+            "Groups not picked: 1 group, 2 conversations", "Dropped: 1 conversation (user, 2030-02-01)"])
+        code, out, err = run("tally", self.work)   # --date defaults to today
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines()[2], f"Dropped: 1 conversation (user, {datetime.now().date().isoformat()})")
+        code, out, err = run("tally", self.work, "--groups")
+        self.assertEqual(out.splitlines(), ["G1: 2 conversations (2-3), 2030-01-03 to 2030-01-04 (UTC)",
+                                            "G2: 2 conversations (4-5), 2030-01-05 to 2030-01-06 (UTC)"])
+
+    def test_groups_before_the_user_answers(self):
+        self.marks("2\tG1\n3\tG1\n5\tG2\n")
+        code, out, err = run("tally", self.work, "--groups")
+        self.assertEqual(code, 0, err)
+        self.assertIn("G2: 1 conversation (5), 2030-01-06 (UTC)", out)
+        code, _, err = run("tally", self.work)
+        self.assertNotEqual(code, 0)
+        self.assertIn("no status", err)
+
+    def test_nothing_left_out(self):
+        self.marks("".join(f"{n}\tG1\tpicked\n" for n in range(8)))
+        code, out, err = run("tally", self.work)
+        self.assertEqual(out.splitlines(), ["Left out by category: none", "Groups not picked: none", "Dropped: none"])
+
+    def test_bad_marks(self):
+        for text, says in (("9\thealth\n", "not in index.tsv"), ("1\thealth\n1\tshopping\n", "marked twice"),
+                           ("1\tfinances\n", "not a category or a group"), ("1\thealth\tpicked\n", "only a group's row"),
+                           ("1\tG1\tmaybe\n", "status is one of"), ("2\thealth\nx\thealth\n", "n is not a number")):
+            self.marks(text)
+            code, _, err = run("tally", self.work)
+            self.assertNotEqual(code, 0, text)
+            self.assertIn(says, err)
+
+
+class Leaks(Base):
+    def test_hits_in_the_last_section_only(self):
+        self.work = self.path("work")
+        os.makedirs(self.work)
+        rows = ["n\tplatform\tstart_utc\tuser_turns\tspace\ttitle\tfirst_prompt",
+                "0\tchatgpt\t2030-01-01T10:00\t1\t\tPython\twrite me a script please now",
+                "1\tchatgpt\t2030-01-02T10:00\t1\t\tC++\thow do  I  fix my   landlord problem today",
+                "2\tchatgpt\t2030-01-03T10:00\t1\t\tAI\tsomething",
+                "3\tgemini-apps\t2030-01-04T10:00\t1\t\t\tplan a trip to the coast"]
+        with open(os.path.join(self.work, "index.tsv"), "w", encoding="utf-8") as f:
+            f.write("\n".join(rows) + "\n")
+        log = self.path("import-log.md")
+        with open(log, "w", encoding="utf-8") as f:
+            f.write("# Import log\n\n## 2029 import\n\nC++ was left out.\n\n## 2030 import (chatgpt)\n\nPicked: Python work.\n"
+                    "Left out: the c++ talk, and How do I fix my landlord problem.\nAlso PLAN A TRIP TO THE coast.\n")
+        code, out, err = run("leaks", self.work, "--pick", "0", log)
+        self.assertEqual(code, 0, err)
+        lines = out.splitlines()
+        self.assertEqual(lines[:-1], ['10: conversation 1\'s title "C++": Left out: the c++ talk, and How do I fix my landlord problem.',
+                                      '10: conversation 1\'s first prompt "how do I fix my": Left out: the c++ talk, and How do I fix my landlord problem.',
+                                      '11: conversation 3\'s first prompt "plan a trip to the": Also PLAN A TRIP TO THE coast.'])
+        self.assertEqual(lines[-1], f"3 hits in {log} from line 7 (## 2030 import (chatgpt)); 1 title(s) under 3 characters not searched")
+        code, _, err = run("leaks", self.work, "--pick", "9", log)
+        self.assertIn("--pick [9]", err)
+
+
+class Encoding(unittest.TestCase):
+    def test_unencodable_text_prints_escaped(self):
+        """Finding 21: a lone surrogate (a JSON escape no UTF-8 can encode) prints as a backslash escape."""
+        tmp = tempfile.mkdtemp(prefix="chat_export_test-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        jsonl = os.path.join(tmp, "s.jsonl")
+        with open(jsonl, "w", encoding="utf-8") as f:
+            f.write(line("user", "bad \udcff byte", 0, turnOrigin="human") + "\n")
+        tool, buf = load_tool(), io.BytesIO()
+        out = io.TextIOWrapper(buf, encoding="ascii")
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.TextIOWrapper(io.BytesIO(), encoding="ascii")):
+            argv, sys.argv = sys.argv, ["chat_export.py", "turns", jsonl]
+            try:
+                tool.main()
+            finally:
+                sys.argv = argv
+            out.flush()
+        self.assertIn(b"bad \\udcff byte", buf.getvalue())
 
 
 def update():

@@ -3,10 +3,10 @@ title: Northwind Freight — Software Engineering Intern, Quotes team
 type: internship
 period: 2025-06 – 2025-09
 org: Northwind Freight
-my_role: Software Engineering Intern; owned the quote-latency fix and the invoice reconciler
-collaborators: Priya (senior engineer, mentor) — co-designed the rollout; Sam (manager) — set the latency goal
+my_role: Software Engineering Intern; owned the quote-latency fix and the invoice reconciler  # (user, 2025-10-02)
+collaborators: Priya (senior engineer, mentor) — co-designed the rollout; Sam (manager) — set the latency goal  # (user, 2025-10-02)
 tags: [go, python, postgresql, redis, kafka, feature-flags, latency]
-visibility: public
+visibility: public  # (user, 2025-10-02)
 links: [https://git.example.com/northwind/quotes, https://git.example.com/northwind/reconciler]
 last_updated: 2025-10-02
 ---
@@ -56,9 +56,9 @@ Cut the shipment-quote API's p95 latency from 820 ms to 210 ms and automated inv
 - *How did you know the latency gain was real and not the holiday?* GAP: whether the gain held in a normal-traffic week.
 
 ## Past phrasings
-- **backend:** "Cut shipment-quote API p95 latency from 820 ms to 210 ms by replacing per-request PostgreSQL lookups with a Redis rate cache refreshed every five minutes" (examples/resume.tex)
-- **backend:** "Built a Kafka consumer in Go that reconciles carrier invoices nightly, flagging 3% of 40k monthly invoices for review and removing a manual spreadsheet step" (examples/resume.tex)
-- **backend:** "Co-designed a feature-flag rollout with a senior engineer, rolling out the new rate cache to all four sales regions over two weeks with zero rollbacks" (examples/resume.tex)
+- **backend:** "Cut shipment-quote API p95 latency from 820 ms to 210 ms by replacing per-request PostgreSQL lookups with a Redis rate cache refreshed every five minutes, falling back to the database on a miss" (examples/resume.tex)
+- **backend:** "Built a Kafka consumer in Go that reconciles carrier invoices nightly, flagging 3% of 40k monthly invoices for review and replacing the finance team's weekly manual spreadsheet check" (examples/resume.tex)
+- **backend:** "Co-designed a feature-flag rollout plan with a senior engineer, who ran the first region's switch, rolling out the new rate cache to all four sales regions over two weeks with zero rollbacks" (examples/resume.tex)
 
 ## Conflicts
 - Settled: use "from 820 ms to 210 ms", not "5x faster" (820 / 210 is 3.9x). (sources/resumes/2025-09-draft.tex; PR #412 comment)

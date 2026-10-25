@@ -21,12 +21,19 @@ HUMANIZER = ("Call the Skill tool with the humanizer skill first, then run it on
              "text only.\nBuilt a queue.")
 SCREEN = ('Read %s/skills/career-log/modes/fit.md whole and follow its section "Screen" for the captures listed '
           'in %s/.build/scan/2026-02-01/screen/batch-1.todo, writing %s/.build/scan/2026-02-01/screen/batch-1.jsonl.')
-FIT = 'Read %s/skills/career-log/modes/fit.md whole and follow its "Handed over by scan" bullet for the capture at %s.'
+FIT = ('Read %s/skills/career-log/modes/fit.md whole and follow its "Handed over by scan" bullet for the capture at %s, '
+       'writing %s.')
 SCAN_MD = ("# Scan\n\n3. **Start one subagent per batch,** of a type that writes files. Its prompt's first line is `"
            + SCREEN % ("<root>", "<dir>", "<dir>") + "`; the rest is the Log root.\n"
            "3. Start one subagent per posting to fit, of the type step 6.3 names. Its prompt's first line is `"
-           + FIT % ("<root>", "<capture path>") + "`.\n")
+           + FIT % ("<root>", "<capture path>", "<dir>/fit/<folder>.jsonl") + "`.\n")
 REVIEW_MD = "# Review\n\n## Dispatch\n\nFirst line: `" + POINTER % ("<root>", "<root>") + "` Then the drafts.\n"
+WRITE_MD = ("# Write\n\n10. Once the check has exited 0: `python3 -I <root>/tools/sync.py commit \"<subject>\" -- <file>...`, "
+            "with the subject `write(<company>): <role>` for a posting run, `write(<slug>): <target>` otherwise.\n")
+MODES_MD = {"log.md": "4. **Commit and push:** `python3 -I <root>/tools/sync.py commit \"log(<slug>): <milestone>\" -- <file>...`.\n",
+            "consolidate.md": "7. **Commit and push**: `python3 -I <root>/tools/sync.py commit \"consolidate(<slugs>): <summary>\" -- <file>...`\n",
+            "import.md": "7. Commit as *Bulk data changes* says: `import: <n> file(s), <m> entr(y/ies)`.\n",
+            "scan.md": "9. `python3 -I <root>/tools/sync.py commit \"<the subject of its commit: line>\" -- <report>`.\n"}
 
 
 def text(t):
@@ -79,8 +86,17 @@ def checked(*lines, ok=True, cmd="python3 -I tools/check_save.py outputs/applica
 
 GOOD_RUN = [lookup(), HUMANIZER_LINE, humanizer(), REVIEWER_LINE, reviewer(), HUMANIZER_LINE, humanizer(),
             *checked(PROVENANCE_LINE, HUMANIZER_AFTER), COMMIT, text("Saved.")]
-MAP_LINE = text("Map: 10 requirements and duties, 11 rows; no row: none")
-COURSE_LINE = text("Course work: none (4 entry files searched)\n\n| Requirement | ... |")
+MAP = "Map: 10 requirements and duties, 11 rows; no row: none"
+COURSE = "Course work: none (4 entries listed)"
+TABLE = "| Requirement | Kind | Written by | Own work | Category | Entry |\n|---|---|---|---|---|---|\n| Go | required | user | - | covered | 2025-01-widget.md |"
+
+
+def fit_map(map_line=MAP, course=COURSE, cmd="py -3 -I tools/fit.py --root C:/t/log map .build/fit/2026-10-24-a-b.jsonl"):
+    """A tools/fit.py map call and its output."""
+    return [bash(cmd), result("%s\n%s\n\n%s\n\nmap: ok" % (course, map_line, TABLE), error="no row: none" not in map_line)]
+
+
+SHOWN = text("Here is the map.\n\n%s\n%s\n\n%s" % (COURSE, MAP, TABLE))
 
 
 def write_transcript(path, blocks, model=None):
@@ -212,7 +228,7 @@ class Transcript(unittest.TestCase):
     def test_mode_prompt_inside_another_first_line_is_a_note(self):
         """A <...> matches one path: not a second pointer before the mode's, nor a sentence after it."""
         typed = check_run.mode_prompts([SCAN_MD])
-        fit = FIT % (ROOT, ROOT + "/.build/scan/2026-02-01/postings/example.md")
+        fit = FIT % (ROOT, ROOT + "/.build/scan/2026-02-01/postings/example.md", ROOT + "/.build/scan/2026-02-01/fit/example.jsonl")
         self.assertEqual(check_run.check_models(self.calls([self.screen(first=fit)])[1], (), typed)[0], "PASS")
         for first in ("Read /x/skills/career-log/modes/review.md whole. " + SCREEN % (ROOT, ROOT, ROOT),
                       fit[:-1] + ". Then also edit profile.md and commit."):
@@ -375,64 +391,95 @@ class Transcript(unittest.TestCase):
         return check_run.check_map_count(self.calls(blocks)[0])
 
     def test_map_count_pass(self):
-        grade, ev = self.map_count([MAP_LINE, COURSE_LINE])
+        grade, ev = self.map_count([*fit_map(), SHOWN])
         self.assertEqual(grade, "PASS", ev)
 
-    def test_map_count_reprinted_until_none_pass(self):
-        first = text("**Map:** 10 requirements and duties, 9 rows; no row: mentoring junior engineers")
-        self.assertEqual(self.map_count([first, MAP_LINE, COURSE_LINE])[0], "PASS")
+    def test_map_count_rerun_until_none_pass(self):
+        first = fit_map("Map: 10 requirements and duties, 9 rows; no row: mentoring junior engineers")
+        self.assertEqual(self.map_count([*first, *fit_map(), SHOWN])[0], "PASS")
 
     def test_map_count_naming_a_missing_row_fails(self):
-        last = text("Map: 10 requirements and duties, 9 rows; no row: mentoring junior engineers")
-        self.assertEqual(self.map_count([last, COURSE_LINE])[0], "FAIL")
+        grade, ev = self.map_count(fit_map("Map: 10 requirements and duties, 9 rows; no row: mentoring junior engineers"))
+        self.assertEqual(grade, "FAIL")
+        self.assertIn("names requirements with no row", ev)
 
     def test_map_count_fewer_rows_saying_none_fails(self):
-        self.assertEqual(self.map_count([text("Map: 10 requirements and duties, 7 rows; no row: none")])[0], "FAIL")
+        self.assertEqual(self.map_count(fit_map("Map: 10 requirements and duties, 7 rows; no row: none"))[0], "FAIL")
 
-    def test_map_count_reworded_fails(self):
-        grade, ev = self.map_count([text("Map: partial, 7 rows"), COURSE_LINE])
+    def test_map_shown_unlike_the_tool_fails(self):
+        typed = text(SHOWN["text"].replace("11 rows", "12 rows"))
+        grade, ev = self.map_count([*fit_map(), typed])
         self.assertEqual(grade, "FAIL")
-        self.assertIn("does not parse", ev)
+        self.assertIn("fit.py printed", ev)
+        course = text(SHOWN["text"].replace("(4 entries", "(5 entries"))
+        self.assertEqual(self.map_count([*fit_map(), course])[0], "FAIL")
 
-    def test_map_shown_without_count_fails(self):
-        self.assertEqual(self.map_count([COURSE_LINE])[0], "FAIL")
+    def test_map_shown_without_its_map_line_fails(self):
+        grade, ev = self.map_count([*fit_map(), text(COURSE + "\n\n" + TABLE)])
+        self.assertEqual(grade, "FAIL")
+        self.assertIn("no Map: line above its table", ev)
 
-    def test_map_count_after_the_map_fails(self):
-        self.assertEqual(self.map_count([COURSE_LINE, MAP_LINE])[0], "FAIL")
+    def test_map_line_after_the_table_fails(self):
+        self.assertEqual(self.map_count([*fit_map(), text(COURSE + "\n\n" + TABLE + "\n\n" + MAP)])[0], "FAIL")
+
+    def test_map_line_with_no_tool_output_fails(self):
+        grade, ev = self.map_count([text(MAP), SHOWN])
+        self.assertEqual(grade, "FAIL")
+        self.assertIn("no tools/fit.py map output", ev)
+        echo = bash("echo '%s'" % MAP)
+        self.assertEqual(self.map_count([echo])[0], "FAIL")
+        self.assertEqual(self.map_count([text(COURSE + "\n\n" + TABLE)])[0], "FAIL")
+
+    def test_map_not_shown_is_graded_by_the_tool(self):
+        """interview: the map is built and not shown; fit.py's lines grade it."""
+        cmd = 'python3 -I tools/fit.py map .build/fit/m.jsonl --category gap --category "claimed, unbacked"'
+        grade, ev = self.map_count(fit_map(cmd=cmd))
+        self.assertEqual(grade, "PASS", ev)
 
     def test_map_count_per_posting(self):
         a = "Map (Example Corp, Engineer): 10 requirements and duties, 10 rows; no row: none"
         b = "Map (Other Inc, SRE): 12 requirements and duties, 11 rows; no row: on-call"
-        self.assertEqual(self.map_count([text(a + "\n" + b)])[0], "FAIL")
         fixed = b.replace("11 rows; no row: on-call", "12 rows; no row: none")
-        self.assertEqual(self.map_count([text(a + "\n" + b), text(fixed)])[0], "PASS")
+        self.assertEqual(self.map_count([*fit_map(a), *fit_map(b)])[0], "FAIL")
+        self.assertEqual(self.map_count([*fit_map(a), *fit_map(b), *fit_map(fixed)])[0], "PASS")
 
-    def test_map_count_under_the_course_work_line_pass(self):
-        shown = "Course work: none (4 entry files searched)\n" + MAP_LINE["text"] + "\n\n| Requirement | ... |"
-        self.assertEqual(self.map_count([text(shown)])[0], "PASS")
+    def test_map_shown_bold_reads_the_same(self):
+        bold = text("**Course work:** none (4 entries listed)\n**Map:** **10** requirements and duties, **11** rows; no row: none\n\n" + TABLE)
+        self.assertEqual(self.map_count([*fit_map(), bold])[0], "PASS")
 
-    def test_map_count_bold_and_trailing_words_pass(self):
-        line = text("**Map:** **10** requirements and duties, **11** rows; no row: none (all mapped)")
-        self.assertEqual(self.map_count([line, COURSE_LINE])[0], "PASS")
+    def test_map_run_that_printed_bad_lines_fails(self):
+        blocks = [bash("py -3 -I tools/fit.py map m.jsonl"),
+                  result("%s\n%s\n\n%s\n\nbad: rows[1].category: covered, but written by unknown; at most shallow"
+                         % (COURSE, MAP, TABLE), error=True), SHOWN]
+        grade, ev = self.map_count(blocks)
+        self.assertEqual(grade, "FAIL")
+        self.assertIn("printed bad: lines", ev)
 
-    def test_map_count_role_with_parentheses_is_read(self):
-        line = text("Map (Example Corp, Software Engineer (Infrastructure)): 10 requirements and duties, 9 rows; no row: none")
-        self.assertEqual(self.map_count([line])[0], "FAIL")
+    def test_map_run_output_with_crlf_lines(self):
+        """Windows: the tool's lines end in CRLF in the tool result."""
+        out = "%s\n%s\n\n%s\n\nmap: ok\nexit 0" % (COURSE, MAP, TABLE)
+        blocks = [bash("py -3 -I tools/fit.py map m.jsonl; echo \"exit $?\""), result(out.replace("\n", "\r\n")), SHOWN]
+        grade, ev = self.map_count(blocks)
+        self.assertEqual(grade, "PASS", ev)
 
-    def test_map_count_after_the_table_in_one_message_fails(self):
-        self.assertEqual(self.map_count([text(COURSE_LINE["text"] + "\n|---|\n" + MAP_LINE["text"])])[0], "FAIL")
+    def test_a_later_course_work_mention_is_not_the_map(self):
+        recap = text("Done.\n\nCourse work: none (4 entries listed)")
+        self.assertEqual(self.map_count([*fit_map(), SHOWN, recap])[0], "PASS")
 
-    def test_map_line_only_in_a_written_file_is_missing(self):
-        write = {"type": "tool_use", "name": "Write", "input": {"file_path": "x.md", "content": MAP_LINE["text"]}}
-        self.assertEqual(self.map_count([write, COURSE_LINE])[0], "FAIL")
+    def test_map_run_commands_other_shells(self):
+        for cmd in ("& py -3 -I \"C:\\t\\log\\tools\\fit.py\" --root \"C:\\t\\log\" map .build/fit/m.jsonl",
+                    "python3 -I tools/fit.py --root /t/log \\\n  map .build/fit/m.jsonl",
+                    "py -3 -I tools/fit.py --root C:/t/log `\n  map .build/fit/m.jsonl"):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.map_count([*fit_map(cmd=cmd), SHOWN])[0], "PASS")
 
-    def test_map_count_none_with_more_words_fails(self):
-        self.assertEqual(self.map_count([text("Map: 10 requirements and duties, 11 rows; no row: none except on-call")])[0],
-                         "FAIL")
+    def test_role_with_parentheses_is_read(self):
+        line = "Map (Example Corp, Software Engineer (Infrastructure)): 10 requirements and duties, 9 rows; no row: none"
+        self.assertEqual(self.map_count(fit_map(line))[0], "FAIL")
 
-    def test_map_count_only_in_a_tool_call_is_a_note(self):
-        echo = bash("echo 'Map: 10 requirements and duties, 11 rows; no row: none'")
-        self.assertEqual(self.map_count([echo, COURSE_LINE])[0], "NOTE")
+    def test_fit_check_is_not_a_map_run(self):
+        check = [bash("py -3 -I tools/fit.py check fit/a.jsonl --capture postings/map.md"), result("check: ok")]
+        self.assertEqual(self.map_count([*check, SHOWN])[0], "FAIL")
 
     def test_no_map_skips(self):
         self.assertEqual(self.map_count(GOOD_RUN)[0], "SKIP")
@@ -448,6 +495,7 @@ class CopyBase(unittest.TestCase):
         self.write("entries/2026-01-queue.md", ENTRY)
         self.write("outputs/resumes/backend.tex", TEX)
         self.write("skills/career-log/modes/review.md", REVIEW_MD)
+        self.write("skills/career-log/modes/write.md", WRITE_MD)
         self.commit()
         self.base = self.git("rev-parse", "HEAD").strip()
 
@@ -480,6 +528,18 @@ class CopyBase(unittest.TestCase):
 
     def saved(self):
         return [p for p in self.git("diff", "--name-only", "--diff-filter=AM", self.base, "HEAD").splitlines() if p]
+
+    def publish(self):
+        """Push HEAD to a bare origin as its default branch, the copy's own, as the harness's copy has it."""
+        branch = self.git("branch", "--show-current").strip()
+        remote = self.copy + "-remote.git"
+        if not os.path.isdir(remote):
+            subprocess.run(["git", "init", "-q", "--bare", "-b", branch, remote], check=True, capture_output=True)
+            self.addCleanup(shutil.rmtree, remote, True)
+            self.git("remote", "add", "origin", remote)
+        self.git("push", "-q", "-f", "origin", "HEAD:" + branch)
+        self.git("fetch", "-q", "origin")
+        self.git("remote", "set-head", "origin", branch)
 
     def phrasings(self, add=(), drop=()):
         """The entry with the lines in add appended under Past phrasings and those in drop removed."""
@@ -569,10 +629,18 @@ class Copy(CopyBase):
 
     def test_provenance_source_citations_pass(self):
         rows = ("| Degree | profile › Education | sources/resumes/2024-old.tex, 2026-new.tex; transcript |\n"
-                "| Queue design | 2026-01-queue › How it works | queue@abc1234:docs/reports/design.md:12 |\n")
+                "| Queue design | 2026-01-queue › What happened | queue@abc1234:docs/reports/design.md:12 |\n")
         self.save(provenance=PROVENANCE.replace("\n## Company context", rows + "\n## Company context", 1))
         grade, ev = check_run.check_provenance(self.copy, self.saved())
         self.assertEqual(grade, "PASS", ev)
+
+    def test_provenance_section_missing_from_its_entry_fails(self):
+        """Exception 5's section check, now the tool's: the section after ` › ` is a heading of that entry."""
+        row = "| Queue design | 2026-01-queue › How it works | (user, 2026-01-02) |\n"
+        self.save(provenance=PROVENANCE.replace("\n## Company context", row + "\n## Company context", 1))
+        grade, ev = check_run.check_provenance(self.copy, self.saved())
+        self.assertEqual(grade, "FAIL", ev)
+        self.assertIn("2026-01-queue › How it works, no heading there", ev)
 
     def test_provenance_example_entry_citation_passes(self):
         path = os.path.join(HERE, "..", "..", "skills", "career-log", "examples", "entries",
@@ -631,6 +699,25 @@ class Copy(CopyBase):
         self.assertIn("provenance.md): 2 rows", ev)
         self.assertIn("Humanizer after review: Built a queue.", ev)
 
+    def test_check_save_lines_around_the_two_it_grades_pass(self):
+        """check_save's own Files, Risks, Past phrasings, Entries and Lint lines, and the `fix:` and
+        `check:` lines under them, are not lines in another form."""
+        self.save()
+        lines = ("Files (%s): ok" % FOLDER, "Files (%s): note: no .build/drafts/x/resume.pdf, so y was not compared" % FOLDER,
+                 "Risks (%s): ok" % FOLDER, PROVENANCE_LINE,
+                 "Past phrasings (entries/2026-01-queue.md): +1 -1; ok",
+                 "  check: removed [backend] '\"Built a queue\" (x)': check it is the line consolidate step 2 ranks last",
+                 "Lint at save: check: %s/answers.md:3: 820 appears in 2 artifacts" % FOLDER, HUMANIZER_AFTER)
+        grade, ev = self.printed([reviewer(), humanizer()] + checked(*lines) + [COMMIT])
+        self.assertEqual(grade, "PASS", ev)
+        bad = ("Provenance check (provenance.md): 3 rows; citing another output: line 7, entry section names "
+               "2026-01-queue › Nowhere, no heading there: x",
+               "  fix: replace each listed row with rows citing the entry sections behind that claim")
+        grade, ev = self.printed([reviewer(), humanizer()] + checked(*bad, HUMANIZER_AFTER, ok=False) + [COMMIT])
+        self.assertEqual(grade, "FAIL", ev)
+        self.assertIn("does not say none", ev)
+        self.assertNotIn("tool line not in the form", ev)
+
     def test_rerun_until_none_pass(self):
         self.save()
         first = checked("Provenance check (provenance.md): 3 rows; citing another output: line 7, names another "
@@ -675,6 +762,23 @@ class Copy(CopyBase):
     def test_no_reviewer_needs_no_humanizer_line(self):
         self.save()
         self.assertEqual(self.printed(checked(PROVENANCE_LINE) + [COMMIT])[0], "PASS")
+
+    def test_sync_commit_is_the_save_commit(self):
+        self.save()
+        sync = bash("py -3 -I /tmp/t/log/tools/sync.py commit 'write(example): Engineer' -- %s" % FOLDER)
+        self.assertEqual(self.printed(checked(PROVENANCE_LINE) + [sync])[0], "PASS")
+        grade, ev = self.printed([reviewer(), humanizer(), sync] + checked(PROVENANCE_LINE, HUMANIZER_AFTER))
+        self.assertEqual(grade, "FAIL")
+        self.assertIn("ran only after the save's commit", ev)
+
+    def test_sync_commit_with_root_and_a_failed_push(self):
+        self.save()
+        sync = bash('python3 -I tools/sync.py --root "/tmp/t/log" commit "write(example): Engineer" -- %s' % FOLDER)
+        pushed = result("committed: [master 1234567] write(example): Engineer\npush: refused (the commit is made,"
+                        " not pushed)\nnext: stop: show the user git's message above", error=True)
+        grade, ev = self.printed([reviewer(), humanizer(), sync, pushed] + checked(PROVENANCE_LINE, HUMANIZER_AFTER))
+        self.assertEqual(grade, "FAIL")
+        self.assertIn("ran only after the save's commit", ev)
 
     def test_check_only_after_the_commit_fails(self):
         self.save()
@@ -883,7 +987,7 @@ class Copy(CopyBase):
         self.save(entry=ENTRY.replace("Built a job queue. (user", "Built a job queue in Go. (user"))
         grade, ev = check_run.check_phrasings(self.copy, self.base, self.saved())
         self.assertEqual(grade, "NOTE", ev)
-        self.assertIn("added no Past phrasings line", ev)
+        self.assertIn("the write save added no Past phrasings line: check the approved resume or bullets report", ev)
 
     def test_phrasing_added_pass(self):
         self.save(entry=self.phrasings(add=['- **backend:** "Cut queue latency by moving retries to a worker pool." (%s)' % FOLDER]))
@@ -1060,10 +1164,434 @@ class Copy(CopyBase):
         self.assertEqual(grade, "NOTE", ev)
         self.assertIn("added no Past phrasings line", ev)
 
+    def test_bullets_report_demote_pass(self):
+        """D8: a bullets report's lines cite its path; the Archived line added to it demotes them."""
+        report = "outputs/reports/2026-02-01-backend-bullets.md"
+        cited = '- **backend:** "Cut queue latency by moving retries to a worker pool." (%s)' % report
+        self.write(report, "Kind: resume bullets\n\n- Cut queue latency by moving retries to a worker pool.\n\n" + PROVENANCE)
+        self.write("entries/2026-01-queue.md", self.phrasings(add=[cited]))
+        self.commit("write(backend-bullets): backend")
+        self.base = self.git("rev-parse", "HEAD").strip()
+        self.write(report, "Kind: resume bullets\nArchived (user, 2026-02-03)\n\n- Cut queue latency by moving retries "
+                           "to a worker pool.\n\n" + PROVENANCE)
+        self.write("entries/2026-01-queue.md", ENTRY)
+        self.commit("write(backend-bullets): backend to Archived")
+        grade, ev = check_run.check_phrasings(self.copy, self.base, self.saved())
+        self.assertEqual(grade, "PASS", ev)
+        self.assertIn("demoted", ev)
+        self.write("entries/2026-01-queue.md", self.phrasings(add=[cited.replace("backend:", "general:")]))
+        self.commit("write(backend-bullets): backend again")
+        grade, ev = check_run.check_phrasings(self.copy, self.base, self.saved())
+        self.assertEqual(grade, "FAIL", ev)
+        self.assertIn("citing an Archived folder", ev)
+
     def test_same_wording_for_another_angle_pass(self):
         self.save(entry=self.phrasings(add=[
             '- **general:** "Built a job queue that retried failed tasks within one second." (%s)' % FOLDER]))
         self.assertEqual(check_run.check_phrasings(self.copy, self.base, self.saved())[0], "PASS")
+
+
+class Finding6(CopyBase):
+    """A file that is not UTF-8, or git that cannot run, is graded or reported, not a traceback."""
+
+    def write_bytes(self, rel, data):
+        path = os.path.join(self.copy, *rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
+
+    def test_provenance_not_utf8_fails(self):
+        self.save()
+        self.write_bytes(FOLDER + "/provenance.md", PROVENANCE.encode("utf-8") + b"\x93cp1252\x94\n")
+        self.commit()
+        grade, ev = check_run.check_provenance(self.copy, self.saved())
+        self.assertEqual(grade, "FAIL")
+        self.assertIn("provenance.md is not UTF-8", ev)
+
+    def test_entry_not_utf8_fails(self):
+        self.save()
+        self.write_bytes("entries/2026-01-queue.md", ENTRY.encode("utf-8") + b"\x93cp1252\x94\n")
+        self.commit()
+        grade, ev = check_run.check_phrasings(self.copy, self.base, self.saved())
+        self.assertEqual(grade, "FAIL")
+        self.assertIn("2026-01-queue.md is not UTF-8", ev)
+
+    def test_git_that_cannot_run_exits_2(self):
+        self.save()
+        path = os.path.join(self.copy, ".build", "run.jsonl")
+        write_transcript(path, GOOD_RUN)
+        real = check_run.logfiles.subprocess.run
+
+        def no_git(cmd, *a, **k):
+            if cmd and cmd[0] == "git":
+                raise FileNotFoundError("git")
+            return real(cmd, *a, **k)
+        out = io.StringIO()
+        check_run.logfiles.subprocess.run = no_git
+        try:
+            with contextlib.redirect_stdout(out):
+                code = check_run.main(["check_run.py", "--transcript", path, "--copy", self.copy, "--base", self.base])
+        finally:
+            check_run.logfiles.subprocess.run = real
+        self.assertEqual(code, 2, out.getvalue())
+        self.assertIn("git failed", out.getvalue())
+
+    def test_git_failing_inside_a_check_exits_2(self):
+        """origin/HEAD names a branch origin no longer has: save-branch's rev-list fails."""
+        self.save()
+        self.publish()
+        self.git("update-ref", "refs/remotes/origin/HEAD", "HEAD")
+        self.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/gone")
+        path = os.path.join(self.copy, ".build", "run.jsonl")
+        write_transcript(path, GOOD_RUN)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = check_run.main(["check_run.py", "--transcript", path, "--copy", self.copy, "--base", self.base])
+        self.assertEqual(code, 2, out.getvalue())
+        self.assertTrue(out.getvalue().startswith("git rev-list failed"), out.getvalue())
+
+    def test_transcript_not_utf8_is_read(self):
+        path = os.path.join(self.copy, ".build", "run.jsonl")
+        os.makedirs(os.path.dirname(path))
+        write_transcript(path, GOOD_RUN)
+        with open(path, "ab") as f:
+            f.write(b'{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "\x93ok\x94"}]}}\n')
+        self.assertIn("text", [e[0] for e in check_run.events(path)])
+
+
+class SaveBranch(CopyBase):
+    def setUp(self):
+        super().setUp()
+        self.save()
+        self.publish()
+
+    def test_on_default_and_pushed_passes(self):
+        grade, ev = check_run.check_branch(self.copy)
+        self.assertEqual(grade, "PASS", ev)
+
+    def test_unpushed_commit_fails(self):
+        self.write("applications.md", "x\n")
+        self.commit("applications(fair): sent")
+        grade, ev = check_run.check_branch(self.copy)
+        self.assertEqual(grade, "FAIL")
+        self.assertIn("1 commit(s) on HEAD not pushed", ev)
+
+    def test_other_branch_fails(self):
+        self.git("checkout", "-q", "-b", "write/example")
+        grade, ev = check_run.check_branch(self.copy)
+        self.assertEqual(grade, "FAIL")
+        self.assertIn("HEAD is branch write/example", ev)
+
+    def test_second_worktree_fails(self):
+        tree = self.copy + "-tree"
+        self.git("worktree", "add", "-q", "-b", "side", tree)
+        self.addCleanup(shutil.rmtree, tree, True)
+        grade, ev = check_run.check_branch(self.copy)
+        self.assertEqual(grade, "FAIL")
+        self.assertIn("2 worktrees", ev)
+
+    def test_no_origin_head_fails(self):
+        self.git("remote", "set-head", "origin", "-d")
+        grade, ev = check_run.check_branch(self.copy)
+        self.assertEqual(grade, "FAIL")
+        self.assertIn("no origin/HEAD", ev)
+
+
+def edit(path):
+    return {"type": "tool_use", "name": "Write", "input": {"file_path": path, "content": "x"}}
+
+
+class OutsideRootAndPaths(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.root = os.path.join(self.tmp, "log")
+        os.makedirs(os.path.join(self.root, "entries"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, onerror=lambda f, p, e: (os.chmod(p, 0o700), f(p)))
+
+    def evs(self, blocks):
+        return transcript(self.tmp, blocks)[0]
+
+    def test_inside_passes(self):
+        grade, ev = check_run.check_outside(self.evs([edit(self.root.replace("\\", "/") + "/.build/x/resume.tex")]), self.root)
+        self.assertEqual(grade, "PASS", ev)
+
+    def test_outside_is_a_note(self):
+        stray = os.path.join(self.tmp, "notes.md")
+        grade, ev = check_run.check_outside(self.evs([edit(os.path.join(self.root, "entries", "a.md")), edit(stray)]), self.root)
+        self.assertEqual(grade, "NOTE")
+        self.assertIn(stray, ev)
+        self.assertNotIn("a.md", ev)
+
+    def test_sibling_with_the_root_as_prefix_is_outside(self):
+        self.assertEqual(check_run.check_outside(self.evs([edit(self.root + "-old/x.md")]), self.root)[0], "NOTE")
+
+    def test_relative_copy_is_made_absolute(self):
+        subprocess.run(["git", "init", "-q", self.root], check=True)
+        subprocess.run(["git", "-C", self.root, "-c", "user.email=t@example.invalid", "-c", "user.name=T",
+                        "commit", "-q", "--allow-empty", "-m", "base"], check=True)
+        path = os.path.join(self.tmp, "run.jsonl")
+        write_transcript(path, [edit(os.path.join(self.root, "b.txt"))])
+        out, cwd = io.StringIO(), os.getcwd()
+        os.chdir(self.tmp)
+        try:
+            with contextlib.redirect_stdout(out):
+                check_run.main(["check_run.py", "--transcript", path, "--copy", "log", "--base", "HEAD"])
+        finally:
+            os.chdir(cwd)
+        self.assertIn("PASS outside-root", out.getvalue())
+
+    def test_no_edit_skips(self):
+        self.assertEqual(check_run.check_outside(self.evs([text("Done.")]), self.root)[0], "SKIP")
+
+    def test_another_spelling_of_the_root_is_the_same(self):
+        """Exception 3: a spelling realpath resolves (here `..`; on Windows also a short name) is the copy."""
+        other = os.path.join(self.root, "entries", "..")
+        self.assertTrue(check_run.same_path(other, self.root))
+        self.assertTrue(check_run.inside(os.path.join(other, "entries", "a.md"), self.root))
+        self.assertFalse(check_run.same_path(self.tmp, self.root))
+        _, calls = transcript(self.tmp, [reviewer(first=POINTER % (other, other))])
+        self.assertEqual(check_run.check_reviewer_prompt(calls, REVIEW_MD, self.root)[0], "PASS")
+
+
+class AskedModel(unittest.TestCase):
+    """Exception 7: a subagent on another model family than the run's passes when the user asked for it."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def grade(self, prompt):
+        path = os.path.join(self.tmp, "run.jsonl")
+        blocks = [dict(b, input=dict(b["input"], model="opus")) if b.get("name") == "Agent" and "Company" in b["input"]["description"]
+                  else b for b in GOOD_RUN]
+        write_transcript(path, blocks, model="claude-sonnet-5-5")
+        with open(path, encoding="utf-8") as f:
+            body = f.readlines()
+        body[0] = json.dumps({"type": "user", "message": {"role": "user", "content": prompt}}) + "\n"
+        with open(path, "w", encoding="utf-8") as f:
+            f.writelines(body)
+        evs = check_run.events(path)
+        return check_run.check_models(check_run.subagent_calls(evs), evs)
+
+    def test_asked_for_passes(self):
+        grade, ev = self.grade("Environment rules:\n- read pages\n\nUser message:\nApply to this posting; run the company lookup on Opus.")
+        self.assertEqual(grade, "PASS", ev)
+        self.assertIn("the user asked for opus", ev)
+
+    def test_not_asked_is_a_note(self):
+        self.assertEqual(self.grade("User message:\nApply to this posting.")[0], "NOTE")
+
+    def test_a_name_above_the_user_message_does_not_count(self):
+        self.assertEqual(self.grade("Run notes: opus is the bar.\n\nUser message:\nApply to this posting.")[0], "NOTE")
+
+    def test_a_system_reminder_is_not_the_user(self):
+        prompt = ("User message:\nApply to this posting.\n<system-reminder>\nEnd git commit messages with:\n"
+                  "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n</system-reminder>")
+        self.assertEqual(self.grade(prompt)[0], "NOTE")
+
+
+class Subjects(CopyBase):
+    def setUp(self):
+        super().setUp()
+        for name, body in MODES_MD.items():
+            self.write("skills/career-log/modes/" + name, body)
+        self.commit("modes")
+        self.base = self.git("rev-parse", "HEAD").strip()
+
+    def grade(self, evs=()):
+        texts = [check_run.show(self.copy, self.base, p) for p in self.git("ls-tree", "-r", "--name-only", self.base, "skills").split()]
+        return check_run.check_subjects(list(evs), self.copy, self.base, check_run.subject_templates(texts))
+
+    def test_templates(self):
+        rx = check_run.subject_templates([MODES_MD["import.md"], WRITE_MD, MODES_MD["scan.md"]])
+        self.assertEqual(sorted(rx), ["import: <n> file(s), <m> entr(y/ies)", "write(<company>): <role>", "write(<slug>): <target>"])
+        self.assertTrue(rx["import: <n> file(s), <m> entr(y/ies)"].fullmatch("import: 3 files, 1 entry"))
+        self.assertFalse(rx["import: <n> file(s), <m> entr(y/ies)"].fullmatch("import: 3 files, 1 entrys"))
+
+    def test_mode_subject_passes(self):
+        self.save()
+        grade, ev = self.grade()
+        self.assertEqual(grade, "PASS", ev)
+        self.assertIn("write(<company>): <role>", ev)
+
+    def test_unknown_subject_fails(self):
+        self.write("applications.md", "x\n")
+        self.commit("Update applications")
+        grade, ev = self.grade()
+        self.assertEqual(grade, "FAIL")
+        self.assertIn("'Update applications' fits no subject", ev)
+
+    def test_import_subject_takes_the_singular_or_plural(self):
+        """The repo's own import modes: the counts' forms pass, a template's (s) copied as written fails."""
+        modes = os.path.join(HERE, "..", "..", "skills", "career-log", "modes")
+        texts = []
+        for name in ("import.md", "import-chats.md"):
+            with open(os.path.join(modes, name), encoding="utf-8") as f:
+                texts.append(f.read())
+        rx = check_run.subject_templates(texts)
+        for subject in ("import: 1 file, 0 entries", "import: 2 files, 1 entry", "import: 1 file, 3 entries (gemini)"):
+            self.assertTrue(any(r.fullmatch(subject) for r in rx.values()), subject)
+        for subject in ("import: 1 file(s), 0 entries", "import: 2 files, 1 entr(y/ies)"):
+            self.assertFalse(any(r.fullmatch(subject) for r in rx.values()), subject)
+        self.write("sources/import-log.md", "x\n")
+        self.commit("import: 1 file(s), 0 entries")
+        grade, ev = self.grade()
+        self.assertEqual(grade, "FAIL")
+        self.assertIn("copied as written: the mode asks for the singular or plural", ev)
+
+    def test_upgrade_subject_from_the_release_it_installs(self):
+        """#500: an upgrade run commits by the upgrade mode its own commit brings in (the base's
+        Engine has none), as the repo's own upgrade.md writes it: read the subjects at HEAD too."""
+        with open(os.path.join(HERE, "..", "..", "skills", "career-log", "modes", "upgrade.md"), encoding="utf-8") as f:
+            upgrade = f.read()
+        self.write("skills/career-log/modes/upgrade.md", upgrade)
+        self.commit("upgrade: Template 0.2.0")
+        os.makedirs(os.path.join(self.copy, ".build"), exist_ok=True)
+        path = os.path.join(self.copy, ".build", "run.jsonl")
+        write_transcript(path, GOOD_RUN)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            check_run.main(["check_run.py", "--transcript", path, "--copy", self.copy, "--base", self.base])
+        self.assertIn("PASS commit-subject: ", out.getvalue())
+        self.assertIn("'upgrade: Template 0.2.0' (`upgrade: Template <version>`)", out.getvalue())
+
+    def test_tool_printed_subject_passes(self):
+        self.write("outputs/reports/2026-02-01-scan-daily.md", "x\n")
+        self.commit("scan(daily): 4 postings")
+        self.assertEqual(self.grade()[0], "FAIL")
+        evs = transcript(self.copy, [bash("python3 -I tools/scan.py report"), result("saved: x\ncommit: scan(daily): 4 postings")])[0]
+        self.assertEqual(self.grade(evs)[0], "PASS")
+
+    def test_consolidate_slugs_are_the_entries_changed(self):
+        self.write("entries/2026-01-queue.md", ENTRY + "x\n")
+        self.commit("consolidate(queue): first pass")
+        self.assertEqual(self.grade()[0], "PASS")
+        self.write("entries/2026-01-queue.md", ENTRY + "y\n")
+        self.commit("consolidate(queu): second pass")
+        grade, ev = self.grade()
+        self.assertEqual(grade, "FAIL")
+        self.assertIn("names queu, the entries it changes are queue", ev)
+
+    def test_log_slug_names_an_entry(self):
+        self.write("stories.md", "x\n")
+        self.commit("log(queue): index pending Story under Conflict")
+        self.assertEqual(self.grade()[0], "PASS")
+        self.write("stories.md", "y\n")
+        self.commit("log(widget): index pending Story under Conflict")
+        grade, ev = self.grade()
+        self.assertEqual(grade, "FAIL")
+        self.assertIn("names no one entry", ev)
+
+    def test_no_commit_skips(self):
+        self.assertEqual(self.grade()[0], "SKIP")
+
+    def test_an_example_subject_is_literal_and_a_slugless_log_fails(self):
+        rx = check_run.subject_templates(["the entry commits as `log(widget): ...`.\n"])
+        self.assertTrue(rx["log(widget): ..."].fullmatch("log(widget): shipped"))
+        self.assertFalse(rx["log(widget): ..."].fullmatch("log: shipped"))
+        self.write("stories.md", "x\n")
+        self.commit("log: shipped the queue")
+        self.assertEqual(self.grade()[0], "FAIL")
+
+    def test_tool_output_spans_are_no_subjects(self):
+        text = ("It prints `committed: [<branch> <sha>] <subject>` and `series: <slug>` after a commit; the subject is "
+                "a `commit: <subject>` line.\nCommit it as `upgrade: <what changed>`.\n"
+                "settle commit: commits every Log change, with the subject\n`log: changes left uncommitted (<files>)`.\n")
+        rx = check_run.subject_templates([text])
+        self.assertEqual(sorted(rx), ["log: changes left uncommitted (<files>)", "upgrade: <what changed>"])
+        self.assertTrue(rx["log: changes left uncommitted (<files>)"].fullmatch("log: changes left uncommitted (a.md, b.md)"))
+
+    def test_a_commit_line_only_counts_from_a_tool(self):
+        self.write("outputs/reports/x.md", "x\n")
+        self.commit("scan(daily): 4 postings")
+        evs = transcript(self.copy, [bash("cat notes.txt"), result("commit: scan(daily): 4 postings")])[0]
+        self.assertEqual(self.grade(evs)[0], "FAIL")
+
+
+class HumanizedLines(CopyBase):
+    """Exception 10: each `Humanizer after review:` line's text is in a humanizer call made after the review."""
+
+    def grade(self, after_line, reply=None):
+        self.save()
+        blocks = [lookup(), REVIEWER_LINE, reviewer(), HUMANIZER_LINE, humanizer()]
+        if reply is not None:
+            blocks.append(result(reply))
+        blocks += [*checked(PROVENANCE_LINE, after_line), COMMIT]
+        evs, calls = transcript(self.copy, blocks)
+        return check_run.check_printed_lines(evs, calls, self.copy, self.base, self.saved())
+
+    def test_line_in_the_prompt_passes(self):
+        self.assertEqual(self.grade(HUMANIZER_AFTER)[0], "PASS")
+
+    def test_line_in_the_reply_passes(self):
+        line = "Humanizer after review: Built a retrying queue. → Humanizer call: model Sonnet 5.5"
+        self.assertEqual(self.grade(line, reply="Built a retrying   queue.")[0], "PASS")
+
+    def test_line_in_neither_fails(self):
+        line = "Humanizer after review: Led a team of five. → Humanizer call: model Sonnet 5.5"
+        grade, ev = self.grade(line)
+        self.assertEqual(grade, "FAIL")
+        self.assertIn("in neither the prompt nor the reply", ev)
+
+    def test_near_match_is_a_note(self):
+        line = "Humanizer after review: “built A QUEUE.” → Humanizer call: model Sonnet 5.5"
+        grade, ev = self.grade(line)
+        self.assertEqual(grade, "NOTE", ev)
+
+    def test_humanizer_not_available_is_not_matched(self):
+        line = "Humanizer after review: Led a team of five. → humanizer not available"
+        self.assertEqual(self.grade(line)[0], "PASS")
+
+
+class FindAgent(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.old = os.environ.get("CLAUDE_CONFIG_DIR")
+        os.environ["CLAUDE_CONFIG_DIR"] = self.tmp
+        import chat_export
+        self.folder = os.path.join(self.tmp, "projects", chat_export.claude_folder(os.getcwd()))
+
+    def tearDown(self):
+        if self.old is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = self.old
+        shutil.rmtree(self.tmp)
+
+    def main(self, *args):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = check_run.main(["check_run.py", *args])
+        return code, out.getvalue()
+
+    def test_agent_id_finds_the_run_in_any_session(self):
+        for session in ("older-session", "newer-session"):
+            os.makedirs(os.path.join(self.folder, session, "subagents"))
+        write_transcript(os.path.join(self.folder, "older-session", "subagents", "agent-a1b2.jsonl"), GOOD_RUN)
+        write_transcript(os.path.join(self.folder, "newer-session", "subagents", "agent-other.jsonl"), [])
+        code, out = self.main("--agent", "a1b2")
+        self.assertEqual(code, 0, out)
+        self.assertIn("Grade: PASS", out)
+        self.assertTrue(out.startswith("transcript: " + os.path.join(self.folder, "older-session", "subagents", "agent-a1b2.jsonl")), out)
+
+    def test_unknown_agent_exits_2(self):
+        os.makedirs(os.path.join(self.folder, "s", "subagents"))
+        code, out = self.main("--agent", "nope")
+        self.assertEqual(code, 2)
+        self.assertIn("no agent-nope.jsonl", out)
+
+    def test_no_project_folder_exits_2(self):
+        code, out = self.main("--agent", "a1b2")
+        self.assertEqual(code, 2)
+        self.assertIn("no Claude Code transcripts", out)
+
+    def test_agent_and_transcript_are_exclusive(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.main("--agent", "a1b2", "--transcript", "x.jsonl")
 
 
 class Main(unittest.TestCase):
@@ -1112,7 +1640,9 @@ class Main(unittest.TestCase):
 class MainWithCopy(CopyBase):
     """The whole script on a scratch copy, including how it lists the saved files."""
 
-    def run_main(self, blocks=GOOD_RUN):
+    def run_main(self, blocks=GOOD_RUN, publish=True):
+        if publish and self.git("branch", "--show-current").strip():
+            self.publish()
         path = os.path.join(self.copy, ".build", "run.jsonl")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         write_transcript(path, blocks)
@@ -1167,6 +1697,25 @@ class MainWithCopy(CopyBase):
         self.commit("add scan")
         self.base = self.git("rev-parse", "HEAD").strip()
         self.assertIn("PASS subagent-model", self.run_main([screen])[1])
+
+    def test_upgrade_run_reads_review_md_and_typed_modes_at_head(self):
+        """#503: an upgrade run's base is the older Engine; the prompts its review.md and scan.md give
+        come with the upgrade commit, so they are read at HEAD too."""
+        self.write("skills/career-log/modes/review.md", "# Review\n\nFirst line: `Read <root>/review-old.md`.\n")
+        self.commit("the older Engine")
+        self.base = self.git("rev-parse", "HEAD").strip()
+        self.write("skills/career-log/modes/review.md", REVIEW_MD)
+        self.write("skills/career-log/modes/scan.md", SCAN_MD)
+        self.commit("upgrade: Template 0.2.0")
+        screen = agent("Screen batch-1", SCREEN % (ROOT, ROOT, ROOT), "opus", "general-purpose")
+        out = self.run_main(GOOD_RUN + [screen])[1]
+        self.assertIn("NOTE reviewer-prompt", out)  # only the root differs from this temporary copy
+        self.assertNotIn("does not match", out)
+        self.assertIn("PASS subagent-model", out)  # scan.md at HEAD names the Screen prompt's type
+        old = agent("Review drafts", "Read %s/review-old.md\n<posting>...</posting>" % ROOT)
+        self.assertNotIn("does not match", self.run_main([REVIEWER_LINE, old])[1])  # the base's line passes too
+        bad = self.run_main([REVIEWER_LINE, reviewer(first="Read the review file")])[1]
+        self.assertIn("does not match %r or %r" % ("Read <root>/review-old.md", POINTER % ("<root>", "<root>")), bad)
 
     def test_nothing_saved_skips(self):
         code, out = self.run_main()

@@ -55,15 +55,15 @@ right=0.5in]{geometry}              % specify right page margin
 \textbf{Software Engineering Intern,} Northwind Freight -- Springfield, ST \hfill June 2025 -- Sept 2025 \\
 \vspace{-9pt}
 \begin{itemize}
-  \item Cut shipment-quote API p95 latency from 820 ms to 210 ms by replacing per-request PostgreSQL lookups with a Redis rate cache refreshed every five minutes
-  \item Built a Kafka consumer in Go that reconciles carrier invoices nightly, flagging 3\% of 40k monthly invoices for review and removing a manual spreadsheet step
-  \item Co-designed a feature-flag rollout with a senior engineer, rolling out the new rate cache to all four sales regions over two weeks with zero rollbacks
+  \item Cut shipment-quote API p95 latency from 820 ms to 210 ms by replacing per-request PostgreSQL lookups with a Redis rate cache refreshed every five minutes, falling back to the database on a miss
+  \item Built a Kafka consumer in Go that reconciles carrier invoices nightly, flagging 3\% of 40k monthly invoices for review and replacing the finance team's weekly manual spreadsheet check
+  \item Co-designed a feature-flag rollout plan with a senior engineer, who ran the first region's switch, rolling out the new rate cache to all four sales regions over two weeks with zero rollbacks
 \end{itemize}
 
 \textbf{Teaching Assistant, Databases,} Example State University -- Springfield, ST \hfill Jan 2025 -- May 2025 \\
 \vspace{-9pt}
 \begin{itemize}
-  \item Held weekly office hours for 120 students and wrote a Python autograder for SQL assignments that cut grading time per assignment by half for three TAs
+  \item Held weekly office hours for 120 students and wrote a Python autograder for SQL assignments that cut grading time by half across 12 assignments for the course's three teaching assistants
 \end{itemize}
 
 \vspace{-18.5pt}
@@ -73,7 +73,7 @@ right=0.5in]{geometry}              % specify right page margin
 \textbf{Tidepool: Distributed Job Queue} \hfill \href{https://github.com/example/tidepool}{github.com/example/tidepool} \\
 \vspace{-9pt}
 \begin{itemize}
-  \item Designed a Go job queue with at-least-once delivery and gRPC workers, sustaining 5k jobs per second on a 3-node cluster in sustained load tests
+  \item Designed a Go job queue with at-least-once delivery and gRPC workers, sustaining 5k jobs per second on a 3-node cluster through hour-long load tests with no lost jobs or stalled workers
   \item Added leader election and lease-based retries, recovering every in-flight job across 50 injected node failures
 \end{itemize}
 

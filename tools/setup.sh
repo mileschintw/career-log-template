@@ -1,15 +1,15 @@
 #!/bin/sh
-# Machine setup on macOS and Linux (SETUP.md step 5). Idempotent. Installs for this user only,
-# except Homebrew on a Mac without it: its installer asks for the user's password through macOS's
-# own dialog (tools/askpass-macos.sh as SUDO_ASKPASS), which the user at the machine answers. On
-# Linux a step that needs sudo is printed for the user to run, at the end.
+# Machine setup on macOS and Linux (SETUP.md step 5). Idempotent. Installs for this user only, with
+# no password. On Linux a step that needs sudo (Chromium's system libraries) is printed for the user
+# to run, at the end.
 #
 #   tools/setup.sh [--yes playwright-cli] [--no playwright-cli]
 #
 # Always: Python 3.11+ (through uv, into ~/.local/bin, when python3 is older), and TinyTeX (pdfTeX;
 #   the templates use \pdfgentounicode, so XeTeX/LuaTeX and Tectonic will not do), the packages in
-#   tools/tex-packages.txt, and poppler (pdfinfo, pdftotext, pdftoppm) for tools/resume.py's checks
-#   (macOS: Homebrew's; Linux: apt's, through the printed sudo line).
+#   tools/tex-packages.txt, and poppler (pdfinfo, pdftotext, pdftoppm) for tools/resume.py's checks:
+#   the user's own when tools/resume.py finds one, else conda-forge's, which micromamba installs
+#   into ~/.career-log/poppler and a rerun updates (#281).
 # Optional, installed only when ~/.career-log/machine.toml says yes for it:
 #   playwright-cli  Node 18+ (through nvm), @playwright/cli (npm), its skill in this checkout,
 #                   Chromium when Chrome and Edge are both missing (Linux: Chromium's system
@@ -54,18 +54,21 @@ if [ -f "$MACHINE" ] && grep -q "^tinytex *=" "$MACHINE"; then
   mv "$MACHINE.tmp" "$MACHINE"
   echo "machine.toml: removed tinytex (TinyTeX is no longer optional: setup always installs it)"
 fi
+set_machine() {   # set_machine <key> <TOML value>: one `<key> = <value>` line in machine.toml
+  mkdir -p "$(dirname "$MACHINE")"
+  [ -f "$MACHINE" ] || printf '%s\n' "# career-log Machine setup: the optional tools the user wants on this machine" \
+    "# (true) or declined (false), and where poppler came from. Written by tools/setup.sh and" \
+    "# tools/setup.ps1; whether a tool is installed is detected on every run (tools/check.py)." > "$MACHINE"
+  grep -v "^$1 *=" "$MACHINE" > "$MACHINE.tmp" || true
+  echo "$1 = $2" >> "$MACHINE.tmp"
+  mv "$MACHINE.tmp" "$MACHINE"
+  echo "machine.toml: $1 = $2"
+}
 choose() {   # choose <comma list> <true|false>
   for t in $(echo "$1" | tr ',' ' '); do
     [ "$t" = tinytex ] && { echo "tinytex: not optional any more; setup always installs it"; continue; }
     case " $TOOLS " in *" $t "*) ;; *) echo "unknown tool: $t (tools: $TOOLS)"; exit 2 ;; esac
-    mkdir -p "$(dirname "$MACHINE")"
-    [ -f "$MACHINE" ] || printf '%s\n' "# career-log Machine setup: the optional tools the user wants on this machine" \
-      "# (true) or declined (false). Written by tools/setup.sh and tools/setup.ps1; whether a tool" \
-      "# is installed is detected on every run (tools/check.py), never stored here." > "$MACHINE"
-    grep -v "^$t *=" "$MACHINE" > "$MACHINE.tmp" || true
-    echo "$t = $2" >> "$MACHINE.tmp"
-    mv "$MACHINE.tmp" "$MACHINE"
-    echo "machine.toml: $t = $2"
+    set_machine "$t" "$2"
   done
 }
 GOT_YES=; GOT_NO=
@@ -225,51 +228,93 @@ install_playwright() {
   if [ "$OS" = linux ] && { [ -z "$BROWSER" ] || config_names_chromium; }; then
     CLI=$(dirname "$(readlink -f "$(command -v playwright-cli)")")
     CORE=
-    for c in "$CLI/node_modules/playwright-core/cli.js" "$CLI/../lib/node_modules/@playwright/cli/node_modules/playwright-core/cli.js"; do
+    # The paths tools/check.py's playwright_core_cli tries
+    for c in "$CLI/node_modules/playwright-core/cli.js" "$CLI/node_modules/@playwright/cli/node_modules/playwright-core/cli.js" \
+             "$CLI/../lib/node_modules/@playwright/cli/node_modules/playwright-core/cli.js"; do
       [ -f "$c" ] && { CORE=$c; break; }
     done
     CACHE=${PLAYWRIGHT_BROWSERS_PATH:-${XDG_CACHE_HOME:-$HOME/.cache}/ms-playwright}
     # The libraries Chromium cannot find (ldd), as Playwright checks at launch
     if for b in "$CACHE"/chromium-*/chrome-linux*/chrome "$CACHE"/chromium_headless_shell-*/chrome-*/chrome-headless-shell; do
          [ -x "$b" ] && ldd "$b" 2>/dev/null; done | grep -q "not found"; then
+      # playwright-core's install-deps downloads no browser; without it, no command here is libraries only
       if [ -n "$CORE" ]; then sudo_line "sudo $(command -v node) $CORE install-deps chromium   # Chromium's system libraries"
-      else sudo_line "sudo env PATH=\"\$PATH\" playwright-cli install-browser --with-deps chromium   # Chromium's system libraries"
+      else user_line "Chromium's system libraries: reinstall playwright-cli with \`npm install -g @playwright/cli@latest\`, since playwright-core, whose install-deps installs them, is not in $CLI"
       fi
     fi
   fi
 }
 
-# ---- TinyTeX ----
+# ---- poppler ----
 
-# poppler's pdftotext, not xpdf's: tools/resume.py needs -bbox-layout. Homebrew's folders too, for
-# a Homebrew this run installed, which is not on this shell's PATH yet.
+# poppler's pdftotext (tools/resume.py needs its -bbox-layout, which xpdf's lacks), as tools/resume.py
+# picks it: the user's own first (POPPLER_BIN, Homebrew's folders, PATH), setup's environment last
 pdftotext_bin() {
-  for p in ${POPPLER_BIN:+"$POPPLER_BIN/pdftotext"} "$(command -v pdftotext 2>/dev/null || true)" \
-           /opt/homebrew/bin/pdftotext /usr/local/bin/pdftotext; do
-    [ -n "$p" ] && [ -x "$p" ] && "$p" -h 2>&1 | grep -q -- -bbox-layout && { echo "$p"; return 0; }
-  done
-  return 1
+  "$PY" -B -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import resume
+p = resume.poppler_bin("pdftotext"); print(p or ""); sys.exit(not p)' "$ROOT/tools"
 }
-brew_bin() {
-  for b in "$(command -v brew 2>/dev/null || true)" /opt/homebrew/bin/brew /usr/local/bin/brew; do
-    [ -n "$b" ] && [ -x "$b" ] && { echo "$b"; return 0; }
-  done
-  return 1
-}
-install_brew() {
+# tools/resume.py's poppler_env, spelled as it prints the paths it finds
+POPPLER_ENV=$("$PY" -B -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import resume; print(resume.poppler_env())' "$ROOT/tools")
+MAMBA_VERSION=2.9.0-0   # micromamba's release; the download is checked against the release's .sha256
+MAMBA_ROOT="$(dirname "$POPPLER_ENV")/micromamba"   # micromamba and its package cache
+MAMBA="$MAMBA_ROOT/micromamba"
+get_micromamba() {
+  [ -x "$MAMBA" ] && return 0
   need curl
-  ASKPASS="$ROOT/tools/askpass-macos.sh"
-  chmod +x "$ASKPASS"   # a copy that lost its mode (a ZIP download) cannot run as SUDO_ASKPASS
-  echo "Installing Homebrew, for poppler: macOS asks for the user's login password in its own dialog"
-  # Homebrew's installer runs sudo -A when SUDO_ASKPASS is set; NONINTERACTIVE skips its "press RETURN"
-  SUDO_ASKPASS="$ASKPASS" NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || return 1
-  BREW=$(brew_bin) || return 1
-  # Homebrew's own next step: its folder on PATH in every new login shell
-  PROFILE="$HOME/.zprofile"
-  case "${SHELL:-}" in */bash) PROFILE="$HOME/.bash_profile" ;; esac
-  LINE="eval \"\$($BREW shellenv)\""
-  grep -qsF "$LINE" "$PROFILE" || { echo "$LINE" >> "$PROFILE"; echo "added to $PROFILE: $LINE"; }
+  case "$OS-$(uname -m)" in
+    mac-arm64) P=osx-arm64 ;; mac-*) P=osx-64 ;;
+    linux-aarch64|linux-arm64) P=linux-aarch64 ;; linux-x86_64) P=linux-64 ;;
+    *) echo "micromamba: no build for $(uname -m)"; return 1 ;;
+  esac
+  URL="https://github.com/mamba-org/micromamba-releases/releases/download/$MAMBA_VERSION/micromamba-$P"
+  echo "Downloading micromamba $MAMBA_VERSION (about 15-20 MB) into $MAMBA_ROOT"
+  mkdir -p "$MAMBA_ROOT"
+  curl -fsSL --retry 5 -o "$MAMBA.part" "$URL" && SUM=$(curl -fsSL --retry 5 "$URL.sha256") || { rm -f "$MAMBA.part"; return 1; }
+  GOT=$( { sha256sum "$MAMBA.part" 2>/dev/null || shasum -a 256 "$MAMBA.part"; } | cut -d' ' -f1)
+  if [ "$GOT" != "$(echo "$SUM" | cut -d' ' -f1)" ]; then
+    echo "micromamba: the download does not match its checksum"; rm -f "$MAMBA.part"; return 1
+  fi
+  chmod +x "$MAMBA.part" && mv "$MAMBA.part" "$MAMBA"
 }
+# --no-rc with --override-channels -c conda-forge: conda-forge only, whatever a .condarc of the user's says
+mamba() { "$MAMBA" "$@" -y --no-rc -r "$MAMBA_ROOT"; }
+
+install_poppler() {
+  FOUND=$(pdftotext_bin) || FOUND=
+  case "$FOUND" in
+    ""|"$POPPLER_ENV"/*) ;;
+    *) echo "poppler: $FOUND (the user's own: used as it is)"; set_machine poppler '"own"'
+       # micromamba serves only setup's environment: with no working one left, both go
+       if [ -d "$MAMBA_ROOT" ] && [ ! -f "$POPPLER_ENV/bin/pdftotext" ]; then
+         if rm -rf "$MAMBA_ROOT" "$POPPLER_ENV"; then echo "removed $MAMBA_ROOT: setup has no poppler environment to manage"; fi
+       fi
+       return ;;
+  esac
+  if ! get_micromamba; then
+    user_line "poppler: micromamba did not download (offline, or behind a proxy: set HTTPS_PROXY), so rerun this script; or install poppler yourself and set POPPLER_BIN to its bin folder"
+    return
+  fi
+  # An environment with its pdftotext in place is updated, even when that pdftotext did not answer
+  # (a first run slowed by a virus scan, say); one an interrupted run left without it is made afresh
+  if [ -n "$FOUND" ] || { [ -d "$POPPLER_ENV/conda-meta" ] && [ -f "$POPPLER_ENV/bin/pdftotext" ]; }; then
+    echo "Updating poppler in $POPPLER_ENV (micromamba, conda-forge)"
+    mamba update -p "$POPPLER_ENV" --override-channels -c conda-forge --all ||
+      echo "poppler: the update failed; rerun this script to try again"
+  else
+    rm -rf "$POPPLER_ENV"
+    echo "Installing poppler into $POPPLER_ENV (micromamba, conda-forge)"
+    # created empty, then filled: `create` with packages ends by telling the user to activate the
+    # environment, which career-log never needs
+    if ! { mamba create -p "$POPPLER_ENV" >/dev/null && mamba install -p "$POPPLER_ENV" --override-channels -c conda-forge poppler; }; then
+      user_line "poppler: micromamba could not install it (its error is above), so rerun this script; or install poppler yourself and set POPPLER_BIN to its bin folder"
+      return
+    fi
+  fi
+  rm -rf "$MAMBA_ROOT/pkgs"   # the downloaded packages (about 300 MB): the environment has its own links or copies
+  if pdftotext_bin >/dev/null; then set_machine poppler '"micromamba"'; fi
+}
+
+# ---- TinyTeX ----
 
 find_bin() { for d in "$TEXDIR"/bin/*/; do [ -x "$d/pdflatex" ] && { echo "${d%/}"; return; }; done; }
 
@@ -294,20 +339,7 @@ install_tinytex() {
   # shellcheck disable=SC2086
   "$BIN/tlmgr" install $PKGS
 
-  if ! pdftotext_bin >/dev/null; then
-    if [ "$OS" = mac ]; then
-      BREW=$(brew_bin) || { install_brew && BREW=$(brew_bin); } || BREW=
-      if [ -n "$BREW" ]; then
-        "$BREW" install poppler || user_line "brew install poppler failed: run it yourself and read its error, or set POPPLER_BIN"
-      else
-        user_line "Homebrew did not install (the password dialog was cancelled or timed out, or this macOS account is not an administrator): rerun this script and enter the password in the dialog, or install poppler yourself and set POPPLER_BIN to its bin folder"
-      fi
-    elif [ "$OS" = linux ] && command -v apt-get >/dev/null 2>&1; then
-      sudo_line "sudo apt-get install poppler-utils   # pdfinfo, pdftotext, pdftoppm"
-    else
-      user_line "install poppler (pdfinfo, pdftotext, pdftoppm) with the package manager you use, or set POPPLER_BIN to the bin folder of one you have"
-    fi
-  fi
+  install_poppler
   if ! pdftotext_bin >/dev/null; then
     echo "poppler missing: skipping the example build until it is installed"
     return

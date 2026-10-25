@@ -1,6 +1,6 @@
 # Writing standards
 
-Rules every output follows, whoever the log belongs to. `write` and the review pass check drafts against this file. The user's own preferences live in `direction.md › Writing preferences for applications`; where the two disagree, the user's preference wins.
+Rules every output follows, whoever the log belongs to. `write` and the review pass check drafts against this file. `tools/writing_lint.py` reads the word lists in parentheses and quotes on its rule lines, so a word added there is checked at once. The user's own preferences live in `direction.md › Writing preferences for applications`; where the two disagree, the user's preference wins.
 
 Each rule names where it comes from:
 - **r/ER**: the r/EngineeringResumes wiki ([index](https://www.reddit.com/r/EngineeringResumes/wiki/index/), read 2026-10-15; [sample bullet points](https://www.reddit.com/r/EngineeringResumes/wiki/sample-bullet-points/)) and its [LaTeX template](https://github.com/r-engineeringresumes/resume-templates) (MIT);
@@ -16,7 +16,7 @@ Run this on every draft before the user sees it, and after a review on the text 
 
 1. **Join clauses with a comma, a colon, parentheses or two sentences,** never an em dash (—). Date ranges keep their en dash (`--` in LaTeX). (humanizer)
 2. **Say what happened,** at its real size: no "pivotal", "testament to", "plays a crucial role", "in today's fast-paced world". (humanizer)
-3. **Plain words** in place of stock AI words: delve, leverage (as a verb for "use"), seamless, robust, showcase, foster, spearhead, harness, tapestry, landscape. (humanizer)
+3. **Plain words** in place of stock AI words: delve, leverage (as a verb for "use"), seamless, robust, showcase, foster (as a verb), spearhead, harness (as a verb), tapestry, landscape. (humanizer)
 4. **List as many items as there are,** not a forced group of three. (humanizer)
 5. **Sentences in prose answers,** with no bold mini-headings and no "**Label:** text" lists where a sentence would do. (humanizer)
 6. **Start with the answer and stop when it is given,** with no chatbot openers or closers ("Great question", "I hope this helps", "In conclusion"). (humanizer)
@@ -54,16 +54,16 @@ Never fabricate, and Principle 3, apply to every output. The rest applies to res
 ### Format
 
 - **Template:** the r/EngineeringResumes LaTeX template, single column, no icons or graphics. Editing and building: [latex.md](latex.md). (r/ER)
-- **One page**, unless the user has 10+ years of experience. (r/ER)
-- **Over one page:** cut by relevance to the target, not by section: the weakest bullet for this posting or target goes first, wherever it sits. `direction.md › What to emphasise` decides what is weak. (practice)
-- **Bullets** are one sentence and at most 2 lines, and a wrapped bullet's last line is not a fragment of 1–4 words. `tools/resume.py` checks the lines. No personal pronouns, no trailing periods. (r/ER)
+- **Pages:** at most `resume_max_pages` (a Config field: 1 by default; setup suggests 2 for 10+ years of experience); `tools/resume.py` checks it. (r/ER)
+- **Over the page limit:** cut by relevance to the target, not by section: the weakest bullet for this posting or target goes first, wherever it sits. `direction.md › What to emphasise` decides what is weak. (practice)
+- **Bullets** are one sentence and at most 2 lines, and a wrapped bullet's last line is not a short fragment; `tools/resume.py` checks the lines. No personal pronouns (I, me, my, we, us, our), no trailing periods. (r/ER)
 - **A long bullet**, one over the **Bullets** limits, is fixed in its words: cut a clause, swap a long phrase for a shorter one the entry supports, or add a few words to fill a short last line. (practice)
 - **Opening verbs** are strong and past tense (built, designed, reduced), not weak (helped, assisted, worked on) and not inflated (spearheaded, orchestrated, leveraged). Vary them within a section. (r/ER)
 - **Bold** sparingly. r/ER advises against bolding keywords inside bullets; follow the user's approved versions if they do. (r/ER)
 - **Dates** sit at the right margin. No summary section unless the user is senior, changing careers or explaining a gap; no references section. (r/ER)
 - **The graduation date**, for a student or recent graduate, sits where the reader sees it at once. (feedback)
-- **A promotion at one employer** shows as two titles with their own dates. Don't merge or hide it. (practice)
-- **Plain-text check:** paste the resume as plain text to check that an ATS reads it in order. (TIH)
+- **A promotion at one employer** shows as two titles with their own dates, under the one employer heading. Don't merge or hide it. A series whose parts are the promotion is laid out the same way ([write.md](modes/write.md) step 6). (practice)
+- **Plain-text check:** read the text layer `tools/resume.py` writes (its `note: text layer:` line) to check that an ATS reads the resume in order. (TIH)
 
 ### Content
 
@@ -89,10 +89,10 @@ Never fabricate, and Principle 3, apply to every output. The rest applies to res
 
 ### Skills section
 
-- **Titled "Skills"**, grouped by category, items comma-separated with their proper names ("C, C++", not "C/C++"). No soft skills, operating systems, editors or proficiency labels. A skill listed here also shows up in a bullet where the log has one that uses it: recruiters check the Skills section against the posting, then look for experience that uses those skills, work before projects. A skill the posting needs and the log records but no bullet can show still gets listed, under **Thin evidence is flagged** below. (r/ER; feedback)
+- **Titled "Skills"**, grouped by category, items comma-separated with their proper names ("C, C++", not "C/C++"). No soft skills, operating systems (Linux, macOS, Windows), editors (VS Code, Vim, Emacs) or proficiency labels (proficient, expert, advanced, intermediate, beginner, familiar). A skill listed here also shows up in a bullet where the log has one that uses it: recruiters check the Skills section against the posting, then look for experience that uses those skills, work before projects. A skill the posting needs and the log records but no bullet can show still gets listed, under **Thin evidence is flagged** below. (r/ER; feedback)
 - **List what the user installs, runs or operates:** languages, frameworks, libraries, databases, services. Protocols, standards and algorithms (OAuth 2.0, HTTP/2, consistent hashing) go in the bullets, where the context shows the user understands them; ATS reads the bullets too. An exception needs strong evidence that it helps relevance; argue it out and ask the user if still unsure. (practice)
 - **Names follow postings:** write a tool the way postings write it, and list only tools postings name. A concept that is not a tool ("rate limiting") stays in the bullets. (practice)
 - **Umbrella terms:** where a posting uses one ("data pipelines"), put that term in a bullet next to the concrete tool. (practice)
 - **Each item fits its line's label.** When a tool fits no line, rename the label or leave the tool off; a misfiled tool reads as not knowing what it is. (practice)
-- **Fill each line by relevance**, as far as it goes without wrapping: posting-named tools first, weaker but still relevant tools in the tail. Tools from shared projects count even where the user did not write that code, as long as the entry records them. (practice)
+- **Fill each line by relevance**, as far as it goes without wrapping (`tools/resume.py` fails a line that wraps): posting-named tools first, weaker but still relevant tools in the tail. Tools from shared projects count even where the user did not write that code, as long as the entry records them. (practice)
 - **Thin evidence is flagged.** A skill listed on thin evidence (coursework only, never used in a project) goes on `profile.md › Interview prep list`, so `interview` mode reviews it. (practice)

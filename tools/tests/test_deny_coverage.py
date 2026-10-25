@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Tests for tools/deny_coverage.py, on small made-up Logs built in a temporary directory.
+"""Tests for tools/deny_coverage.py, on small made-up Logs built in a temporary directory; the
+--commit and clear ones in a clone of a bare origin, with git's global and system config left out,
+as tools/tests/test_sync.py does.
 
   python3 -I tools/tests/test_deny_coverage.py
 """
-import importlib.util, io, os, tempfile, unittest
+import importlib.util, io, os, shlex, shutil, subprocess, sys, tempfile, unittest
 from contextlib import redirect_stdout
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -96,7 +98,7 @@ def make_log(root, deny="", cleared=None):
 def run(root):
     out = io.StringIO()
     with redirect_stdout(out):
-        rc = deny_coverage.main(["deny_coverage.py", root])
+        rc = deny_coverage.main(["deny_coverage.py", "--root", root])
     return rc, out.getvalue()
 
 
@@ -152,8 +154,77 @@ class Recorded(unittest.TestCase):
             self.assertIn("no table in profile.md has a column", notes[0])
 
     def test_quoted_title_and_org(self):
+        # A quoted org is one name; a title is still cut at ` — ` and split
         text = '---\ntitle: "Zentrovia — Dev"\norg: "Quillfeather, Inc."\n---\n'
-        self.assertEqual(deny_coverage.entry_names(text), ["Zentrovia", "Quillfeather", "Inc"])
+        self.assertEqual(deny_coverage.entry_names(text), ["Zentrovia", "Quillfeather, Inc"])
+
+    def test_unquoted_org_is_split(self):
+        # Unquoted, a comma can list several employers on one line
+        self.assertEqual(deny_coverage.entry_names("---\norg: Quillfeather, Inc.\n---\n"), ["Quillfeather", "Inc"])
+
+    def test_quoted_list_and_hash(self):
+        # A quoted list item and a quoted `#` are read whole, as logfiles.front_matter reads them
+        self.assertEqual(deny_coverage.entry_names('---\norg: ["Acme, Inc", "Beta Labs"]\n---\n'),
+                         ["Acme, Inc", "Beta Labs"])
+        self.assertEqual(deny_coverage.entry_names('---\norg: ["GAP", "sponsored by Acme, Inc"]\n---\n'),
+                         ["Acme, Inc"])   # the GAP and connector rules apply to the whole value
+        self.assertEqual(deny_coverage.entry_names('---\norg: "Acme #1 Labs"   # the lab\n---\n'),
+                         ["Acme #1 Labs"])
+        self.assertEqual(deny_coverage.entry_names("---\norg:\n  - 'Acme #1 Labs'\n  - Beta # x\n---\n"),
+                         ["Acme #1 Labs", "Beta"])
+        # A quote inside quotes the same kind keeps the whole value (no one-letter `O` to deny)
+        self.assertEqual(deny_coverage.entry_names("---\norg: 'O''Brien Co'\ntitle: 'Children's Ward — Dev'\n---\n"),
+                         ["O'Brien Co", "Children's Ward"])
+
+    def test_a_part_of_a_quoted_name_covers_it(self):
+        # The export's grep -iwE matches whole words, so a deny line `Acme` covers `Acme, Inc`
+        patterns = [deny_coverage.compile_pattern("Acme")]
+        names = [(n, "e.md") for n in deny_coverage.entry_names('---\norg: ["Acme, Inc"]\n---\n')]
+        self.assertEqual(names, [("Acme, Inc", "e.md")])
+        self.assertEqual(deny_coverage.uncovered(names, patterns, []), [])
+
+    def test_every_line_of_a_repeated_key(self):
+        self.assertEqual(deny_coverage.entry_names("---\norg: Acme\norg: Beta\n---\n"), ["Acme", "Beta"])
+
+    def test_title_with_no_dash_when_org_names_no_one(self):
+        # With no ` — `, the whole title is a name only when `org` is missing, empty, `personal` or a GAP
+        for org in ("", "org:\n", "org: []\n", "org: personal\n", "org: Personal\n", "org: GAP\n",
+                    "org: GAP: which group ran it\n", "org: [personal, GAP]\n", 'org: "personal"\n',
+                    'org: [""]\n'):
+            self.assertEqual(deny_coverage.entry_names(f"---\ntitle: Brindlewood Kite Map\n{org}---\n"),
+                             ["Brindlewood Kite Map"], org)
+            self.assertEqual(deny_coverage.entry_names(f"---\ntitle: Brindlewood — Kite map\n{org}---\n"),
+                             ["Brindlewood"], org)
+        # An org that names someone: the title is read only up to ` — `, as before
+        for org in ("org: Quillfeather Labs\n", "org: Quillfeather (GAP: which team)\n", "org: [personal, Zentrovia]\n"):
+            names = deny_coverage.entry_names(f"---\ntitle: Brindlewood Kite Map\n{org}---\n")
+            self.assertNotIn("Brindlewood Kite Map", names, org)
+            names = deny_coverage.entry_names(f"---\ntitle: Brindlewood — Kite map\n{org}---\n")
+            self.assertIn("Brindlewood", names, org)
+            self.assertNotIn("Kite map", names, org)
+        # A whole title is one name: not split at commas or parentheses, its quoted text kept
+        for title in ("Notes, maps and kites", '"Kite, Map"', "Brindlewood (v2)", 'Rewrite of "Brindlewood"'):
+            self.assertEqual(len(deny_coverage.entry_names(f"---\ntitle: {title}\norg: personal\n---\n")), 1, title)
+        # `none` and `n/a` are not among the values that let a whole title be read
+        self.assertEqual(deny_coverage.entry_names("---\ntitle: Brindlewood Kite Map\norg: none\n---\n"), [])
+        # The org may come after the title
+        self.assertEqual(deny_coverage.entry_names("---\ntitle: Brindlewood Kite Map\norg: GAP\n---\n"),
+                         deny_coverage.entry_names("---\norg: GAP\ntitle: Brindlewood Kite Map\n---\n"))
+
+    def test_unclosed_front_matter_names_nothing(self):
+        self.assertEqual(deny_coverage.entry_names("---\ntitle: x\n\norg: Acme\n"), [])
+
+    def test_root_is_given_with_the_flag(self):
+        with tempfile.TemporaryDirectory() as root:
+            make_log(root)
+            for argv in ([root], ["--root"], ["--root", root, "--root", root], ["--root="]):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    self.assertEqual(deny_coverage.main(["deny_coverage.py"] + argv), 2, argv)
+                self.assertTrue(out.getvalue().startswith("usage:"), argv)
+            out = io.StringIO()
+            with redirect_stdout(out):
+                self.assertEqual(deny_coverage.main(["deny_coverage.py", "--root=" + root]), 1)
 
 
 class Pieces(unittest.TestCase):
@@ -470,18 +541,37 @@ class Main(unittest.TestCase):
             deny = os.path.join(root, ".export-deny")
             with open(deny, "rb") as f:
                 before = f.read()
-            here = deny_coverage.__file__
-            try:
-                deny_coverage.__file__ = os.path.join(root, "tools", "deny_coverage.py")
-                out = io.StringIO()
-                with redirect_stdout(out):
-                    rc = deny_coverage.main(["deny_coverage.py", "entry", entry])
-            finally:
-                deny_coverage.__file__ = here
+            out = io.StringIO()
+            with redirect_stdout(out):
+                rc = deny_coverage.main(["deny_coverage.py", "entry", "--root", root, entry])
             with open(deny, "rb") as f:
                 self.assertEqual(f.read(), before)
         self.assertEqual((rc, out.getvalue()), (0, "glintmoor\ncourse[^[:alnum:]]*group\nterm[^[:alnum:]]*two\n"
                                                    "widget[^[:alnum:]]*sorter[^[:alnum:]]*lab\n"))
+
+    def test_entry_relative_to_root(self):
+        # Run from another folder, a relative path is read against --root; one from the current folder wins
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as elsewhere:
+            make_log(root)
+            with open(os.path.join(root, "entries", "2026-08-kite.md"), "w", encoding="utf-8") as f:
+                f.write("---\ntitle: Brindlewood Kite Map\norg: personal\n---\n")
+            os.makedirs(os.path.join(elsewhere, "entries"))
+            with open(os.path.join(elsewhere, "entries", "2026-01-widget-sorter.md"), "w", encoding="utf-8") as f:
+                f.write("---\norg: Korvane\n---\n")
+            saved = os.getcwd()
+            try:
+                os.chdir(elsewhere)
+                outs = []
+                for rel in ("entries/2026-01-widget-sorter.md", "entries/2026-08-kite.md", "entries/no.md"):
+                    out = io.StringIO()
+                    with redirect_stdout(out):
+                        outs.append((deny_coverage.main(["deny_coverage.py", "entry", "--root", root, rel]),
+                                     out.getvalue()))
+            finally:
+                os.chdir(saved)
+        self.assertEqual(outs, [(0, "Korvane\n"),
+                                (0, "Brindlewood[^[:alnum:]]*Kite[^[:alnum:]]*Map\n"),
+                                (2, "FAIL: no entries/no.md\n")])
 
     def test_entry_not_utf8(self):
         with tempfile.TemporaryDirectory() as root:
@@ -531,7 +621,7 @@ class Main(unittest.TestCase):
 
     def test_help(self):
         for args in (["--help"], ["-h"], [".", "--help"], ["line", "-h"], ["line", "Korvane", "--help"],
-                     ["entry", "--help"]):
+                     ["entry", "--help"], ["entry", "--commit", "--help"], ["clear", "--help"]):
             out = io.StringIO()
             with redirect_stdout(out):
                 rc = deny_coverage.main(["deny_coverage.py"] + args)
@@ -543,6 +633,309 @@ class Main(unittest.TestCase):
                 f.write("Someone\n")
             self.assertEqual(run(root), (0, "OK: .export-deny covers 0 recorded names\n"))
 
+
+    def test_any_console_prints_names(self):
+        # A console whose code page lacks a name's characters (cp1252) still gets the whole list.
+        with tempfile.TemporaryDirectory() as root:
+            make_log(root, deny=DENY_ALL + "\n", cleared="Career fair\npage\n")
+            entry = os.path.join(root, "entries", "2026-07-kite.md")
+            with open(entry, "w", encoding="utf-8") as f:
+                f.write("---\norg: 風箏工作室\n---\n")
+            stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+            saved, sys.stdout = sys.stdout, stream
+            try:
+                rc = deny_coverage.main(["deny_coverage.py", "--root", root])
+                stream.flush()
+            finally:
+                sys.stdout = saved
+        self.assertEqual(rc, 1)
+        self.assertIn("  風箏工作室    (entries/2026-07-kite.md)", stream.buffer.getvalue().decode("utf-8"))
+
+
+HAS_GIT = shutil.which("git") is not None
+
+
+@unittest.skipUnless(HAS_GIT, "needs git")
+class Commits(unittest.TestCase):
+    """--commit and clear, in a clone whose origin is a bare repo."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        empty = os.path.join(self.tmp, "gitconfig")
+        open(empty, "w").close()
+        self.env = dict(os.environ, GIT_CONFIG_GLOBAL=empty, GIT_CONFIG_NOSYSTEM="1", GIT_TERMINAL_PROMPT="0")
+        self.env.pop("CAREER_LOG_UNATTENDED", None)
+        self.origin = os.path.join(self.tmp, "origin.git")
+        self.git(self.tmp, "init", "-q", "--bare", "-b", "master", self.origin)
+        self.root = self.clone("log")
+        self.write("README.md", "# Log\n")
+        self.write(".export-deny", "# names\nSomeone\nWidget\n")
+        self.write("entries/2026-02-kite.md", "---\ntitle: Kite\norg: Kestrelby\n---\n")
+        self.git(self.root, "add", "-A")
+        self.git(self.root, "commit", "-q", "-m", "init")
+        self.git(self.root, "push", "-q", "origin", "master")
+        self.git(self.root, "remote", "set-head", "origin", "master")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def git(self, cwd, *args):
+        p = subprocess.run(["git", "-C", cwd] + list(args), capture_output=True, text=True, env=self.env)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        return p.stdout
+
+    def clone(self, name, identity=True):
+        path = os.path.join(self.tmp, name)
+        self.git(self.tmp, "clone", "-q", self.origin, path)
+        self.git(path, "config", "core.autocrlf", "false")
+        if identity:
+            self.git(path, "config", "--local", "user.name", "Test")
+            self.git(path, "config", "--local", "user.email", "test@example.org")
+        return path
+
+    def write(self, rel, text, root=None):
+        path = os.path.join(root or self.root, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+
+    def read(self, rel):
+        with open(os.path.join(self.root, rel), encoding="utf-8") as f:
+            return f.read()
+
+    def tool(self, *args, root=None):
+        p = subprocess.run([sys.executable, "-I", TOOL, "--root", root or self.root] + list(args),
+                           capture_output=True, encoding="utf-8", env=self.env)
+        return p.returncode, p.stdout
+
+    def log(self, n):
+        """The last n commits: [(subject, [files])], newest first."""
+        out = self.git(self.root, "log", "-n", str(n), "--format=@%s", "--name-only")
+        commits = []
+        for block in out.split("@")[1:]:
+            subject, *files = [l for l in block.splitlines() if l]
+            commits.append((subject, files))
+        return commits
+
+    def pushed(self):
+        return self.git(self.root, "rev-list", "--count", "origin/master..HEAD").strip() == "0"
+
+    def push_from_another_clone(self):
+        other = self.clone("other")
+        self.write("README.md", "# Log\n\nother\n", root=other)
+        self.git(other, "commit", "-q", "-am", "other")
+        self.git(other, "push", "-q", "origin", "master")
+
+    def test_entry_commit_commits_only_the_deny_file(self):
+        self.write("README.md", "# Log\n\nstaged\n")
+        self.git(self.root, "add", "README.md")
+        rc, out = self.tool("entry", "--commit", os.path.join(self.root, "entries", "2026-02-kite.md"))
+        self.assertEqual(rc, 0, out)
+        lines = out.splitlines()
+        self.assertEqual(lines[0], "Kestrelby")
+        self.assertRegex(lines[1], r"^committed: \[master [0-9a-f]+\] export-deny: names from 2026-02-kite\.md$")
+        self.assertEqual(lines[-1], "sync: ok")
+        self.assertEqual(self.log(1), [("export-deny: names from 2026-02-kite.md", [".export-deny"])])
+        self.assertTrue(self.pushed())
+        self.assertEqual(self.git(self.root, "status", "--short"), "M  README.md\n")
+        self.assertTrue(self.read(".export-deny").endswith("Widget\nKestrelby\n"))
+
+    def test_entry_commit_subject_for_many_entries(self):
+        paths = []
+        for i, org in enumerate(("Aldermoor", "Brackwater", "Cindervale", "Dunmerrow")):
+            rel = "entries/2026-0%d-e%d.md" % (i + 3, i)
+            self.write(rel, "---\norg: %s\n---\n" % org)
+            paths.append(os.path.join(self.root, rel))
+        rc, out = self.tool("entry", "--commit", *paths)
+        self.assertEqual((rc, out.splitlines()[-1]), (0, "sync: ok"), out)
+        self.assertEqual(self.log(1)[0][0], "export-deny: names from 4 entries")
+
+    def test_entry_commit_with_nothing_to_add(self):
+        self.write("entries/2026-02-kite.md", "---\norg: Widget\n---\n")
+        before = self.git(self.root, "rev-parse", "HEAD")
+        rc, out = self.tool("entry", "--to", os.path.join(self.root, ".export-deny"), "--commit",
+                            os.path.join(self.root, "entries", "2026-02-kite.md"))
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith("OK: "), out)
+        self.assertNotIn("sync:", out)
+        self.assertEqual(self.git(self.root, "rev-parse", "HEAD"), before)
+
+    def test_entry_commit_stops_as_sync_does(self):
+        # No repo-local identity: sync.py refuses, and its next: stop: line is the last.
+        bare = self.clone("noid", identity=False)
+        rc, out = self.tool("entry", "--commit", os.path.join(bare, "entries", "2026-02-kite.md"), root=bare)
+        self.assertEqual(rc, 1)
+        self.assertTrue(out.splitlines()[-1].startswith("next: stop:"), out)
+        # A push origin refuses: another clone pushed first.
+        self.push_from_another_clone()
+        rc, out = self.tool("entry", "--commit", os.path.join(self.root, "entries", "2026-02-kite.md"))
+        self.assertEqual(rc, 1)
+        self.assertIn("push: refused", out)
+        self.assertTrue(out.splitlines()[-1].startswith("next: stop:"), out)
+
+    def test_commit_needs_the_roots_deny_file(self):
+        elsewhere = os.path.join(self.tmp, "deny")
+        self.write("deny", "Someone\n", root=self.tmp)
+        for args in (["entry", "--to", elsewhere, "--commit", os.path.join(self.root, "entries", "2026-02-kite.md")],
+                     ["line", "--commit", "--to", elsewhere, "Kestrelby"]):
+            rc, out = self.tool(*args)
+            self.assertEqual(rc, 2, args)
+            self.assertTrue(out.startswith("usage: "), out)
+
+    def test_line_commit(self):
+        rc, out = self.tool("line", "--commit", "Kestrelby", "Q&R Partners")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(out.splitlines()[:2], ["Kestrelby", "Q[^[:alnum:]]+R[^[:alnum:]]+Partners"])
+        self.assertEqual(self.log(1), [("export-deny: add Kestrelby, Q&R Partners", [".export-deny"])])
+        self.assertTrue(self.pushed())
+
+    def test_clear_two_commits_cleared_first(self):
+        self.write("entries/2026-02-kite.md", "---\norg: Widget\n---\n")
+        self.git(self.root, "commit", "-q", "-am", "widget")
+        self.git(self.root, "push", "-q", "origin", "master")
+        rc, out = self.tool("clear", "Widget")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(out.splitlines()[-1], "sync: ok")
+        self.assertEqual(self.log(2), [("export-deny: clear Widget", [".export-deny"]),
+                                       ("export-cleared: Widget", [".export-cleared"])])
+        self.assertTrue(self.pushed())
+        self.assertEqual(self.read(".export-deny"), "# names\nSomeone\n")
+        self.assertEqual(self.read(".export-cleared"), "Widget\n")
+        self.assertEqual(self.tool(), (0, "OK: .export-deny covers 1 recorded names\n"))
+
+    def test_clear_takes_the_deny_line_and_notes_another_match(self):
+        self.write(".export-deny", "Kite[^[:alnum:]]*Works\nKite\n")
+        self.write(".export-cleared", "# cleared\nSomething")   # no line end at the end
+        self.git(self.root, "add", "-A")
+        self.git(self.root, "commit", "-q", "-m", "lines")
+        rc, out = self.tool("clear", "Kite Works")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("note: .export-deny still has Kite, which the export's scan matches against 'Kite Works' too\n",
+                      out)
+        self.assertEqual(self.read(".export-deny"), "Kite\n")
+        self.assertEqual(self.read(".export-cleared"), "# cleared\nSomething\nKite Works\n")
+
+    def test_clear_a_name_with_no_line_changes_nothing(self):
+        before = self.git(self.root, "rev-parse", "HEAD")
+        rc, out = self.tool("clear", "Widget Labs")
+        self.assertEqual(rc, 2)
+        self.assertEqual(out, "FAIL: no .export-deny line is 'Widget Labs' or its deny: line"
+                              " 'Widget[^[:alnum:]]*Labs'; the lines that match it: Widget. Nothing was changed.\n")
+        self.assertFalse(os.path.exists(os.path.join(self.root, ".export-cleared")))
+        self.assertEqual(self.git(self.root, "rev-parse", "HEAD"), before)
+        self.assertEqual(self.tool("clear", "Kestrelbyy"),   # a typo: no line, and no such recorded name
+                         (2, "FAIL: no .export-deny line is 'Kestrelbyy' or its deny: line 'Kestrelbyy', and the Log"
+                             " records no such name. Nothing was changed.\n"))
+        self.assertFalse(os.path.exists(os.path.join(self.root, ".export-cleared")))
+        for args in (["clear"], ["clear", "a", "b"], ["clear", "-x"], ["clear", " "]):
+            self.assertEqual(self.tool(*args)[0], 2, args)
+
+    def test_clear_leaves_the_deny_line_when_the_first_push_fails(self):
+        self.push_from_another_clone()
+        rc, out = self.tool("clear", "Widget")
+        self.assertEqual(rc, 1)
+        self.assertIn("push: refused", out)
+        self.assertNotIn("export-deny: clear", out)
+        self.assertEqual(self.read(".export-deny"), "# names\nSomeone\nWidget\n")
+        self.assertEqual(self.log(1)[0], ("export-cleared: Widget", [".export-cleared"]))
+
+    def test_fail_prints_run_lines_that_pass(self):
+        self.write("entries/2026-02-kite.md", "---\norg: Kestrelby & Sons, Marrowgate\n---\n")
+        os.makedirs(os.path.join(self.root, "outputs", "applications", "2026-03-01-tallowmere-analyst"))
+        self.git(self.root, "commit", "-q", "-am", "names")
+        self.git(self.root, "push", "-q", "origin", "master")
+        rc, out = self.tool()
+        self.assertEqual(rc, 1, out)
+        runs = [l[len("run: "):] for l in out.splitlines() if l.startswith("run: ")]
+        self.assertEqual(len(runs), 2, out)
+        self.assertNotIn("tallowmere", runs[0])
+        self.assertIn("'<employer>'   (for each folder: tallowmere-analyst)", runs[1])
+        self.assertIn(" clear '<name>'", out)
+        # Every line not about a name is unindented: the upgrade guide counts the indented ones.
+        self.assertEqual(sum(l.startswith("  ") for l in out.splitlines()), 3)
+        words = shlex.split(runs[0])
+        words = [sys.executable] + words[words.index("-I"):]
+        p = subprocess.run(words, capture_output=True, encoding="utf-8", env=self.env)
+        self.assertEqual(p.returncode, 0, p.stdout)
+        self.assertEqual(self.log(1), [("export-deny: add Kestrelby & Sons, Marrowgate", [".export-deny"])])
+        self.assertEqual(self.tool("line", "--commit", "Tallowmere")[0], 0)
+        self.assertEqual(self.tool(), (0, "OK: .export-deny covers 3 recorded names\n"))
+
+    def test_clear_keeps_other_names_covered(self):
+        # Kestrelby Labs was covered only by the Kestrelby line the user clears: it gets its own line.
+        self.write(".export-deny", "Someone\nKestrelby\n")
+        self.write("entries/2026-02-kite.md", "---\norg: Kestrelby, Kestrelby Labs\n---\n")
+        self.git(self.root, "commit", "-q", "-am", "names")
+        self.git(self.root, "push", "-q", "origin", "master")
+        rc, out = self.tool("clear", "Kestrelby")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("kept covered: Kestrelby[^[:alnum:]]*Labs\n", out)
+        self.assertEqual(self.read(".export-deny"), "Someone\nKestrelby[^[:alnum:]]*Labs\n")
+        self.assertEqual(self.tool(), (0, "OK: .export-deny covers 2 recorded names\n"))
+
+    def test_clear_again_finishes_a_stopped_clear(self):
+        # The .export-deny commit was made but its push refused: clear again pushes it.
+        self.write("entries/2026-02-kite.md", "---\norg: Widget\n---\n")
+        self.git(self.root, "commit", "-q", "-am", "widget")
+        self.git(self.root, "push", "-q", "origin", "master")
+        self.write(".export-cleared", "Widget\n")
+        self.write(".export-deny", "# names\nSomeone\n")
+        self.git(self.root, "add", "-A")
+        self.git(self.root, "commit", "-q", "-m", "export-cleared: Widget")
+        rc, out = self.tool("clear", "Widget")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("commit: nothing to commit", out)
+        self.assertEqual(out.splitlines()[-1], "sync: ok")
+        self.assertTrue(self.pushed())
+
+    def test_line_commit_with_nothing_new(self):
+        before = self.git(self.root, "rev-parse", "HEAD")
+        rc, out = self.tool("line", "--commit", "Widget")
+        self.assertEqual((rc, out), (0, "Widget\nOK: .export-deny has every line already; nothing to commit\n"))
+        self.assertEqual(self.git(self.root, "rev-parse", "HEAD"), before)
+        self.assertEqual(self.tool("line", "--to", "", "Widget")[0], 2)
+
+    def test_run_line_quotes_apostrophes_for_every_shell(self):
+        self.write("entries/2026-02-kite.md", "---\norg: Brannock's Mill, Ferrow’s Yard\n---\n")
+        self.git(self.root, "commit", "-q", "-am", "names")
+        self.git(self.root, "push", "-q", "origin", "master")
+        rc, out = self.tool()
+        self.assertEqual(rc, 1, out)
+        run = [l[len("run: "):] for l in out.splitlines() if l.startswith("run: ")][0]
+        self.assertTrue(run.endswith(''' line --commit "Brannock's Mill" "Ferrow’s Yard"'''), run)
+        args = run.split(" line --commit ", 1)[1]
+        shells = [[s, "-c", "echo " + args] for s in ("sh",) if shutil.which(s)]
+        shells += [[s, "-NoProfile", "-Command", "[Console]::OutputEncoding = [Text.Encoding]::UTF8; echo " + args]
+                   for s in ("pwsh", "powershell") if shutil.which(s)]
+        for shell in shells:
+            p = subprocess.run(shell, capture_output=True, encoding="utf-8", env=self.env)
+            self.assertEqual(p.stdout.split(), ["Brannock's", "Mill", "Ferrow’s", "Yard"], (shell[0], p.stdout, p.stderr))
+        self.assertEqual(self.tool("line", "--commit", "Brannock's Mill", "Ferrow’s Yard")[0], 0)
+        self.assertEqual(self.tool(), (0, "OK: .export-deny covers 2 recorded names\n"))
+
+    def test_clear_does_not_deny_the_name_again(self):
+        # Widget! keeps its `!`, and its deny: line (Widget) would match the cleared name: a note, no line.
+        self.write("entries/2026-02-kite.md", "---\norg: Widget!\n---\n")
+        self.git(self.root, "commit", "-q", "-am", "widget")
+        self.git(self.root, "push", "-q", "origin", "master")
+        rc, out = self.tool("clear", "Widget")
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("kept covered:", out)
+        self.assertIn("note: 'Widget!' is no longer covered, and its deny: line would match 'Widget': ask the user"
+                      " whether to clear it too (clear 'Widget!')\n", out)
+        self.assertEqual(self.read(".export-deny"), "# names\nSomeone\n")
+        rc, out = self.tool("clear", "Widget!")   # the note's command, on the user's yes
+        self.assertEqual((rc, out.splitlines()[-1]), (0, "sync: ok"), out)
+        self.assertEqual(self.log(1), [("export-cleared: Widget!", [".export-cleared"])])
+        self.assertEqual(self.read(".export-cleared"), "Widget\nWidget!\n")
+        self.assertEqual(self.tool(), (0, "OK: .export-deny covers 1 recorded names\n"))
+
+    def test_clear_twice_changes_nothing(self):
+        self.assertEqual(self.tool("clear", "Widget")[0], 0)
+        head = self.git(self.root, "rev-parse", "HEAD")
+        self.assertEqual(self.tool("clear", "Widget"),
+                         (0, "OK: Widget is in .export-cleared and has no .export-deny line; nothing to commit\n"))
+        self.assertEqual(self.git(self.root, "rev-parse", "HEAD"), head)
 
 if __name__ == "__main__":
     unittest.main()

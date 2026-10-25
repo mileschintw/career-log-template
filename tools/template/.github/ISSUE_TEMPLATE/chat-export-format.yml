@@ -48,4 +48,4 @@ body:
     id: version
     attributes:
       label: Template version
-      description: The commit in your repo's `tools/TEMPLATE_VERSION`. If that file is missing, the date of your repo's first commit.
+      description: The two lines of your repo's `tools/TEMPLATE_VERSION` (the release, then its source commit), on one line. If that file is missing, the date of your repo's first commit.

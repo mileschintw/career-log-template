@@ -16,6 +16,10 @@ _Avoid_: data, content, my repo
 A shareable repo holding the Engine and an empty Log skeleton, from which someone starts their own private Log.
 _Avoid_: clean version, starter, fork
 
+**Release**:
+One published version of the Template, a semver tag `v<version>` on its public repo with a GitHub Release; a Log names the one it came from in `tools/TEMPLATE_VERSION`. A **breaking** release changes a Log's data format and ships an **upgrade guide**, `docs/upgrades/upgrade-<version>.md`, which the upgrade mode runs with the user. A release that only adds a setting (a Config field with a default, or a Direction item) is not breaking, but ships a guide too, whose `## 3. New settings` asks about it; a release that changes only the Engine needs none.
+_Avoid_: update, snapshot, publish (when the versioned release is meant)
+
 **Example**:
 A fictional person's records shipped inside the Engine to show the format and to test the setup; never part of anyone's Log.
 _Avoid_: sample entry, demo data, dummy
@@ -33,7 +37,7 @@ A choice about how the Engine runs for one Log, each with a safe default: the re
 _Avoid_: setting, preference, option
 
 **Save level**:
-Whether a saved application feeds later runs (**Reference**, the default) or is kept only as the record of what was sent (**Archived**); chosen per run, and the rules are in write's Save levels.
+Whether a saved application or bullets report feeds later runs (**Reference**, the default) or is kept only as the record of what was sent (**Archived**); chosen per run, and the rules are in write's Save levels.
 _Avoid_: draft (an Archived application was sent), record (that word is the Log's)
 
 **Story**:
@@ -57,7 +61,7 @@ One experience split into several entries, one per part a reader would pick for 
 _Avoid_: sub-entry, chapter, entry folder
 
 **Machine setup**:
-Whether the user wants each optional tool on one machine (playwright-cli, with Node, its skill and a browser), kept as a yes or no per tool in `~/.career-log/machine.toml`, outside every repo; whether a tool is installed is detected by `tools/check.py` on every run, never stored. TinyTeX is required, so it has no yes or no.
+Whether the user wants each optional tool on one machine (playwright-cli, with Node, its skill and a browser), kept as a yes or no per tool in `~/.career-log/machine.toml`, outside every repo; whether a tool is installed is detected by `tools/check.py` on every run, never stored. TinyTeX is required, so it has no yes or no; the same file records where poppler came from (setup's micromamba environment, or the user's own).
 _Avoid_: config, environment, settings (for this)
 
 **Screen**:

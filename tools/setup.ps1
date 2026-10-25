@@ -1,13 +1,14 @@
-# Machine setup on Windows (SETUP.md step 5). Idempotent. Installs for this user only, except the
-# Visual C++ runtime poppler needs, which installs for all users through Windows' own administrator
-# dialog (UAC): the user at the machine answers it.
+# Machine setup on Windows (SETUP.md step 5). Idempotent. Installs for this user only, with no
+# administrator dialog.
 #
 #   powershell -ExecutionPolicy Bypass -File tools\setup.ps1 [-Yes playwright-cli] [-No playwright-cli]
 #
 # Always: Python 3.11+ (winget, for this user only, when py -3 is older), and TinyTeX (pdfTeX; the
 #   templates use \pdfgentounicode) into %APPDATA%\TinyTeX (or one already in a packaged app's store,
 #   as tools\resume.py finds it), the packages in tools\tex-packages.txt, and poppler (pdfinfo,
-#   pdftotext, pdftoppm) through winget or scoop, with the Visual C++ runtime winget's poppler needs.
+#   pdftotext, pdftoppm): the user's own when tools\resume.py finds one, else conda-forge's, which
+#   micromamba installs into ~\.career-log\poppler, with the runtime DLLs it needs, and a rerun
+#   updates (#281).
 # Optional, installed only when ~\.career-log\machine.toml says yes for it:
 #   playwright-cli  Node 18+ (winget's per-user zip), @playwright/cli (npm), its skill in this
 #                   checkout, Chromium when Chrome and Edge are both missing (with Edge and no
@@ -22,7 +23,8 @@
 # Ends with tools\check.py setup.
 param([string]$Yes = '', [string]$No = '', [switch]$Outside)
 $ErrorActionPreference = 'Stop'
-# A program that cannot load a DLL (poppler without the Visual C++ runtime) fails at once, with no dialog
+# A program that cannot load a DLL (a poppler of the user's without the Visual C++ runtime) fails at
+# once, with no dialog; the processes this one starts inherit the mode
 Add-Type -Namespace CareerLog -Name Native -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetErrorMode(uint mode); [DllImport("kernel32.dll")] public static extern uint GetOEMCP();'
 [CareerLog.Native]::SetErrorMode(0x8003) | Out-Null
 # The folder above tools\ (tools\resume.py's fallback without git): needs no git and works outside a checkout
@@ -52,17 +54,20 @@ if ((Test-Path $Machine) -and (@(Get-Content $Machine) -match '^tinytex *=').Cou
   Write-Machine @(Get-Content $Machine | Where-Object { $_ -notmatch '^tinytex *=' })
   Write-Host 'machine.toml: removed tinytex (TinyTeX is no longer optional: setup always installs it)'
 }
+function Set-Machine($Key, $Value) {   # one `<key> = <TOML value>` line in machine.toml
+  New-Item -ItemType Directory -Force -Path (Split-Path $Machine) | Out-Null
+  $Lines = if (Test-Path $Machine) { @(Get-Content $Machine) } else { @(
+    '# career-log Machine setup: the optional tools the user wants on this machine',
+    '# (true) or declined (false), and where poppler came from. Written by tools/setup.sh and',
+    '# tools/setup.ps1; whether a tool is installed is detected on every run (tools/check.py).') }
+  Write-Machine (@($Lines | Where-Object { $_ -notmatch "^$([regex]::Escape($Key)) *=" }) + "$Key = $Value")
+  Write-Host "machine.toml: $Key = $Value"
+}
 function Set-Choice($List, $Value) {
   foreach ($t in ($List -split ',' | Where-Object { $_ })) {
     if ($t -eq 'tinytex') { Write-Host 'tinytex: not optional any more; setup always installs it'; continue }
     if ($Tools -notcontains $t) { throw "unknown tool: $t (tools: $($Tools -join ', '))" }
-    New-Item -ItemType Directory -Force -Path (Split-Path $Machine) | Out-Null
-    $Lines = if (Test-Path $Machine) { @(Get-Content $Machine) } else { @(
-      '# career-log Machine setup: the optional tools the user wants on this machine',
-      '# (true) or declined (false). Written by tools/setup.sh and tools/setup.ps1; whether a tool',
-      '# is installed is detected on every run (tools/check.py), never stored here.') }
-    Write-Machine (@($Lines | Where-Object { $_ -notmatch "^$([regex]::Escape($t)) *=" }) + "$t = $Value")
-    Write-Host "machine.toml: $t = $Value"
+    Set-Machine $t $Value
   }
 }
 Set-Choice $Yes 'true'
@@ -228,25 +233,9 @@ function Install-TinyTeX {
   & $Tlmgr install @Pkgs
   if ($LASTEXITCODE -ne 0) { throw 'tlmgr install failed' }
 
-  if (-not (Test-Poppler)) {
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-      # Its dependency, the Visual C++ runtime, installs only for all users: handled below, when poppler cannot start
-      winget install --id oschwartz10612.Poppler -e --source winget --scope user --skip-dependencies --accept-source-agreements --accept-package-agreements
-      if (Test-PopplerNeedsRuntime) { Install-VCRuntime }
-    } elseif (Get-Command scoop -ErrorAction SilentlyContinue) {
-      scoop install poppler
-    }
-  }
-
-  if (-not (Test-Poppler)) {
-    if ($script:RuntimeRunning) {
-      $script:UserLines += '  the Visual C++ runtime poppler needs is still installing: rerun this script once it ends'
-    } elseif (Test-PopplerNeedsRuntime) {
-      $script:UserLines += "  rerun this script and answer yes in Windows' administrator dialog: poppler needs the Visual C++ runtime, which installs for all users"
-    } else {
-      $script:UserLines += '  install poppler (pdfinfo, pdftotext, pdftoppm) with winget or scoop, or set POPPLER_BIN to its bin folder'
-    }
-    Write-Host 'poppler cannot run yet: skipping the example build'
+  Install-Poppler
+  if (-not (Get-Pdftotext)) {
+    Write-Host 'poppler missing: skipping the example build until it is installed'
     return
   }
   Write-Host 'Checking: building the example resume'
@@ -258,40 +247,81 @@ function Install-TinyTeX {
   if ($LASTEXITCODE -ne 0) { throw 'the example resume did not build' }
 }
 
-# Any pdftotext on PATH is not enough: Git for Windows ships xpdf's, which lacks the
-# -bbox-layout that tools\resume.py needs. Look for poppler's on PATH and in winget's folder.
-function Test-Poppler {
-  $ErrorActionPreference = 'Continue'   # Windows PowerShell turns native stderr into errors under Stop
-  $Cands = @($(if ($env:POPPLER_BIN) { Join-Path $env:POPPLER_BIN 'pdftotext.exe' })) +
-           @(Get-Command pdftotext -All -ErrorAction SilentlyContinue | ForEach-Object { $_.Source }) +
-           @(Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\*Poppler*\*\Library\bin\pdftotext.exe" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
-  foreach ($c in $Cands) { if ((Test-Path $c) -and (& $c -h 2>&1 | Out-String) -match 'bbox-layout') { return $true } }
-  return $false
-}
+# ---- poppler ----
 
-# winget's poppler is there but cannot start: 0xC0000135, a DLL missing (the Visual C++ runtime)
-function Test-PopplerNeedsRuntime {
+# poppler's pdftotext (tools\resume.py needs its -bbox-layout; Git for Windows ships xpdf's, which
+# lacks it), as tools\resume.py picks it: the user's own first, setup's environment last. Single
+# quotes in the Python: Windows PowerShell drops double quotes inside a native command's argument.
+function Get-Pdftotext {
   $ErrorActionPreference = 'Continue'
-  $Exe = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\*Poppler*\*\Library\bin\pdftotext.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-  if (-not $Exe) { return $false }
-  & $Exe.FullName -v 2>&1 | Out-Null
-  return $LASTEXITCODE -eq -1073741515
+  $p = & $PyExe @PyArgs -B -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import resume; print(resume.poppler_bin(''pdftotext'') or '''')' (Join-Path $Root 'tools')
+  if ($LASTEXITCODE -eq 0 -and "$p".Trim()) { return "$p".Trim() }
 }
-
-function Install-VCRuntime {
-  Write-Host "Installing the Visual C++ runtime poppler needs. It installs for all users, so Windows asks for an administrator's approval in its own dialog. If no dialog is in front, it waits behind a flashing shield button on the taskbar"
-  # Elevated, winget runs in a window of its own, kept hidden; the dialog still shows
-  try {
-    $p = Start-Process (Get-Command winget).Source -Verb RunAs -WindowStyle Hidden -PassThru -ArgumentList 'install --id Microsoft.VCRedist.2015+.x64 -e --source winget --silent --disable-interactivity --accept-source-agreements --accept-package-agreements'
-    $null = $p.Handle   # kept now, so Windows PowerShell can read the exit code later
-    if ($p.WaitForExit(900000)) { Write-Host "Visual C++ runtime: winget exit $($p.ExitCode)" }
-    else { Write-Host 'Visual C++ runtime: still installing after 15 minutes; going on without it'; $script:RuntimeRunning = $true }
-  } catch {
-    Write-Host "Visual C++ runtime: not installed (the administrator dialog was declined or did not open: $($_.Exception.Message))"
+$MambaVersion = '2.9.0-0'   # micromamba's release; the download is checked against the release's .sha256
+$MambaRoot = Join-Path $HOME '.career-log\micromamba'   # micromamba and its package cache
+$Mamba = Join-Path $MambaRoot 'micromamba.exe'
+$PopplerEnv = Join-Path $HOME '.career-log\poppler'   # tools\resume.py's poppler_env
+function Get-Micromamba {
+  if (Test-Path $Mamba) { return $true }
+  $ErrorActionPreference = 'Continue'
+  $Url = "https://github.com/mamba-org/micromamba-releases/releases/download/$MambaVersion/micromamba-win-64"
+  Write-Host "Downloading micromamba $MambaVersion (about 11 MB) into $MambaRoot"
+  New-Item -ItemType Directory -Force -Path $MambaRoot | Out-Null
+  curl.exe -fsSL --retry 5 -o "$Mamba.part" $Url
+  $Sum = if ($LASTEXITCODE -eq 0) { curl.exe -fsSL --retry 5 "$Url.sha256" }
+  if ($LASTEXITCODE -ne 0 -or -not $Sum -or (Get-FileHash "$Mamba.part" -Algorithm SHA256).Hash -ne ("$Sum".Trim() -split '\s+')[0]) {
+    Write-Host 'micromamba: the download failed or does not match its checksum'
+    Remove-Item "$Mamba.part" -ErrorAction SilentlyContinue
+    return $false
   }
+  Move-Item "$Mamba.part" $Mamba -Force
+  return $true
+}
+# --no-rc with --override-channels -c conda-forge: conda-forge only, whatever a .condarc of the user's says
+function Invoke-Mamba {
+  $ErrorActionPreference = 'Continue'
+  & $Mamba @args -y --no-rc -r $MambaRoot | Out-Host
+  return $LASTEXITCODE -eq 0
+}
+function Install-Poppler {
+  $Found = Get-Pdftotext
+  if ($Found -and -not $Found.StartsWith("$PopplerEnv\", [StringComparison]::OrdinalIgnoreCase)) {
+    Write-Host "poppler: $Found (the user's own: used as it is)"
+    Set-Machine 'poppler' '"own"'
+    # micromamba serves only setup's environment: with no working one left, both go
+    if ((Test-Path $MambaRoot) -and -not (Test-Path (Join-Path $PopplerEnv 'Library\bin\pdftotext.exe'))) {
+      Remove-Item $MambaRoot, $PopplerEnv -Recurse -Force -ErrorAction SilentlyContinue
+      if (-not (Test-Path $MambaRoot)) { Write-Host "removed ${MambaRoot}: setup has no poppler environment to manage" }
+    }
+    return
+  }
+  if (-not (Get-Micromamba)) {
+    $script:UserLines += '  poppler: micromamba did not download (offline, or behind a proxy: set HTTPS_PROXY), so rerun this script; or install poppler yourself and set POPPLER_BIN to its bin folder'
+    return
+  }
+  # An environment with its pdftotext in place is updated, even when that pdftotext did not answer
+  # (a first run slowed by a virus scan, say); one an interrupted run left without it is made afresh
+  if ($Found -or ((Test-Path (Join-Path $PopplerEnv 'conda-meta')) -and (Test-Path (Join-Path $PopplerEnv 'Library\bin\pdftotext.exe')))) {
+    Write-Host "Updating poppler in $PopplerEnv (micromamba, conda-forge)"
+    if (-not (Invoke-Mamba update -p $PopplerEnv --override-channels -c conda-forge --all)) {
+      Write-Host 'poppler: the update failed; rerun this script to try again'
+    }
+  } else {
+    Remove-Item $PopplerEnv -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "Installing poppler into $PopplerEnv (micromamba, conda-forge)"
+    # created empty, then filled: `create` with packages ends by telling the user to activate the
+    # environment, which career-log never needs
+    if (-not ((Invoke-Mamba create -p $PopplerEnv) -and (Invoke-Mamba install -p $PopplerEnv --override-channels -c conda-forge poppler))) {
+      $script:UserLines += '  poppler: micromamba could not install it (its error is above), so rerun this script; or install poppler yourself and set POPPLER_BIN to its bin folder'
+      return
+    }
+  }
+  # the downloaded packages (about 300 MB): the environment has its own links or copies
+  Remove-Item (Join-Path $MambaRoot 'pkgs') -Recurse -Force -ErrorAction SilentlyContinue
+  if (Get-Pdftotext) { Set-Machine 'poppler' '"micromamba"' }
 }
 
-$UserLines = @(); $RuntimeRunning = $false
+$UserLines = @()
 Write-Host '== tinytex'
 Install-TinyTeX
 $Undecided = @()

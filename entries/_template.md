@@ -63,4 +63,4 @@ last_updated: YYYY-MM-DD
 An older conflict line without either marker gets one at the next consolidate. -->
 
 ## Pending
-<!-- Facts not yet placed in the sections above, deleted once placed. One line per milestone, at most two sentences plus links: - YYYY-MM-DD (the day recorded, not the day it happened): what. links -->
+<!-- Facts not yet placed in the sections above, deleted once placed. One line per milestone, at most two sentences plus links. entries.py pending-add writes each line's date, the day recorded (an event date goes inside "what"): - YYYY-MM-DD: what. links -->

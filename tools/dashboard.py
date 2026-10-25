@@ -2,6 +2,7 @@
 """The scan dashboard: one read-only HTML page of the scan's results, regenerated from the Log.
 
   python3 -I tools/dashboard.py [--check]          (Windows: py -3 -I tools/dashboard.py ...)
+  python3 -I tools/dashboard.py --artifact <url>
 
 It takes --root <root>, the Log's root (default: the repo this script is in).
 
@@ -22,11 +23,14 @@ with the same Log write the same bytes. Its sections, each from the Log files it
 Text from the Log is escaped, and only http and https URLs become links.
 
 ARTIFACT (`outputs/dashboard/artifact.md`) records where the page is published: a line
-`Artifact: <url>`. The tool only reads it.
+`Artifact: <url>`.
 
 Prints `wrote: <OUT>` (or `unchanged: <OUT>`), then `artifact: <url>`, or `artifact: none`. With
 --check it writes nothing and prints `dashboard: up to date`, `dashboard: stale` or
-`dashboard: missing`, with exit 1 for the last two.
+`dashboard: missing`, with exit 1 for the last two. With --artifact <url> (an https URL) it writes
+only ARTIFACT, as that one line: `wrote: <ARTIFACT>`, `artifact: <url>` and `commit: dashboard:
+artifact`, or `unchanged: <ARTIFACT>` and `artifact: <url>`. tools/scan.py's report and status
+regenerate the page themselves (write()).
 
 Exit 0 on success, 1 on --check's stale or missing, or a file that does not parse, 2 on a bad
 argument. Standard library only, Python 3.11+.
@@ -39,10 +43,15 @@ OUT = "outputs/dashboard/dashboard.html"
 ARTIFACT = "outputs/dashboard/artifact.md"
 DIRECTION_SECTIONS = ("Target roles, ranked", "Constraints")
 
-# scan.py owns the report format; load it from beside this script (`-I` leaves this folder off sys.path)
-_spec = importlib.util.spec_from_file_location("scan", os.path.join(HERE, "scan.py"))
-scan = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(scan)
+# scan.py owns the report format; load it from beside this script (`-I` leaves this folder off sys.path),
+# or use the copy already running (scan.py regenerates this page), and leave no tools/__pycache__
+sys.dont_write_bytecode = True
+_path = os.path.join(HERE, "scan.py")
+scan = sys.modules.get("scan")
+if scan is None or not os.path.exists(getattr(scan, "__file__", None) or "") or not os.path.samefile(scan.__file__, _path):
+    _spec = importlib.util.spec_from_file_location("scan", _path)
+    scan = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(scan)
 
 
 # ---- Markdown, the small part the Log's reports use ----
@@ -314,6 +323,41 @@ def artifact_url(root):
     return m.group(1) if m else None
 
 
+def written(root):
+    """The page as OUT holds it, or None."""
+    out = os.path.join(root, OUT)
+    if not os.path.exists(out):
+        return None
+    with open(out, encoding="utf-8", newline="") as f:
+        return f.read()
+
+
+def write(root, page=None):
+    """Writes the page when it changed: `wrote: <OUT>` or `unchanged: <OUT>`."""
+    page = render(root) if page is None else page
+    if written(root) == page:
+        return "unchanged: %s" % OUT
+    out = os.path.join(root, OUT)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out, "w", encoding="utf-8", newline="\n") as f:
+        f.write(page)
+    return "wrote: %s" % OUT
+
+
+def write_artifact(root, url):
+    """ARTIFACT as the one line `Artifact: <url>`: `wrote:` or `unchanged:`, then the commit subject."""
+    if not re.fullmatch(r"https://\S+", url):
+        raise ValueError("--artifact takes the page's https:// URL")
+    p = os.path.join(root, ARTIFACT)
+    line = "Artifact: %s\n" % url
+    if os.path.exists(p) and scan.read(p) == line:
+        return ["unchanged: %s" % ARTIFACT, "artifact: %s" % url]
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8", newline="\n") as f:
+        f.write(line)
+    return ["wrote: %s" % ARTIFACT, "artifact: %s" % url, "commit: dashboard: artifact"]
+
+
 def main(argv):
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
@@ -321,32 +365,30 @@ def main(argv):
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--root", default=ROOT)
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--artifact")
     try:
         a = ap.parse_args(argv)
     except SystemExit as e:
         return 0 if e.code == 0 else 2
+    if a.check and a.artifact:
+        print("dashboard: --check and --artifact go alone")
+        return 2
     root = a.root
     try:
+        if a.artifact:
+            for line in write_artifact(root, a.artifact):
+                print(line)
+            return 0
         page = render(root)
+        if a.check:
+            old = written(root)
+            state = "missing" if old is None else "up to date" if old == page else "stale"
+            print("dashboard: %s" % state)
+            return 0 if state == "up to date" else 1
+        print(write(root, page))
     except (scan.ScanError, OSError, ValueError) as e:
         print("dashboard: %s" % e)
         return 1
-    out = os.path.join(root, OUT)
-    old = None
-    if os.path.exists(out):
-        with open(out, encoding="utf-8", newline="") as f:
-            old = f.read()
-    if a.check:
-        state = "missing" if old is None else "up to date" if old == page else "stale"
-        print("dashboard: %s" % state)
-        return 0 if state == "up to date" else 1
-    if old == page:
-        print("unchanged: %s" % OUT)
-    else:
-        os.makedirs(os.path.dirname(out), exist_ok=True)
-        with open(out, "w", encoding="utf-8", newline="\n") as f:
-            f.write(page)
-        print("wrote: %s" % OUT)
     print("artifact: %s" % (artifact_url(root) or "none"))
     return 0
 

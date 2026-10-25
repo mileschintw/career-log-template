@@ -25,3 +25,11 @@ n = 10
 # scan: "on" drafts a resume and answers for the top `m` (1 to 20); "off" drafts none.
 auto_write = "off"
 m = 5
+
+# "on": the check every mode runs first says when a newer Template release exists (it asks GitHub
+# at most once a day and sends nothing from the Log); "off" never asks.
+update_check = "on"
+
+# write (skills/career-log/modes/write.md): the most pages a resume may have (1 to 3); tools/resume.py
+# fails a longer one. 2 suits 10+ years of experience.
+resume_max_pages = 1

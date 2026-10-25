@@ -1,6 +1,8 @@
 #!/bin/sh
 # Build the shareable Template (Engine + empty Log skeleton) into a new folder.
-#   tools/export-template.sh <dest>
+#   tools/export-template.sh [--version <semver>] <dest>
+# --version names the release this export is (AGENTS.md › Sharing); without it the export is
+# stamped `next`, a build no Log upgrades from or to.
 # Exports committed content only (git archive HEAD): the allowlist below, then the
 # skeleton in tools/template/ overlaid at the root. Anything not on the allowlist
 # (entries, sources, outputs, profile, direction, ...) never leaves, and neither do
@@ -11,16 +13,36 @@
 # tools/deny_coverage.py fails when .export-deny misses an employer or project name the Log records.
 set -eu
 ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
-DEST=${1:?usage: tools/export-template.sh <dest>}
+USAGE="usage: tools/export-template.sh [--version <semver>] <dest>"
+VERSION=next
+if [ "${1:-}" = "--version" ]; then
+  VERSION=${2:?$USAGE}; shift 2
+  if ! printf '%s\n' "$VERSION" | grep -qxE '[0-9]+\.[0-9]+\.[0-9]+'; then
+    echo "refusing: --version takes a semver such as 0.2.0, not $VERSION"; exit 1
+  fi
+fi
+DEST=${1:?$USAGE}
 DENY="$ROOT/.export-deny"
 ALLOWED="$ROOT/.export-allow"
 
 # The allowlist: the Engine, plus the files every Log needs as they are. The rest of docs/ is the
 # source maintainer's: list docs/ subpaths one by one, never docs as a whole.
-ALLOW="skills tools SETUP.md AGENTS.md CLAUDE.md GLOSSARY.md docs/adr docs/social-preview/social-preview.svg .gitattributes .gitignore entries/_template.md"
+ALLOW="skills tools SETUP.md AGENTS.md CLAUDE.md GLOSSARY.md docs/guide.md docs/adr docs/upgrades docs/social-preview/social-preview.svg docs/social-preview/banner.svg .gitattributes .gitignore entries/_template.md"
 
 if [ -e "$DEST" ] && [ -n "$(ls -A "$DEST" 2>/dev/null)" ]; then
   echo "refusing: $DEST exists and is not empty"; exit 1
+fi
+# A release ships no unreleased guide: upgrade-next.* is renamed to the version first, unless it
+# still holds only the empty skeleton: no Log format change (`## Changes`, CHECKS) and no new
+# setting (`## 3. New settings`). Read from HEAD, the commit exported.
+if [ "$VERSION" != next ]; then
+  NEXT_MD=$(git -C "$ROOT" show HEAD:docs/upgrades/upgrade-next.md 2>/dev/null || true)
+  NEXT_PY=$(git -C "$ROOT" show HEAD:docs/upgrades/upgrade-next.py 2>/dev/null || true)
+  if { [ -n "$NEXT_MD" ] && ! printf '%s\n' "$NEXT_MD" | tr -d '\r' | grep -qxF 'No Log format change yet.'; } ||
+     { [ -n "$NEXT_MD" ] && ! printf '%s\n' "$NEXT_MD" | tr -d '\r' | grep -qxF 'This release adds none.'; } ||
+     { [ -n "$NEXT_PY" ] && ! printf '%s\n' "$NEXT_PY" | tr -d '\r' | grep -qxF 'CHECKS = []'; }; then
+    echo "refusing: docs/upgrades/upgrade-next.* holds a Log format change or a new setting; rename them to upgrade-$VERSION.* first (AGENTS.md › Sharing)"; exit 1
+  fi
 fi
 if [ ! -f "$DENY" ]; then
   echo "refusing: no $DENY (patterns that must not appear in the Template; see tools/template/.export-deny)"; exit 1
@@ -52,7 +74,7 @@ if [ -f "$ALLOWED" ]; then
   else echo "FAIL: tools/deny_coverage.py needs Python 3.11 or later (python3, or py -3 on Windows)"; exit 1
   fi
   # shellcheck disable=SC2086
-  $PY -I "$ROOT/tools/deny_coverage.py" "$ROOT" || { echo "FAIL: export stopped by tools/deny_coverage.py; follow its output above, then export again"; exit 1; }
+  $PY -I "$ROOT/tools/deny_coverage.py" --root "$ROOT" || { echo "FAIL: export stopped by tools/deny_coverage.py; follow its output above (its run: lines add and commit the names), then export again"; exit 1; }
 fi
 
 # The export is built and checked in $OUT and copied to DEST only once every check passes, so
@@ -70,11 +92,17 @@ git -C "$ROOT" -c core.autocrlf=false archive --format=tar -o "$TMP/engine.tar" 
 git -C "$ROOT" -c core.autocrlf=false archive --format=tar -o "$TMP/skeleton.tar" HEAD:tools/template
 tar xf "$TMP/engine.tar" -C "$OUT"
 tar xf "$TMP/skeleton.tar" -C "$OUT"
-# Stamp the commit exported: "Use this template" squashes the history, so this file is how a
-# Log names its Template version (the issue form, import-chats step 8). Written before the scan,
-# and only from the Template's own source (it has .export-allow): an export from a Log made
-# from the Template keeps the stamp it came with, a commit upstream can look up.
-if [ -f "$ALLOWED" ]; then git -C "$ROOT" rev-parse HEAD > "$OUT/tools/TEMPLATE_VERSION"; fi
+# The maintainer's files in docs/upgrades/ stay here: the scratch Logs that test a guide
+# (test-*.sh), the guide of the release not yet made (upgrade-next.*) and its empty form
+# (upgrade-skeleton.*).
+rm -f "$OUT"/docs/upgrades/test-* "$OUT"/docs/upgrades/upgrade-next.* "$OUT"/docs/upgrades/upgrade-skeleton.*
+# Stamp the version and the commit exported: "Use this template" squashes the history, so this
+# file is how a Log names its Template version (the upgrade mode, the issue form, import-chats
+# step 8). Written before the scan, and only from the Template's own source (it has
+# .export-allow): an export from a Log made from the Template keeps the stamp it came with.
+if [ -f "$ALLOWED" ]; then
+  printf '%s\nsource %s\n' "$VERSION" "$(git -C "$ROOT" rev-parse HEAD)" > "$OUT/tools/TEMPLATE_VERSION"
+fi
 # Drop source-only blocks, text only the Template's source maintainer needs: in every .md file,
 # the lines from a line that is exactly <!-- source-only --> through one that is exactly
 # <!-- /source-only -->, plus one blank line after it. An unclosed, nested or unopened block
@@ -147,7 +175,7 @@ while IFS= read -r pat || [ -n "$pat" ]; do
     FOUND=1
   fi
 done < "$DENY"
-if [ "$FOUND" -ne 0 ]; then echo "FAIL: fix the Engine files above, commit, then export again"; exit 1; fi
+if [ "$FOUND" -ne 0 ]; then echo "FAIL: fix the Engine files above, commit, then export again. Where a hit is a common word or a tool's name that a .export-deny line matches, ask the user whether to clear that name instead; on a yes, run: python3 -I tools/deny_coverage.py clear <name> (py -3 on Windows) and follow its output"; exit 1; fi
 
 cp -R "$OUT/." "$DEST"
 echo "Template written to $DEST ($(find "$DEST" -type f | wc -l | tr -d ' ') files)"

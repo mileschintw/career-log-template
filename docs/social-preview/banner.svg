@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="200" viewBox="0 0 1280 200">
+<rect width="1280" height="200" fill="#0d1117"/>
+<rect x="24" y="16" width="1232" height="168" rx="14" fill="#161b22" stroke="#30363d" stroke-width="2"/>
+<text x="64" y="98" font-family="Helvetica, Arial, sans-serif" font-size="56" font-weight="700" fill="#f0f6fc">career-log</text>
+<text x="64" y="140" font-family="Helvetica, Arial, sans-serif" font-size="20" fill="#8b949e">Your career, version-controlled. Write the resume from the record.</text>
+<g font-family="Menlo, monospace" text-anchor="middle">
+<line x1="860" y1="100" x2="1180" y2="100" stroke="#30363d" stroke-width="4"/>
+<circle cx="860" cy="100" r="9" fill="#e3b341"/><text x="860" y="72" font-size="22" fill="#e3b341">log</text><text x="860" y="140" font-size="17" fill="#c9d1d9">feature</text>
+<circle cx="967" cy="100" r="9" fill="#e3b341"/><text x="967" y="72" font-size="22" fill="#e3b341">log</text><text x="967" y="140" font-size="17" fill="#c9d1d9">hard bug</text>
+<circle cx="1073" cy="100" r="9" fill="#58a6ff"/><text x="1073" y="72" font-size="22" fill="#58a6ff">talk</text><text x="1073" y="140" font-size="17" fill="#c9d1d9">story</text>
+<circle cx="1180" cy="100" r="12" fill="#3fb950"/><text x="1180" y="72" font-size="22" fill="#3fb950">out</text><text x="1180" y="140" font-size="17" fill="#c9d1d9">resume.pdf</text>
+</g>
+</svg>
