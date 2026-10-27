@@ -151,6 +151,20 @@ class Names(unittest.TestCase):
             (3, "Cut costs by \\textbf{30\\%} across three teams"), (5, "Second continued"),
             (11, "Last"), (11, "Two on one line")])
 
+    def test_tex_bullets(self):
+        """#524: items under an Education or Skills heading are no bullet; a bold label starts one."""
+        tex = ("\\section*{Skills}\n\\begin{itemize}\n  \\item \\textbf{Languages:} Go, SQL\n\\end{itemize}\n"
+               "\\section*{Work Experience}\n\\begin{itemize}\n  \\item \\textbf{Queue:} Built a job queue\n"
+               "  \\item \\textbf{24x} less memory\n\\end{itemize}\n% \\section*{Education}\n"
+               "\\section*{Education \\& Coursework}\n\\begin{itemize}\n"
+               "  \\item {\\small \\textbf{Related Courses:} Distributed Systems}\n\\end{itemize}\n"
+               "\\section{Research}\n\\begin{itemize}\n  \\item Measured cache hit rates\n\\end{itemize}\n")
+        self.assertEqual(logfiles.tex_bullets(tex), [
+            (7, "\\textbf{Queue:} Built a job queue"), (8, "\\textbf{24x} less memory"), (17, "Measured cache hit rates")])
+        self.assertEqual(logfiles.tex_bullets("\\begin{itemize}\n  \\item No heading above\n\\end{itemize}\n"
+                                              "\\section*{Projects \\& Skills}\n  \\item Built a cache\n"),
+                         [(2, "No heading above"), (5, "Built a cache")])
+
 
 class Files(unittest.TestCase):
     def setUp(self):

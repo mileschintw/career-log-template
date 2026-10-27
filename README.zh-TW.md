@@ -26,6 +26,7 @@
 
 - **作業系統：** macOS、Windows 和 Linux。
 - **Agent：** 已在 [Claude Code](https://claude.com/claude-code) 測過（Opus 和 Sonnet；建議用 Sonnet 以上）。Codex、Cursor 和 Antigravity 應該可用，但沒有測過。
+- **模型測試結果：** 各模式的測試結果，以及為什麼不支援 Haiku：[ADR 0008](docs/adr/0008-sonnet-is-the-lowest-supported-model.md)（英文）。
 - **履歷：** 北美風格的一頁英文履歷。你和你的記錄可以用任何語言。
 
 **更多：** [guide](docs/guide.md)（英文）列出每個模式和範例說法、設定項目、檔案地圖，以及寫作規則的來源；[SETUP.md](SETUP.md) 是每台電腦的設定。

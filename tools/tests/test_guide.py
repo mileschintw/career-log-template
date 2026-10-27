@@ -77,6 +77,9 @@ TREE = {
     "skills/career-log/modes/log.md": "# Log\n",
     "skills/career-log/modes/setup.md": "# Setup\n",
     "skills/career-log/modes/scan-results.md": "# Scan results\n",
+    "skills/career-log/modes/scan.md": "# Scan\n\n## Files\n\n| Path | What |\n|---|---|\n"
+                                       "| `scan-sources.md` | Job sources, see [scan-results](scan-results.md) |\n",
+    "skills/career-log/excerpts.md": "# Excerpts\n\n## Files\n\n| Path | What |\n|---|---|\n| `sources/<agent>/` | Excerpts |\n",
     "SETUP.md": "# Setup\n",
     "docs/guide.md": GUIDE,
 }
@@ -131,6 +134,10 @@ class Guide(unittest.TestCase):
         self.assertIn("| `README.md` | Index, see [setup](../skills/career-log/modes/setup.md) |", text)
         self.assertIn("[SETUP.md](../SETUP.md)", text)
         self.assertNotIn("A second table", text)
+        # each skill file's own Files table follows Layout: the skill's folder first, then modes/
+        self.assertIn("| `tools/` | Machine setup: [SETUP.md](../SETUP.md) |\n| `sources/<agent>/` | Excerpts |\n"
+                      "| `scan-sources.md` | Job sources, see [scan-results](../skills/career-log/modes/scan-results.md) |",
+                      text)
         self.assertIn('| `record_language` | The language Log files are written in. | one line of text | `"English"` |', text)
         self.assertIn("`fit_budget`: a whole number from 1 to 50", text)
         self.assertIn("| Target roles | `direction.md › Target roles, ranked` |", text)

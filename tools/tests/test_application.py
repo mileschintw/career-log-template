@@ -458,9 +458,10 @@ class Phrasings(Base):
         self.assertEqual(code, 0, out)
         self.assertEqual(out[0], "bullet 1: Cut quote API p95 latency from 820 ms to 210 ms with a Redis rate cache")
         self.assertTrue(out[1].startswith("  entries/2025-06-queue.md: 0."), out)
-        self.assertEqual(out[2], "bullet 2: **Queue:** Built a Go job queue on PostgreSQL for 40% of traffic")
+        self.assertEqual(out[2], "  same: entries/2025-06-queue.md:7: adds no line")
+        self.assertEqual(out[3], "bullet 2: **Queue:** Built a Go job queue on PostgreSQL for 40% of traffic")
         self.assertIn("cite: %s" % self.FOLDER, out)
-        self.assertEqual(out[-1], "entry: entries/2025-06-queue.md: 2 lines for backend")
+        self.assertEqual(out[-2:], ["entry: entries/2025-06-queue.md: 2 lines for backend", "adds: --add 2=entries/2025-06-queue.md"])
         _, out = self.run_tool("phrasings", self.FOLDER, "entries/2025-06-queue.md", "--angle", "ml")
         self.assertEqual(out[1], "  entries/2025-06-queue.md: none for ml")
 
@@ -471,10 +472,54 @@ class Phrasings(Base):
         self.assertIn("cite: outputs/resumes/backend.tex, 2026-03-02", out)
         self.write(".build/drafts/backend/resume.tex", RESUME)
         _, out = self.run_tool("phrasings", ".build/drafts/backend/resume.tex", "--angle", "backend")
-        self.assertTrue(out[-1].startswith("cite: (the saved output"))
+        self.assertTrue(out[-2].startswith("cite: (the saved output"))
         self.write(".build/drafts/bullets/bullets.md", "- Built a queue\n- Ran it\n")
         _, out = self.run_tool("phrasings", ".build/drafts/bullets/bullets.md", "--angle", "backend")
-        self.assertEqual(out[:2], ["bullet 1: Built a queue", "bullet 2: Ran it"])
+        self.assertEqual([l for l in out if l.startswith("bullet")], ["bullet 1: Built a queue", "bullet 2: Ran it"])
+
+    def test_verdicts_name_the_bullets_to_add(self):
+        """#518 (4): which bullets differ from every wording kept for the angle, and their entry."""
+        self.write("entries/2025-07-cache.md", "# Cache\n\n## What happened\nBuilt a PostgreSQL job queue in Go "
+                   "that took 40% of traffic.\n\n## Past phrasings\n- none yet\n")
+        self.write(self.FOLDER + "/resume.tex", RESUME.replace(r"\end{itemize}", r"  \item BSc in Computer Science, 2024" "\n"
+                                                               r"\end{itemize}"))
+        code, out = self.run_tool("phrasings", self.FOLDER, "entries/2025-06-queue.md", "entries/2025-07-cache.md",
+                                  "--angle", "backend")
+        self.assertEqual(code, 0, out)
+        verdicts = [l for l in out if l.startswith("  ") and not l.startswith("  entries/")]
+        self.assertEqual(verdicts, ["  same: entries/2025-06-queue.md:7: adds no line",
+                                    "  add: entries/2025-07-cache.md",
+                                    "  none: the entries given hold less than half its words: adds no line"])
+        self.assertEqual(out[-1], "adds: --add 2=entries/2025-07-cache.md")
+        merged = RESUME.replace(r"\item Cut quote", r"\item Built a PostgreSQL job queue and cut quote")
+        self.write(self.FOLDER + "/resume.tex", merged)
+        self.write("entries/2025-08-api.md", "# API\n\n## What happened\nCut quote latency with a Redis rate cache.\n")
+        _, out = self.run_tool("phrasings", self.FOLDER, "entries/2025-07-cache.md", "entries/2025-08-api.md", "--angle", "backend")
+        self.assertEqual(out[1:4], ["  entries/2025-07-cache.md: none for backend", "  entries/2025-08-api.md: none for backend",
+                                    "  add: entries/2025-08-api.md"])   # a merged bullet goes in whole
+        self.write("entries/2025-07-cache.md", self.read("entries/2025-07-cache.md").replace(
+            "- none yet", "**backend**\n- Built a job queue (2025 resume)"))
+        _, out = self.run_tool("phrasings", self.FOLDER, "entries/2025-07-cache.md", "--angle", "backend")
+        self.assertIn("  older form: entries/2025-07-cache.md: 2 Past phrasings lines in a form this command cannot read: "
+                      "adds no line until they are in the template's form", out)
+        self.assertEqual(out[-1], "adds: none")
+
+    def test_education_items_are_no_bullets(self):
+        """#524: a coursework line under the Education heading is listed as no bullet and gets no add:."""
+        self.write(self.FOLDER + "/resume.tex", RESUME.replace(r"\end{document}", r"""\section*{Education}
+\begin{itemize}
+  \item {\small \textbf{Related Courses:} Go job queue on PostgreSQL, traffic}
+\end{itemize}
+\end{document}"""))
+        code, out = self.run_tool("phrasings", self.FOLDER, "entries/2025-06-queue.md", "--angle", "backend")
+        self.assertEqual(code, 0, out)
+        self.assertEqual([l for l in out if l.startswith("bullet")], [
+            "bullet 1: Cut quote API p95 latency from 820 ms to 210 ms with a Redis rate cache",
+            "bullet 2: **Queue:** Built a Go job queue on PostgreSQL for 40% of traffic"])
+        self.assertEqual(out[-1], "adds: --add 2=entries/2025-06-queue.md")
+        code, out = self.run_tool("phrasings", self.FOLDER, "--angle", "backend", "--add", "3=entries/2025-06-queue.md")
+        self.assertEqual(code, 2, out)
+        self.assertIn("n from 1 to 2", out[0])
 
     def test_add_through_phrasing_add(self):
         code, out = self.run_tool("phrasings", self.FOLDER, "--angle", "backend", "--add", "2=entries/2025-06-queue.md")
@@ -496,7 +541,7 @@ class Phrasings(Base):
         rel = "outputs/reports/2026-03-01-bullets.md"
         self.write(rel, "Kind: resume bullets\n\n- Built a queue\n\n| Claim | Entry section | Source |\n|---|---|---|\n")
         _, out = self.run_tool("phrasings", rel, "--angle", "general")
-        self.assertEqual(out[:1] + out[-1:], ["bullet 1: Built a queue", "cite: %s" % rel])
+        self.assertEqual(out[:1] + out[-2:], ["bullet 1: Built a queue", "cite: %s" % rel, "adds: none"])
         self.write("outputs/reports/2026-03-01-bio.md", "Kind: bio\n\nText\n")
         self.assertEqual(self.run_tool("phrasings", "outputs/reports/2026-03-01-bio.md", "--angle", "general")[0], 2)
 

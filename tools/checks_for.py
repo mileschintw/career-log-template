@@ -12,7 +12,7 @@ script is in).
 It prints, in this order:
 - one line per changed path: `engine: <path>` (an Engine path: the export's ALLOW list in
   tools/export-template.sh, its .export-* files, and, in the Template's source (a root with
-  `maintainer/`), `.github/`, `maintainer/` and the maintainer docs; AGENTS.md › Changes says how it lands), `guard: <path>`
+  `maintainer/`), `.github/`, `maintainer/` and the maintainer docs; skills/career-log/engine-changes.md says how it lands), `guard: <path>`
   (.export-deny, .export-cleared), `coordination: <path>` (docs/coordination/) or
   `not engine: <path>`;
 - `warn:` when only one of the Template's two front pages changed;
@@ -23,9 +23,11 @@ It prints, in this order:
 
 The map is GROUPS below: each group's triggers (an exact path, or a folder ending in `/` for
 everything under it) and the checks it runs. A group with a workflow is what that workflow in
-this repo's .github/workflows/ runs, on the same `paths:`, the workflow's own file included;
-tools/tests/test_checks_for.py fails when the two disagree. A new tool or test: add its group here,
-and in the Template's source its workflow with the same `paths:` plus its own file. A check whose script is missing (maintainer/
+this repo's .github/workflows/ runs, on the same `paths:`, the workflow's own file included; groups
+that share a workflow are run together by it, on all their `paths:`. tools/tests/test_checks_for.py
+fails when a workflow and its groups disagree. A new tool or test: add its group here, and in the
+Template's source a workflow for it with the same `paths:` plus its own file, or name a workflow
+whose `paths:` it mostly shares and add its paths and steps there. A check whose script is missing (maintainer/
 in a Template) is left out.
 
 Exit 0 on success, 2 on a bad argument or a git error. Standard library only, Python 3.11+.
@@ -44,7 +46,7 @@ GUARDS = (".export-deny", ".export-cleared")
 COORDINATION = "docs/coordination/"
 # Engine only here, in the Template's source (AGENTS.md › Changes); the export leaves them out
 SOURCE_ENGINE = (".export-allow", ".github/", "maintainer/", "docs/maintaining.md",
-                 "docs/maintaining-tests.md", "docs/migrating.md")
+                 "docs/maintaining-tests.md", "docs/migrating.md", "docs/publishing.md")
 FRONT_PAGES = ("tools/template/README.md", "tools/template/README.zh-TW.md")
 OK = "the last line is `OK`"
 
@@ -92,7 +94,7 @@ GROUPS = [
         py("tools/tests/test_logfiles.py"),
         py("tools/tests/test_entries.py"),
     ]),
-    ("config", "config-tests.yml", [
+    ("config", "machine-check.yml", [
         "tools/config.py", "tools/config.default.toml", "tools/logfiles.py", "tools/tests/test_config.py",
         "tools/template/README.md", "tools/template/README.zh-TW.md", "tools/template/direction.md",
     ], [
@@ -117,7 +119,7 @@ GROUPS = [
         do("run SETUP.md step 5 with the tools the change touches, on each platform you can; "
            "step 5's check holds"),
     ]),
-    ("resume", "resume-tests.yml", [
+    ("resume", "parser-tests.yml", [
         "tools/resume.py", "tools/tex-packages.txt", "tools/config.py", "tools/config.default.toml",
         "tools/logfiles.py", "tools/tests/test_resume.py", "skills/career-log/examples/resume.tex",
         "skills/career-log/assets/resume-blank.tex",
@@ -144,13 +146,13 @@ GROUPS = [
         py("tools/tests/test_scan.py"),
         py("tools/tests/test_fit.py"),
     ]),
-    ("dashboard", "dashboard-tests.yml", [
+    ("dashboard", "scan-tests.yml", [
         "tools/dashboard.py", "tools/scan.py", "tools/fit.py", "tools/entries.py", "tools/logfiles.py",
         "tools/sponsorship.py", "tools/config.py", "tools/tests/test_dashboard.py",
     ], [
         py("tools/tests/test_dashboard.py"),
     ]),
-    ("sponsorship", "sponsorship-tests.yml", [
+    ("sponsorship", "scan-tests.yml", [
         "tools/sponsorship.py", "tools/config.py", "tools/logfiles.py", "tools/tests/test_sponsorship.py",
     ], [
         py("tools/tests/test_sponsorship.py"),
@@ -183,7 +185,7 @@ GROUPS = [
     ], [
         py("maintainer/tests/test_harness.py"),
     ]),
-    ("writing lint", "writing-lint-tests.yml", [
+    ("writing lint", "application-tests.yml", [
         "tools/writing_lint.py", "tools/entries.py", "tools/logfiles.py", "skills/career-log/writing.md",
         "tools/tests/test_writing_lint.py",
     ], [

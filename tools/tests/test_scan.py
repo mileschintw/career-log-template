@@ -598,6 +598,7 @@ class ScanTest(unittest.TestCase):
         os.chdir(self.tmp)
         self.addCleanup(os.chdir, here)
         self.write("page.txt", "text\n")
+        self.write(".build/scan/x/fetched.jsonl", json.dumps({"url": "https://a.example/1"}) + "\n")
         out = io.StringIO()
         with redirect_stdout(out):
             code = scan.main(["capture", "--root", "log", ".build/scan/x/postings/a.md", "https://a.example/1", "page.txt"])
@@ -934,7 +935,110 @@ class ScanTest(unittest.TestCase):
         self.assertNotIn("c1.com/j/1", earlier)
         self.assertFalse([p for p in earlier.values() if p.endswith(".unreadable")])
 
+    def fetched(self, *urls, folder=".build/scan/x"):
+        with open(os.path.join(self.root, folder, "fetched.jsonl"), "a", encoding="utf-8") as f:
+            f.writelines(json.dumps({"url": u, "status": 403, "chars": 0, "capture": False}) + "\n" for u in urls)
+
+    def fake_get(self, status, ctype, body):
+        calls = []
+        def get(url):
+            calls.append(url)
+            if isinstance(status, Exception):
+                raise status
+            return status, ctype, body
+        old = scan.http_get
+        scan.http_get = get
+        self.addCleanup(setattr, scan, "http_get", old)
+        return calls
+
+    def test_fetch_writes_the_capture_from_the_page(self):
+        body = ("<html><head><title>t</title><script>var x = 'not text';</script></head><body><nav>Jobs</nav>"
+                "<h1>Backend Engineer</h1><div>" + "<p>Build the queue &amp; its workers.</p>" * 30 + "</div></body></html>")
+        url = "https://jobs.lever.co/acme/1234abcd-0000-0000-0000-000000000000"
+        calls = self.fake_get(200, "text/html; charset=utf-8", body)
+        code, lines = self.run_tool("fetch", ".build/scan/x/postings/a.md", url + ".")
+        self.assertEqual(code, 0, lines)
+        self.assertEqual(calls, [url])
+        self.assertRegex(lines[0], r"^capture: \.build/scan/x/postings/a\.md \(https://jobs\.lever\.co/acme/\S+, fetch, \d+ characters\)$")
+        self.assertTrue(lines[1].startswith("next: read the capture's first 30 lines"), lines)
+        text =self.read(".build/scan/x/postings/a.md")
+        self.assertTrue(text.startswith(url + "\n\nJobs\nBackend Engineer\n"), text[:120])
+        self.assertIn("Build the queue & its workers.", text)
+        self.assertNotIn("not text", text)
+        rec = json.loads(self.read(".build/scan/x/fetched.jsonl").splitlines()[-1])
+        self.assertEqual((rec["url"], rec["status"], rec["capture"]), (url, 200, True))
+        # a fetched page that turns out to be no posting is read again, and captured over the fetch's
+        page = self.write(".playwright-cli/posting-page.json", json.dumps("Backend Engineer, read again\n"))
+        self.assertEqual(self.run_tool("capture", ".build/scan/x/postings/a.md", url + "/apply?lever-source=x", page)[0], 0)
+
+    def test_fetch_refuses_a_shell_or_an_error_and_records_it(self):
+        self.fake_get(200, "text/html", "<html><body><div id=root></div><noscript>Enable JavaScript to run this app.</noscript></body></html>")
+        code, lines = self.run_tool("fetch", ".build/scan/x/postings/a.md", "https://jobs.ashbyhq.com/acme/1")
+        self.assertEqual(code, 1)
+        self.assertEqual(lines[0], "scan: fetch: no capture from https://jobs.ashbyhq.com/acme/1"
+                                   " (0 characters of text, a page built by script or a wall)")
+        self.assertTrue(lines[1].startswith("next: read the page with playwright-cli"), lines)
+        self.assertFalse(os.path.exists(os.path.join(self.root, ".build/scan/x/postings/a.md")))
+        self.fake_get(404, "", "")
+        lines = self.run_tool("fetch", ".build/scan/x/postings/b.md", "https://b.example/1")[1]
+        self.assertIn("(status 404)", lines[0])
+        self.assertTrue(lines[1].startswith("next: status 404: the posting may be gone; read the page"), lines)
+        self.fake_get(scan.urllib.error.URLError("no host"), "", "")
+        self.assertIn("(no answer: no host)", self.run_tool("fetch", ".build/scan/x/postings/c.md", "https://c.example/1")[1][0])
+        recs = [json.loads(l) for l in self.read(".build/scan/x/fetched.jsonl").splitlines()]
+        self.assertEqual([(r["url"], r["status"], r["capture"]) for r in recs],
+                         [("https://jobs.ashbyhq.com/acme/1", 200, False), ("https://b.example/1", 404, False),
+                          ("https://c.example/1", 0, False)])
+        page = self.write(".playwright-cli/posting-page.json", json.dumps("Backend Engineer\n"))
+        code, lines = self.run_tool("capture", ".build/scan/x/postings/a.md", "https://jobs.ashbyhq.com/acme/1", page,
+                                    "--stand-in", "https://api.ashbyhq.com/posting-api/job-board/acme")
+        self.assertEqual(code, 0, lines)
+        self.assertEqual(lines, ["capture: .build/scan/x/postings/a.md (https://jobs.ashbyhq.com/acme/1, 16 characters,"
+                                 " stand-in https://api.ashbyhq.com/posting-api/job-board/acme)"])
+
+    def test_fetch_refuses_an_api_and_its_record_never_counts(self):
+        calls = self.fake_get(200, "application/json", json.dumps({"text": "Backend Engineer " * 100}))
+        for api in ("https://api.lever.co/v0/postings/acme/1234abcd-0000-0000-0000-000000000000",
+                    "https://boards-api.greenhouse.io/v1/boards/acme/jobs/123",
+                    "https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/External/job/x_R1"):
+            code, lines = self.run_tool("fetch", ".build/scan/x/postings/a.md", api)
+            self.assertEqual(code, 1, lines)
+            self.assertEqual(lines[0], "scan: fetch: %s is an API or JSON endpoint, not the posting's page" % api)
+        self.assertEqual(calls, [])
+        os.makedirs(os.path.join(self.root, ".build/scan/x"))
+        self.fetched("https://boards-api.greenhouse.io/v1/boards/acme/jobs/123")   # shares the posting's id
+        page = self.write("api.txt", "Backend Engineer\n")
+        self.assertEqual(self.run_tool("capture", ".build/scan/x/postings/a.md",
+                                       "https://job-boards.greenhouse.io/acme/jobs/123", page)[0], 1)
+
+    def test_page_text(self):
+        self.assertEqual(scan.page_text("<html><head><title>T</title><meta charset=utf-8><body><table><tr><td>Location"
+                                        "</td><td>Remote</td></tr></table><main>Duties</main>", "text/html"),
+                         "Location\nRemote\nDuties")   # no </head>: the body is still read
+        self.assertEqual(scan.meta_charset(b'<html><meta charset="big5">'), "big5")
+        for page in ("https://boards.greenhouse.io/apiture/jobs/123", "https://jobs.lever.co/apixio/abc-123"):
+            self.assertFalse(scan.is_api(page), page)   # a company whose name starts with "api"
+        self.assertTrue(scan.is_api("https://example.com/api/jobs/1"))
+
+    def test_capture_refuses_a_page_never_fetched(self):
+        page = self.write(".playwright-cli/posting-page.json", json.dumps("Backend Engineer\n"))
+        url = "https://job-boards.greenhouse.io/acme/jobs/123"
+        code, lines = self.run_tool("capture", ".build/scan/x/postings/a.md", url, page)
+        self.assertEqual(code, 1)
+        self.assertEqual(lines[0], "scan: capture: refused: no fetch of %s on record, so its own page was never read" % url)
+        self.assertTrue(lines[1].startswith("next: run fetch .build/scan/x/postings/a.md %s first;" % url), lines)
+        self.assertFalse(os.path.exists(os.path.join(self.root, ".build/scan/x/postings/a.md")))
+        os.makedirs(os.path.join(self.root, ".build/scan/y"))
+        self.fetched(url, folder=".build/scan/y")   # another run's fetch does not count
+        self.assertEqual(self.run_tool("capture", ".build/scan/x/postings/a.md", url, page)[0], 1)
+        os.makedirs(os.path.join(self.root, ".build/scan/x"), exist_ok=True)
+        self.fetched("https://boards.greenhouse.io/acme/jobs/123")   # the same posting under its other URL
+        self.assertEqual(self.run_tool("capture", ".build/scan/x/postings/a.md", url, page)[0], 0)
+
     def test_capture(self):
+        os.makedirs(os.path.join(self.root, ".build/scan/x"))
+        self.fetched("https://acme.example/jobs/1", "https://b.example/1", "https://c.example/1")
+        self.fetched("https://c.example/1", folder="")
         page = self.write(".playwright-cli/posting-page.json", json.dumps("Backend Engineer\r\nAcme | Remote\n"))
         code, lines = self.run_tool("capture", ".build/scan/x/postings/a.md", "https://acme.example/jobs/1.", page)
         self.assertEqual(code, 0, lines)

@@ -26,6 +26,7 @@ A GitHub template for keeping a career log (a "brag document") in git and lettin
 
 - **Systems:** macOS, Windows and Linux.
 - **Agents:** tested with [Claude Code](https://claude.com/claude-code) (Opus and Sonnet; Sonnet or above recommended). Codex, Cursor and Antigravity should work, but are not tested.
+- **Model results:** the per-mode test results, and why Haiku is not supported: [ADR 0008](docs/adr/0008-sonnet-is-the-lowest-supported-model.md).
 - **Resumes:** one-page English resumes in the North American style. You and your records can use any language.
 
 **More:** the [guide](docs/guide.md) has every mode with example requests, the setup items, the file map and where the writing rules come from; [SETUP.md](SETUP.md) is per-machine setup.

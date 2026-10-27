@@ -9,7 +9,8 @@
   python3 -I tools/scan.py prefilter <dir>
   python3 -I tools/scan.py screen <dir> --screen-budget <s> --fit-budget <f> [--sort [--give-up]]
   python3 -I tools/scan.py screen --check <results.jsonl> [--batch <batch.todo>]
-  python3 -I tools/scan.py capture <capture path> <url> <page.json | text file>
+  python3 -I tools/scan.py fetch <capture path> <url>
+  python3 -I tools/scan.py capture <capture path> <url> <page.json | text file> [--stand-in <API url>]
   python3 -I tools/scan.py fitmap <url> [--out <fit result>]
   python3 -I tools/scan.py rank <dir> --n <n> [--m <m>] [--give-up]
   python3 -I tools/scan.py report <rows.jsonl> [--name <name>] [--top <line>] [--drafting] [--screen <dir>] [--body <file>]
@@ -31,7 +32,7 @@ URLs: a posting's URL is kept as given (less trailing punctuation). Two URLs are
 their canonical forms (host without `www.`, port, path without its trailing slash, and the query less
 TRACKING parameters; no scheme, no fragment) or their ATS job ids (`greenhouse:123`) match.
 
-Files it reads and writes (SKILL.md › Layout):
+Files it reads and writes (skills/career-log/modes/scan.md › Files):
 - a scan report, `outputs/reports/<YYYY-MM-DD>-scan[-<n>].md` (REPORT_NAME), `-<n>` from 2 on for a
   later run the same day. Its first line is `# Scan <name>`, the next paragraph its top line (sources
   skipped), then `## Pending`, a table with the columns of PENDING_COLUMNS, one row per posting. Then
@@ -58,7 +59,7 @@ Files it reads and writes (SKILL.md › Layout):
   per source read: its section name and how its postings were read, one of READS), `kept.jsonl`,
   `dedup-dropped.jsonl`, `prefiltered.jsonl`, `prefilter-dropped.jsonl`, `screen-list.jsonl`,
   `not-screened.jsonl`, `postings/<folder>.md` (the captures: the URL on the first line, a blank
-  line, then the page's text), `screen/batch-<i>.todo` (capture paths, one per line), `screen/*.jsonl` (the Screen results), `fit.jsonl`,
+  line, then the page's text), `fetched.jsonl` (fetch's), `screen/batch-<i>.todo` (capture paths, one per line), `screen/*.jsonl` (the Screen results), `fit.jsonl`,
   `screened.jsonl`, `dropped.jsonl`, `fit/<folder>.jsonl` (the fit results, in tools/fit.py's
   format), `unreadable.jsonl`, `ranked.jsonl` and `rows.jsonl`.
 
@@ -147,9 +148,23 @@ key is the current one.
   and with --batch, that it holds one line for each capture of the batch file that exists (by the
   URL on its first line) and none for another posting. `check: ok` lines, else exit 1 with one
   `bad:`, `missing:`, `extra:` or `repeated:` line per problem.
+- `fetch`: the plain fetch of a posting's own page (browser.md › Fallback order item 1, for scan's
+  captures): a GET of <url>, its HTML read as the text a reader sees (no script, style or template).
+  It refuses a posting API or JSON endpoint (an `api.` host, an `/api/` path, Workday's `/wday/cxs/`,
+  a `.json` file): the page's own URL is the read; and a record of one never counts for `capture`.
+  It appends `{"url", "status", "chars", "capture"}` to the run folder's `fetched.jsonl` (`<dir>` for
+  a capture path `<dir>/postings/<x>.md`, else the capture's own folder), then, given status 200 and
+  at least 500 characters of text, writes the capture as `capture` does and prints `capture: <path>
+  (<url>, fetch, <n> characters)` and a `next:` line (read the capture: one with no posting is read
+  again with playwright-cli). Otherwise it writes no capture and refuses with `fetch: no capture
+  from <url> (<why>)` and a `next:` line: a page built by script, a wall or an error status is read
+  next with playwright-cli (a 404 or 410 may be a posting that is gone).
 - `capture`: writes a posting's capture: the URL, a blank line, then the text of the page file
   (a `.json` file holding one JSON string, as `eval ... --filename` writes it, or a text file),
-  with LF line ends. It refuses a page with no text, writing nothing.
+  with LF line ends. It refuses a URL with no `fetch` on record in `fetched.jsonl` (the page's own
+  URL is read first, before playwright-cli or a posting API), and a page with no text, writing
+  nothing. --stand-in names the API or JSON endpoint the page file came from (its text saved as a
+  text file), and its line ends `, stand-in <API url>)`.
 - `fitmap`: the newest `## Fit maps` subsection for the URL: `fit map: <report> (entries commit
   <sha>)`, then `fit map: reuse`, or `fit map: stale (<each entry changed since>)`; or `fit map: none`.
   The entries a map cites are the dated file names in its Entry cells, in any letters (tools/fit.py's
@@ -251,7 +266,8 @@ key is the current one.
 Exit 0 on success, 1 when a step refuses (a report name taken, a URL in no report, a file that does
 not parse, no git), 2 on a bad argument. Standard library only, Python 3.11+.
 """
-import argparse, datetime, glob, hashlib, json, os, re, shutil, subprocess, sys
+import argparse, datetime, glob, hashlib, html.parser, json, os, re, shutil, subprocess, sys
+import http.client, urllib.error, urllib.request
 from urllib.parse import parse_qsl, urlsplit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -284,6 +300,9 @@ BATCH = 10
 DEDUP_DROPPED = "dedup-dropped.jsonl"   # beside dedup's --out
 READ_FILE = "read.jsonl"   # how each source was read: the agent's, at collect
 READS = ("API", "fetch", "browser", "file")
+FETCHED = "fetched.jsonl"   # each posting page fetch tried: fetch's, read by capture
+FETCH_MIN = 500   # fewer characters of text than this is no page: a shell built by script, a wall
+FETCH_AGENT = "Mozilla/5.0 (compatible; career-log scan; plain fetch)"
 SECTIONS = ("Constraints", "Target roles, ranked")
 
 
@@ -1202,10 +1221,142 @@ def screen_sort(root, date, d, budget, give_up=False):
     return out
 
 
-def cmd_capture(root, path, url, source):
+class PageText(html.parser.HTMLParser):
+    """The text a reader sees on an HTML page: no script, style or template, a line per block."""
+    SKIP = {"script", "style", "noscript", "template", "svg", "title"}
+    BLOCK = {"p", "div", "li", "ul", "ol", "br", "tr", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6",
+             "section", "article", "main", "header", "footer", "table", "dd", "dt"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts, self.skip = [], 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.SKIP:
+            self.skip += 1
+        elif tag in self.BLOCK:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag in self.SKIP:
+            self.skip = max(0, self.skip - 1)
+        elif tag in self.BLOCK:
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        if not self.skip:
+            self.parts.append(data)
+
+    def text(self):
+        lines = (re.sub(r"[ \t ]+", " ", l).strip() for l in "".join(self.parts).split("\n"))
+        return "\n".join(l for l in lines if l)
+
+
+def page_text(body, content_type):
+    if "html" not in content_type.lower() and not re.match(r"\s*<", body):
+        return body.strip()
+    p = PageText()
+    p.feed(body)
+    p.close()
+    return p.text()
+
+
+def http_get(url):
+    """(status, content type, body) of a plain GET; the tests replace it."""
+    req = urllib.request.Request(url, headers={"User-Agent": FETCH_AGENT, "Accept": "text/html,*/*"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            raw = r.read(4_000_000)
+            ctype = r.headers.get("Content-Type", "")
+            charset = r.headers.get_content_charset() or meta_charset(raw) or "utf-8"
+            try:
+                return r.status, ctype, raw.decode(charset, "replace")
+            except LookupError:   # a charset Python does not know
+                return r.status, ctype, raw.decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, "", ""
+
+
+def meta_charset(raw):
+    """The charset a page's own <meta> names in its first 4 KB, or None."""
+    m = re.search(rb"""<meta[^>]+charset=["']?([\w-]+)""", raw[:4096], re.I)
+    return m.group(1).decode("ascii") if m else None
+
+
+def is_api(url):
+    """Whether the URL is a job board's posting API or another JSON endpoint, not a posting's page."""
+    s = urlsplit(url)
+    host, path = (s.hostname or "").lower(), s.path.lower()
+    return (host.startswith("api.") or "-api." in host or host.startswith("api-") or "/api/" in path
+            or re.match(r"/api(/|$)", path) or "/wday/cxs/" in path or path.endswith(".json"))
+
+
+def fetch_log(root, path):
+    """The run folder's FETCHED file for a capture path: <dir>/fetched.jsonl for <dir>/postings/<x>.md."""
+    d = os.path.dirname(os.path.abspath(at_root(root, path)))
+    if os.path.basename(d) == "postings":
+        d = os.path.dirname(d)
+    return os.path.join(d, FETCHED)
+
+
+def fetched(root, path, url):
+    """The fetch record of url in path's run folder, or None."""
+    log = fetch_log(root, path)
+    if not os.path.exists(log):
+        return None
+    want = keys(url)
+    hit = None
+    for _, item, _ in jsonl_lines(log):   # an API shares the posting's id: a fetch of it is no read of the page
+        if item and not is_api(str(item.get("url") or "")) and keys(str(item.get("url") or "")) & want:
+            hit = item
+    return hit
+
+
+def cmd_fetch(root, path, url):
     found = urls(url)
     if not found:
         raise ScanError("%s is not a URL" % url)
+    url = found[0]
+    if is_api(url):
+        raise ScanError("fetch: %s is an API or JSON endpoint, not the posting's page\nnext: fetch the posting's own"
+                        " URL, the one its list gave" % url)
+    try:
+        status, ctype, body = http_get(url)
+        why = None if 200 <= status < 300 else "status %d" % status
+    except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException) as e:
+        status, ctype, body, why = 0, "", "", "no answer: %s" % getattr(e, "reason", e)
+    text = page_text(body, ctype) if why is None else ""
+    if why is None and len(text) < FETCH_MIN:
+        why = "%d characters of text, a page built by script or a wall" % len(text)
+    log = fetch_log(root, path)
+    os.makedirs(os.path.dirname(log), exist_ok=True)
+    with open(log, "a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps({"url": url, "status": status, "chars": len(text), "capture": why is None}) + "\n")
+    if why:
+        raise ScanError("fetch: no capture from %s (%s)\nnext: %sread the page with playwright-cli (browser.md ›"
+                        " Fallback order item 2) and run capture with the file it wrote; when that read"
+                        " gives no posting too, or on a machine without playwright-cli, a posting API may stand in"
+                        " (capture --stand-in), else leave it unwritten"
+                        % (url, why, "status %d: the posting may be gone; " % status if status in (404, 410) else ""))
+    dst = at_root(root, path)
+    os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
+    logfiles.write_text(dst, url + "\n\n" + text + "\n")
+    return ["capture: %s (%s, fetch, %d characters)" % (path, url, len(text)),
+            "next: read the capture's first 30 lines; when they hold no posting (only navigation, a sign-in page),"
+            " read the page with playwright-cli and run capture with the file it wrote"]
+
+
+def cmd_capture(root, path, url, source, stand_in=None):
+    found = urls(url)
+    if not found:
+        raise ScanError("%s is not a URL" % url)
+    if fetched(root, path, found[0]) is None:
+        raise ScanError("capture: refused: no fetch of %s on record, so its own page was never read\nnext: run"
+                        " fetch %s %s first; when it gives no capture, read the page with playwright-cli; a"
+                        " posting API stands in only when that read gives no posting too, or on a machine"
+                        " without playwright-cli" % (found[0], path, found[0]))
+    if stand_in is not None and not urls(stand_in):
+        raise ScanError("--stand-in %s is not a URL" % stand_in)
     src = at_root(root, source)
     text = read(src)
     if src.lower().endswith(".json"):
@@ -1222,7 +1373,8 @@ def cmd_capture(root, path, url, source):
     dst = at_root(root, path)
     os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
     logfiles.write_text(dst, found[0] + "\n\n" + text + "\n")
-    return ["capture: %s (%s, %d characters)" % (path, found[0], len(text))]
+    via = ", stand-in %s" % urls(stand_in)[0] if stand_in else ""
+    return ["capture: %s (%s, %d characters%s)" % (path, found[0], len(text), via)]
 
 
 def md_table(columns, rows):
@@ -1999,10 +2151,14 @@ def main(argv):
     sp.add_argument("--give-up", action="store_true")
     sp.add_argument("--check")
     sp.add_argument("--batch")
+    sp = sub.add_parser("fetch")
+    sp.add_argument("path")
+    sp.add_argument("url")
     sp = sub.add_parser("capture")
     sp.add_argument("path")
     sp.add_argument("url")
     sp.add_argument("source")
+    sp.add_argument("--stand-in")
     sp = sub.add_parser("fitmap")
     sp.add_argument("url")
     sp.add_argument("--out")
@@ -2093,8 +2249,10 @@ def main(argv):
             lines = cmd_screen_check(root, a.check, a.batch)
         elif a.cmd == "screen":
             lines = cmd_screen(root, a.date, a.dir, a.screen_budget, a.fit_budget, a.sort, a.give_up)
+        elif a.cmd == "fetch":
+            lines = cmd_fetch(root, a.path, a.url)
         elif a.cmd == "capture":
-            lines = cmd_capture(root, a.path, a.url, a.source)
+            lines = cmd_capture(root, a.path, a.url, a.source, a.stand_in)
         elif a.cmd == "fitmap":
             lines = cmd_fitmap(root, a.url, a.out)
         elif a.cmd == "rank":

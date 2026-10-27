@@ -1061,7 +1061,9 @@ class CheckTest(unittest.TestCase):
         self.assertIn("log change: ?? direction.md", lines)
         self.assertEqual(len(nexts), 1)
         self.assertTrue(nexts[0].startswith("next: now, first:"))
-        self.assertIn("Uncommitted Log changes", nexts[0])
+        self.assertIn("an earlier session left", nexts[0])
+        self.assertIn("settle commit -- <file>...", nexts[0])
+        self.assertIn("settle discard -- <file>...", nexts[0])
 
     def test_stories_folder_is_listed(self):
         # stories/ (Talking points, wordings) is a Log folder in logfiles.LOG_FOLDERS
@@ -1335,8 +1337,8 @@ class GitStateTest(unittest.TestCase):
         settle = [n for n in nexts if "status -- <file>..." in n]
         self.assertEqual(len(settle), 1, nexts)
         self.assertIn("sync.py\" status -- <file>...`", settle[0])
-        self.assertIn("`settle commit`", settle[0])
-        self.assertIn("`settle discard`", settle[0])
+        self.assertIn("sync.py\" settle commit -- <file>...`", settle[0])
+        self.assertIn("sync.py\" settle discard -- <file>...`", settle[0])
         self.assertLess(nexts.index(settle[0]), next(i for i, n in enumerate(nexts) if "pull`" in n))
         self.assertEqual(nexts[-1], "next: go on with the mode")
 
@@ -2000,6 +2002,11 @@ class SessionTest(unittest.TestCase):
         self.assertTrue(out[1].startswith("Saved: not listed (nosuchsha@1 is not"), out[1])
 
 
+UPDATE_LINE = ('update: v0.3.0 available (you have v0.2.0): tell the user once this session, in passing, and go on;'
+               ' only their request ("upgrade") starts the upgrade mode, and `update_check = "off"` in config.toml'
+               ' stops this line (setup › Changes)')
+
+
 class ReleaseTest(unittest.TestCase):
     """check_release: the `update:` line, against a fake Releases API on this machine."""
 
@@ -2052,8 +2059,7 @@ class ReleaseTest(unittest.TestCase):
             return json.load(f)
 
     def test_newer_release(self):
-        self.assertEqual(self.release(), (['update: v0.3.0 available (you have v0.2.0); say "upgrade" to run'
-                                           ' the upgrade mode'], [], False))
+        self.assertEqual(self.release(), ([UPDATE_LINE], [], False))
         self.assertEqual(self.cache()["latest"], "0.3.0")
         self.assertNotIn("Authorization", self.requests[0])
 
@@ -2065,8 +2071,7 @@ class ReleaseTest(unittest.TestCase):
 
     def test_asks_once_a_day(self):
         self.release()
-        self.assertEqual(self.release()[0], ['update: v0.3.0 available (you have v0.2.0); say "upgrade" to run'
-                                             ' the upgrade mode'])
+        self.assertEqual(self.release()[0], [UPDATE_LINE])
         self.assertEqual(len(self.requests), 1)
         cache = self.cache()
         for checked in (cache["checked"] - check.RELEASE_EVERY - 1, cache["checked"] + 3600):   # a day old; ahead

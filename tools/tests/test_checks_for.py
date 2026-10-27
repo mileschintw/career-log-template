@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Tests for tools/checks_for.py: the checks it prints for typical changes, the changed paths it
 reads from git, and, in the Template's source, that each workflow in .github/workflows/ runs on
-the same `paths:` and the same steps as its group in GROUPS (skipped in a Template, which has none).
+the same `paths:` and the same steps as its groups in GROUPS together (skipped in a Template, which
+has none).
 
   python3 -I tools/tests/test_checks_for.py
 
@@ -97,23 +98,30 @@ def as_globs(triggers):
     return sorted(t + "**" if t.endswith("/") else t for t in triggers)
 
 
-def compare(group, name, text, root=REPO):
-    """Problems between a group and its workflow's text; [] when they agree."""
-    problems = []
-    want = as_globs(checks_for.triggers(group, root))
+def named(names, one, many):
+    """`group a has` for one name, `groups a, b have` for more."""
+    return "group %s %s" % (names[0], one) if len(names) == 1 else "groups %s %s" % (", ".join(names), many)
+
+
+def compare(groups, name, text, root=REPO):
+    """Problems between the groups that name a workflow and its text; [] when they agree."""
+    problems, names = [], [g[0] for g in groups]
+    have = {g[0]: set(as_globs(checks_for.triggers(g, root))) for g in groups}
+    want = set().union(*have.values())
     got, others = workflow_paths(text)
     problems += ["%s: a path filter the map cannot hold: %s" % (name, o) for o in others]
     if got is None:
         return problems + ["%s: no paths: list under pull_request:" % name]
-    for p in sorted(set(want) - set(got)):
-        problems.append("%s: paths: lacks %s (group %s has it)" % (name, p, group[0]))
-    for p in sorted(set(got) - set(want)):
-        problems.append("%s: paths: has %s (group %s lacks it)" % (name, p, group[0]))
-    mine = sorted(set([c[1] for c in group[3] if c[0] == "py"]
-                      + scripts([c[1] for c in group[3] if c[0] in ("sh", "ps")])))
+    for p in sorted(want - set(got)):
+        problems.append("%s: paths: lacks %s (%s it)" % (name, p, named([g for g in have if p in have[g]], "has", "have")))
+    for p in sorted(set(got) - want):
+        problems.append("%s: paths: has %s (%s it)" % (name, p, named(names, "lacks", "lack")))
+    checks = [c for g in groups for c in g[3]]
+    mine = sorted(set([c[1] for c in checks if c[0] == "py"]
+                      + scripts([c[1] for c in checks if c[0] in ("sh", "ps")])))
     steps, unread = workflow_steps(text)
     if steps != mine:
-        problems.append("%s: runs %s, group %s runs %s" % (name, steps, group[0], mine))
+        problems.append("%s: runs %s, %s %s" % (name, steps, named(names, "runs", "run"), mine))
     problems += ["%s: a step the parity test cannot read: %s" % (name, u) for u in unread]
     return problems
 
@@ -313,7 +321,10 @@ class FromGit(unittest.TestCase):
 @unittest.skipUnless(os.path.isdir(WORKFLOWS), "no .github/workflows/ (a Template)")
 class Parity(unittest.TestCase):
     def test_every_workflow_matches_its_group(self):
-        groups = {g[1]: g for g in checks_for.GROUPS if g[1]}
+        groups = {}
+        for g in checks_for.GROUPS:
+            if g[1]:
+                groups.setdefault(g[1], []).append(g)
         problems = []
         for name in sorted(os.listdir(WORKFLOWS)):
             if not name.endswith(".yml") or name in NO_PATHS:
@@ -324,19 +335,27 @@ class Parity(unittest.TestCase):
                 problems.append("%s: no group in tools/checks_for.py GROUPS" % name)
                 continue
             problems += compare(groups.pop(name), name, text)
-        problems += ["group %s: no .github/workflows/%s" % (g[0], name) for name, g in groups.items()]
+        problems += ["group %s: no .github/workflows/%s" % (g[0], name) for name, gs in groups.items() for g in gs]
         self.assertEqual(problems, [])
 
     def test_a_changed_workflow_fails(self):
         name = "scan-tests.yml"
         with open(os.path.join(WORKFLOWS, name), encoding="utf-8") as f:
             text = f.read()
-        group = next(g for g in checks_for.GROUPS if g[1] == name)
+        group = [g for g in checks_for.GROUPS if g[1] == name]
         self.assertEqual(compare(group, name, text), [])
         dropped = text.replace('      - "tools/entries.py"\n', "")
-        self.assertEqual(compare(group, name, dropped), ["scan-tests.yml: paths: lacks tools/entries.py (group scan has it)"])
+        self.assertEqual(compare(group, name, dropped),
+                         ["scan-tests.yml: paths: lacks tools/entries.py (groups scan, dashboard have it)"])
+        dropped = text.replace('      - "tools/tests/test_dashboard.py"\n', "")
+        self.assertEqual(compare(group, name, dropped),
+                         ["scan-tests.yml: paths: lacks tools/tests/test_dashboard.py (group dashboard has it)"])
         added = text.replace('      - "tools/scan.py"\n', '      - "tools/scan.py"\n      - "tools/x.py"\n')
-        self.assertEqual(compare(group, name, added), ["scan-tests.yml: paths: has tools/x.py (group scan lacks it)"])
+        self.assertEqual(compare(group, name, added),
+                         ["scan-tests.yml: paths: has tools/x.py (groups scan, dashboard, sponsorship lack it)"])
+        self.assertIn("scan-tests.yml: paths: has tools/x.py (group scan lacks it)", compare(group[:1], name, added))
+        left_out = text.replace("        run: python -I tools/tests/test_sponsorship.py -v\n", "        run: echo\n")
+        self.assertEqual(len(compare(group, name, left_out)), 1)   # one group's step missing
         step = text.replace("tools/tests/test_scan.py -v", "tools/tests/test_other.py -v")
         self.assertEqual(len(compare(group, name, step)), 1)
         for extra in ["python tools/tests/test_other.py -v", "python3 -I -m unittest discover"]:

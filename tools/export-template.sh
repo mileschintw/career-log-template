@@ -1,7 +1,7 @@
 #!/bin/sh
 # Build the shareable Template (Engine + empty Log skeleton) into a new folder.
 #   tools/export-template.sh [--version <semver>] <dest>
-# --version names the release this export is (AGENTS.md › Sharing); without it the export is
+# --version names the release this export is (ADR 0011); without it the export is
 # stamped `next`, a build no Log upgrades from or to.
 # Exports committed content only (git archive HEAD): the allowlist below, then the
 # skeleton in tools/template/ overlaid at the root. Anything not on the allowlist
@@ -41,7 +41,7 @@ if [ "$VERSION" != next ]; then
   if { [ -n "$NEXT_MD" ] && ! printf '%s\n' "$NEXT_MD" | tr -d '\r' | grep -qxF 'No Log format change yet.'; } ||
      { [ -n "$NEXT_MD" ] && ! printf '%s\n' "$NEXT_MD" | tr -d '\r' | grep -qxF 'This release adds none.'; } ||
      { [ -n "$NEXT_PY" ] && ! printf '%s\n' "$NEXT_PY" | tr -d '\r' | grep -qxF 'CHECKS = []'; }; then
-    echo "refusing: docs/upgrades/upgrade-next.* holds a Log format change or a new setting; rename them to upgrade-$VERSION.* first (AGENTS.md › Sharing)"; exit 1
+    echo "refusing: docs/upgrades/upgrade-next.* holds a Log format change or a new setting; rename them to upgrade-$VERSION.* first"; exit 1
   fi
 fi
 if [ ! -f "$DENY" ]; then

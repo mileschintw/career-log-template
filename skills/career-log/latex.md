@@ -6,7 +6,7 @@ How to edit, build and check a resume `.tex` locally. Read before touching any `
 
 - **Engine: pdfLaTeX**, from TinyTeX. The templates call `\pdfgentounicode`, a pdfTeX primitive, so XeLaTeX, LuaLaTeX and Tectonic cannot build them. Overleaf's default (pdfLaTeX) matches.
 - **Install:** through the trigger check ([SKILL.md](SKILL.md)), whose `next:` lines run [SETUP.md](../../SETUP.md) step 5's script for TinyTeX, the packages in `tools/tex-packages.txt` and poppler; step 6 checks the result. TinyTeX is not put on `PATH`; `tools/resume.py` finds it itself, in the order SETUP.md › How `tools/resume.py` finds its tools gives.
-- **New package:** when a build stops on `File '<x>.sty' not found`, rerun with `--install-missing`, and add each package its `add to tools/tex-packages.txt:` lines name to that file, so the next machine gets it (an Engine change: [AGENTS.md › Changes](../../AGENTS.md#changes)).
+- **New package:** when a build stops on `File '<x>.sty' not found`, rerun with `--install-missing`, and add each package its `add to tools/tex-packages.txt:` lines name to that file, so the next machine gets it (an Engine change: [engine-changes.md](engine-changes.md)).
 
 ## The loop
 

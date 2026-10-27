@@ -10,7 +10,7 @@ Nothing is saved until the final text has passed review. Text the user or the dr
 
 ## Dispatch
 
-Start one subagent as [SKILL.md › Subagents](../SKILL.md#rules-for-every-mode) says, with the prompt below. If your agent has no subagents, run the review yourself inline and state in the report that the review was not independent.
+Start one subagent as [subagents.md](../subagents.md) says, with the prompt below. If your agent has no subagents, run the review yourself inline and state in the report that the review was not independent.
 
 When the user asks for a weaker model than the session's for the reviewer, use it after one line saying that weaker reviewers have missed the semantic Grounding checks in [Reviewer instructions](#reviewer-instructions) (implied cause, a verb's scope, drift from the user's words); say it once and do not block the request.
 

@@ -27,3 +27,10 @@ The mechanical steps are subcommands of `python3 -I <root>/tools/entries.py`: `s
 10. **Next up**, after step 9's commit: run the command [SKILL.md › Next up](../SKILL.md#rules-for-every-mode) gives, with `stories`.
 
 Done when every question in the request has a confirmed type and a chosen Story (or the user set it aside, and the report says so), every fact the user gave is in its entry with its source, each Talking points draft is saved or declined by the user, and the last `story-coverage` prints none of step 9's findings for what this run wrote. The last message ends with the Next up block.
+
+## Files
+
+| Path | What |
+|---|---|
+| `stories/<question-type-slug>.md` | Talking points, one file per behavioural question type; its `stories.md` row links it. Written by [stories](stories.md) |
+| `stories/wordings/<question-type-slug>.md` | The wordings of the behavioural questions the user brought, word for word, one file per question type, Talking points or not. Written by `tools/entries.py story-wording-add` ([stories](stories.md) step 2) |

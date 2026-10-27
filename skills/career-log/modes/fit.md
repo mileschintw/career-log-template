@@ -139,3 +139,9 @@ Step 5 of a one-posting run follows this section, and so do [fit-several-posting
 10. **Show the map:** put the `Course work:` line, the `Map:` line and the table that the last run of `fit.py map` printed into your reply, as it printed them: the user may not see a tool's output. Show every row, however many; a count or a summary by category is not the map.
 
 Done when every map file's `requirements` holds each requirement and duty of the input that is not a condition, `fit.py map` printed `map: ok` for every map file, every cited entry was read whole in this run, and, unless the step that sent you here skips or defers **Show the map**, the map is shown as that item says.
+
+## Files
+
+| Path | What |
+|---|---|
+| `outputs/reports/sponsorship.jsonl` | Each employer's US visa filings found (H-1B LCA, PERM) and the day they were looked up, reused until older than `tools/sponsorship.py --help` says; [fit.md › Sponsorship lookup](fit.md#sponsorship-lookup) keeps it through `tools/sponsorship.py` |

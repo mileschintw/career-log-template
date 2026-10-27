@@ -66,8 +66,8 @@ Entry size: an `entry over threshold: <path> <n> tokens` line for each entry too
 estimates past its threshold (half of what one Read call returns), in every mode. It has no
 next: line: the modes say what to do with an entry that size.
 
-Newer Template release: an `update: v<x> available (you have v<y>); say "upgrade" to run the upgrade
-mode` line when the public Template has a release newer than tools/TEMPLATE_VERSION's version, and
+Newer Template release: an `update: v<x> available (you have v<y>): ...` line, saying what to do with
+it, when the public Template has a release newer than tools/TEMPLATE_VERSION's version, and
 nothing otherwise. It asks GitHub's Releases API, for the Template tools/upgrade.py fetches
 (CAREER_LOG_RELEASES_URL overrides the address), at most once a day, for 2 seconds at most,
 sending nothing from the Log, and keeps the answer in ~/.career-log/release.json; offline,
@@ -881,10 +881,12 @@ def check_uncommitted(ctx):
         return [], [], False
     lines = ["log changes: uncommitted (%d file(s))" % len(files)]
     lines += ["log change: %s %s" % (status, path) for status, path in files]
-    nexts = ["next: now, first: for the files above that are not this session's own bulk change waiting"
-             " for the user's yes, show the user what `%s status -- <file>...` prints and ask whether to"
-             " commit them (`settle commit`) or discard them (`settle discard`, then follow its output), as"
-             " SKILL.md › Commits, *Uncommitted Log changes*, says." % tool_cmd(ctx.root, "sync.py")]
+    sync = tool_cmd(ctx.root, "sync.py")
+    nexts = ["next: now, first: the files above that are not this session's own bulk change waiting for the"
+             " user's yes are changes an earlier session left. Show the user what `%s status -- <file>...`"
+             " prints for those files and ask whether to commit them (`%s settle commit -- <file>...`) or"
+             " discard them (`%s settle discard -- <file>...`, then follow its output), naming those files"
+             " each time; then go on with the request." % (sync, sync, sync)]
     return lines, nexts, False
 
 
@@ -1064,7 +1066,7 @@ def inbox_state(ctx):
     return (["gitignore inbox: missing (%s)" % ", ".join(lacking)],
             ["next: now, first: add the line(s) %s to %s, then run `%s commit \"gitignore: sources/inbox\" --"
              " .gitignore`, before anything is put in sources/inbox/: the raw exports there stay out of git"
-             " (AGENTS.md › Changes, guard files)." % (", ".join("`%s`" % l for l in lacking),
+             " (skills/career-log/engine-changes.md › Exceptions, guard files)." % (", ".join("`%s`" % l for l in lacking),
                                                         os.path.join(ctx.root, ".gitignore"), tool_cmd(ctx.root, "sync.py"))])
 
 
@@ -1191,8 +1193,9 @@ def check_release(ctx):
                 except OSError:
                     pass
         if latest and upgrade.SEMVER.match(latest) and upgrade.key(latest) > upgrade.key(have):
-            return (["update: v%s available (you have v%s); say \"upgrade\" to run the upgrade mode" % (latest, have)],
-                    [], False)
+            return (["update: v%s available (you have v%s): tell the user once this session, in passing, and go"
+                     " on; only their request (\"upgrade\") starts the upgrade mode, and `update_check = \"off\"` in"
+                     " config.toml stops this line (setup › Changes)" % (latest, have)], [], False)
     except Exception:
         pass
     return [], [], False

@@ -14,7 +14,8 @@ from its single source:
 - config: tools/config.default.toml (each field's comment and default) and tools/config.py (FIELDS,
   the allowed values);
 - direction: tools/config.py (DIRECTION) and the section it names in tools/template/direction.md;
-- files: SKILL.md › Layout.
+- files: SKILL.md › Layout, then the `## Files` table of each other skill file that has one
+  (the skill's folder, then modes/, each in name order): the files only that file's work uses.
 Relative links in a source are rewritten to point from docs/.
 
 write: rewrites every block from its source and prints `wrote <file>` or `unchanged <file>`.
@@ -112,9 +113,18 @@ def modes_block(root):
 
 
 def files_block(root):
-    header, rows = table(read(os.path.join(root, *SKILL_MD.split("/"))), "Layout")
     src = os.path.dirname(SKILL_MD)
-    return render(["Path", "What"], [[r[0], rebase(r[1], src, root)] for r in rows])
+    header, rows = table(read(os.path.join(root, *SKILL_MD.split("/"))), "Layout")
+    out = [[r[0], rebase(r[1], src, root)] for r in rows]
+    for folder in (src, src + "/modes"):
+        here = os.path.join(root, *folder.split("/"))
+        for name in sorted(os.listdir(here)) if os.path.isdir(here) else []:
+            path = os.path.join(here, name)
+            if name.endswith(".md") and folder + "/" + name != SKILL_MD and os.path.isfile(path):
+                text = read(path)
+                if re.search(r"^## Files$", text, re.M):
+                    out += [[r[0], rebase(r[1], folder, root)] for r in table(text, "Files")[1]]
+    return render(["Path", "What"], out)
 
 
 def config_block(root):

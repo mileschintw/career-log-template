@@ -57,7 +57,7 @@ For each `step: <version>`, in order:
    git -C <root> add -A
    git -C <root> commit -m "upgrade: Template <version>" -m "The upgrade to the released Template <version> (the upgrade mode), not an Engine change to review."
    ```
-   The body keeps [AGENTS.md › Changes](../../../AGENTS.md#changes)' rule for an Engine commit on the default branch from being applied to it later.
+   The body keeps [engine-changes.md › Exceptions](../engine-changes.md#exceptions)' rule for an Engine commit on the default branch from being applied to it later.
 
 Done when `git -C <root> log --oneline <start>..HEAD` lists an `upgrade: Template <version>` commit for every `step:` line, and `git -C <root> status --short` prints nothing.
 

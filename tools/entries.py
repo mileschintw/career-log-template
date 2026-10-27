@@ -289,7 +289,13 @@ A text or wording that starts with `-` goes after `--`, with every flag before t
 - `diff <entry> [<part>...]` (consolidate step 5): `git add -N` for each one not in the index
   (so a new part shows), then `git diff` of them, and with parts also of README.md, stories.md
   and profile.md, printed in a `diff` code fence longer than any run of backticks in it, to be
-  pasted as printed. `no change: <files>` when the diff is empty. Exit 0.
+  pasted as printed. Each hunk header names the section of its first change, and each hunk has
+  3 lines of context. A deleted line and the added line that rewrites it (difflib's ratio of
+  their words at least 0.5) print every changed word with 8 unchanged words beside each change;
+  the rest of an unchanged run, the same in both lines, prints as `[… N words unchanged …]` when
+  that leaves out more than 8 words, as does the rest of a context line after its first 8 words,
+  and a `#` line at the top of the block explains the mark. Every added and deleted word is printed, and a line
+  added or deleted whole is printed in full. `no change: <files>` when the diff is empty. Exit 0.
 - `drop <entry> --reason <reason>` (SKILL.md › Dropped experiences, on the user's word): deletes
   the entry's README row (`README row: <row>`, or `none`), each Story index item that links it
   (`story removed: <question type>: <item>`) and its file (`deleted: <entry>`; out of the index
@@ -329,6 +335,7 @@ Stories (the Story index, Talking points and wordings files, and the Application
   python3 -I tools/entries.py story-coverage [--type <question type>]... [--talking-points]
       [--application-questions]
   python3 -I tools/entries.py story-candidates <question type>
+  python3 -I tools/entries.py story-leads --type <question type>... | --check <pack>
   python3 -I tools/entries.py story-stale <talking points file>
   python3 -I tools/entries.py story-wording-add <question type> <wording>
   python3 -I tools/entries.py story-wordings [--type <question type>]...
@@ -464,6 +471,26 @@ In the output below, `-` stands for an empty field, a list of question types is 
   - `pending: <path>: <bullet>`: each `- ` line of each entry's `## Pending`, entry by entry, cut
     to 300 characters with ` ...` (read the entry for the rest).
   Exit 0.
+- `story-leads --type <question type>...` (interview step 3): for each `--type`, one predicted
+  question each, a `question <n>: <question type>` line, then story-candidates' lines for that type; then one
+  `next: now, ...` line: show them, ask the user to confirm each type and pick each lead that
+  confirmed Talking points do not give, and end the turn. Exit 0.
+- `story-leads --check <pack>`: the interview pack's `## Stories` section, one `### <question>`
+  heading per question, each with a `Type: <question type>` line and one Lead: line (a leading `- `
+  and bold labels are read too): `Lead: <the Story, or set aside> (user, YYYY-MM-DD)` for the user's
+  answer, or `Lead: <the Story's key> (stories/<slug>.md, confirmed YYYY-MM-DD[ HH:MM])` for a lead
+  taken from confirmed Talking points. One `lead: <question>: <its Lead: value>` line per question
+  that has both; then a `FAIL:` line for each `no type: <question>`, `no lead: <question>`, `<n>
+  leads: <question>`, `lead not the user's pick: <question>: <value>` (one that ends neither way),
+  `taken lead not in the form: <question>: <value>` (one that ends `(..., confirmed ...)`, names a
+  `.md` file and not the user, but is not that form: a Windows or pack-relative path, a Markdown
+  link), `lead not in confirmed talking points: <question>: <value>: <why>` (the file is missing,
+  its `type:` is not the question's Type:, or its `## Stories` lacks the key) and `taken lead date out of date: <question>: <value>: the file
+  is confirmed <its date>` (its `confirmed:` day is another: the file was confirmed again, with the
+  key still in it), and a `next:` line, exit 1: it says to rewrite the two taken-lead kinds in the
+  form, keeping the key, and to ask the user about the rest; or `leads: ok, <n> question(s)`,
+  exit 0. A `## Stories` with no `### ` but a `None predicted.` line prints `leads: none
+  predicted`, exit 0; no `## Stories` section, or neither, is a FAIL, with its own `next:` line.
 - `story-stale <stories/<slug>.md>`: the changes, since the file was confirmed, to the entries it
   points at. First `since: <commit> <subject>`, the last commit that wrote the file's current
   `confirmed:` line, or, when no commit did, `since: <date> <time> (...)`; then `changed: <entry>
@@ -1753,6 +1780,103 @@ def cmd_story_candidates(root, question_type):
     return 0
 
 
+LEAD_LINE = re.compile(r"^\s*(?:[-*]\s+)?(?:\*\*)?(Lead|Type)(?:\*\*)?:(?:\*\*)?[ \t]*(.*?)[ \t]*$", re.M)
+USER_PICK = re.compile(r"\(user, \d{4}-\d{2}-\d{2}\)\.?$")
+TALKING_PICK = re.compile(r"^(\S+) \((stories/[^,()]+\.md), confirmed (\d{4}-\d{2}-\d{2})(?: \d{2}:\d{2})?\)\.?$")
+TALKING_LIKE = re.compile(r"\(.*\.md\b.*\bconfirmed\b[^()]*\)\.?$")   # meant as a taken lead, whatever its shape
+NAMES_USER = re.compile(r"\buser\b", re.I)
+NONE_PREDICTED = re.compile(r"^None predicted\.?[ \t]*$", re.M | re.I)
+
+
+def cmd_story_leads(root, types):
+    """interview step 3's candidates, one block per predicted question, and the ask that waits for the pick."""
+    for n, question_type in enumerate(types, 1):
+        print("question %d: %s" % (n, question_type))
+        cmd_story_candidates(root, question_type)
+    print("next: now, show the user each question's proposed type; for a question whose type has confirmed"
+          " Talking points (interview step 3), the lead you take from that file, in one short list they may"
+          " change; for each other question, its candidates as stories step 4 shows them, with the one you"
+          " recommend for this posting. Ask them to confirm each type and pick each of those other leads"
+          " (one of these, another story, talk it through, or set the question aside), then end your turn:"
+          " the pack's Lead: lines are their answers and the leads taken, and `story-leads --check <pack>`"
+          " runs before its commit")
+    return 0
+
+
+def talking_pick_problem(root, m, types):
+    """Why a Lead: taken from Talking points does not match the file it names, or None. A date that is
+    only out of date (the file was confirmed again, with the Story still in it) is its own kind: the
+    lead stays the user's, and only the date in the pack needs rewriting."""
+    key, path, day = m.groups()
+    if not os.path.isfile(os.path.join(root, path)):
+        return "lead not in confirmed talking points", "no such file"
+    tp = TalkingPoints(root, path)
+    if tp.type not in types:
+        return "lead not in confirmed talking points", "the file's type is %s" % (tp.type or "-")
+    if key not in [s.key for s in tp.stories]:
+        return "lead not in confirmed talking points", "not in the file's ## Stories"
+    if str(tp.day) != day:
+        if tp.day is None:
+            return "lead not in confirmed talking points", "the file is confirmed %s" % (tp.confirmed or "-")
+        return "taken lead date out of date", "the file is confirmed %s" % tp.confirmed
+    return None
+
+
+def cmd_story_leads_check(root, path):
+    """The pack's ## Stories: each `### <question>` has a Type: line and one Lead: line, the user's pick or
+    a Story of the confirmed Talking points file it names."""
+    full = path if os.path.isabs(path) else os.path.join(root, path)
+    text = logfiles.read_text(full)
+    body = logfiles.section(text, "Stories")
+    blocks = re.split(r"(?m)^### +", body)[1:] if body is not None else []
+    if not blocks and body is not None and NONE_PREDICTED.search(body):
+        print("leads: none predicted")
+        return 0
+    if not blocks:
+        print("FAIL: %s: %s" % ("no ## Stories section" if body is None else "no ### question under ## Stories", path))
+        print("next: write the pack's ## Stories as interview step 3 says, one ### heading per question (or the"
+              " line `None predicted.` for a stage with no behavioural question), then run this again")
+        return 1
+    out, ok = [], []
+    for b in blocks:
+        question = b.split("\n", 1)[0].strip()
+        found = {}
+        for label, value in LEAD_LINE.findall(b):
+            found.setdefault(label, []).append(value)
+        if not found.get("Type"):
+            out.append("no type: %s" % question)
+        leads = found.get("Lead", [])
+        if len(leads) != 1:
+            out.append("%s: %s" % ("no lead" if not leads else "%d leads" % len(leads), question))
+        elif USER_PICK.search(leads[0]):
+            ok.append("lead: %s: %s" % (question, leads[0]))
+        elif not TALKING_PICK.match(leads[0]):
+            out.append("%s: %s: %s" % ("taken lead not in the form" if TALKING_LIKE.search(leads[0])
+                                       and not NAMES_USER.search(leads[0])
+                                       else "lead not the user's pick", question, leads[0]))
+        else:
+            problem = talking_pick_problem(root, TALKING_PICK.match(leads[0]), found.get("Type", []))
+            if problem:
+                out.append("%s: %s: %s: %s" % (problem[0], question, leads[0], problem[1]))
+            else:
+                ok.append("lead: %s: %s" % (question, leads[0]))
+    for line in ok:
+        print(line)
+    for line in out:
+        print("FAIL: %s" % line)
+    if out:
+        print("next: fix a `no type` or `leads:` line in the pack; rewrite each `taken lead not in the form`"
+              " or `taken lead date out of date` Lead: without asking the user, keeping its key, as `Lead: <key>"
+              " (stories/<slug>.md, confirmed <date>)`: the date is the one the `out of date` line prints, or for"
+              " the other the one `story-leads --type <its type>` prints on its `talking points:` line (a"
+              " `talking points: none` there makes it a lead to ask about); for each `no lead`, `lead not the"
+              " user's pick` or `lead not in confirmed talking points`, ask the user, end your turn, and write"
+              " their answer as its Lead: line; then run this again, and commit the pack once it prints leads: ok")
+        return 1
+    print("leads: ok, %d question(s)" % len(blocks))
+    return 0
+
+
 def talking_points_arg(root, arg):
     for base in (root, os.getcwd()):
         full = os.path.abspath(os.path.join(base, arg))
@@ -3018,6 +3142,139 @@ def fence(text):
     return "`" * max([3] + [len(run) + 1 for run in re.findall(r"`+", text)])
 
 
+DIFF_CONTEXT = 8   # words diff keeps on each side of a change in a long line
+WORD_TOKENS = re.compile(r"\s+|\S+")   # whitespace runs are tokens too, so a whitespace change shows
+HUNK = re.compile(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+MD_HEADING = re.compile(r"#{1,6}[ \t]")
+MD_FENCE = re.compile(r"[ \t]*(`{3,}|~{3,})")
+
+
+def unchanged_mark(n):
+    return "[… %d words unchanged …]" % n
+
+
+def trim_run(tokens, head, tail):
+    """An unchanged run of tokens, keeping its first head and last tail words and putting the mark
+    in place of the rest when that leaves out more than DIFF_CONTEXT words; (tokens, cut or not)."""
+    at = [k for k, t in enumerate(tokens) if not t.isspace()]
+    if len(at) - head - tail <= DIFF_CONTEXT:
+        return tokens, False
+    kept = (tokens[:at[head - 1] + 1] + [" "] if head else []) + [unchanged_mark(len(at) - head - tail)]
+    return kept + ([" "] + tokens[at[-tail]:] if tail else []), True
+
+
+def trim_pair(old, new):
+    """The old and new line, each with the same long unchanged runs cut (trim_run), DIFF_CONTEXT
+    words kept beside each change; added and deleted words are never cut. (old, new, cut or not)."""
+    a, b = WORD_TOKENS.findall(old), WORD_TOKENS.findall(new)
+    ops = difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes()
+    out_a, out_b, cut = [], [], False
+    for k, (tag, i1, i2, j1, j2) in enumerate(ops):
+        if tag == "equal":
+            run, c = trim_run(a[i1:i2], DIFF_CONTEXT if k else 0, DIFF_CONTEXT if k < len(ops) - 1 else 0)
+            out_a, out_b, cut = out_a + run, out_b + run, cut or c
+        else:
+            out_a, out_b = out_a + a[i1:i2], out_b + b[j1:j2]
+    return "".join(out_a), "".join(out_b), cut
+
+
+def pair_lines(dels, adds):
+    """Each deleted line paired with the added line that rewrites it, in order: [(index in dels or
+    None, index in adds or None)], a pair when difflib's ratio of their words is at least 0.5."""
+    def ratio(x, y):
+        m = difflib.SequenceMatcher(None, x.split(), y.split(), autojunk=False)
+        return m.ratio() if m.quick_ratio() >= 0.5 else 0
+    n, m = len(dels), len(adds)
+    r = [[ratio(d, a) for a in adds] for d in dels]
+    best = [[0.0] * (m + 1) for _ in range(n + 1)]   # best[i][j]: the most pairs' weight in dels[i:], adds[j:]
+    for i in range(n - 1, -1, -1):
+        for j in range(m - 1, -1, -1):
+            best[i][j] = max(best[i + 1][j], best[i][j + 1], r[i][j] + best[i + 1][j + 1] if r[i][j] >= 0.5 else 0)
+    out, i, j = [], 0, 0
+    while i < n or j < m:
+        if i < n and j < m and r[i][j] >= 0.5 and best[i][j] == r[i][j] + best[i + 1][j + 1]:
+            out, i, j = out + [(i, j)], i + 1, j + 1
+        elif i < n and (j == m or best[i][j] == best[i + 1][j]):
+            out, i = out + [(i, None)], i + 1
+        else:
+            out, j = out + [(None, j)], j + 1
+    return out
+
+
+def section_of(lines, n):
+    """The last Markdown heading at or above line n (1-based) of a file's lines, front matter and
+    fenced code left out."""
+    start = next((k + 1 for k in range(1, len(lines)) if lines[k] == "---"), 0) if lines[:1] == ["---"] else 0
+    heading, fence = "", None
+    for line in lines[start:n]:
+        m = MD_FENCE.match(line)
+        if fence:
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not line.strip(" \t`~"):
+                fence = None
+        elif m:
+            fence = m.group(1)
+        elif MD_HEADING.match(line):
+            heading = line.rstrip()
+    return heading
+
+
+def word_diff(root, out):
+    """git diff output with each rewritten line's long unchanged runs cut (trim_pair), each long
+    context line cut after its first DIFF_CONTEXT words, and each hunk header naming its section;
+    (text, cut or not)."""
+    res, block, cut = [], [], False
+    hunk, old, lines = False, "", []
+    head, at = None, 0   # the hunk header's index in res until its first change; the next new line's number
+    def flush():
+        nonlocal cut
+        dels, adds = [l for l in block if l[0] == "-"], [l for l in block if l[0] == "+"]
+        for i, j in pair_lines([l[1] for l in dels], [l[1] for l in adds]):
+            d, a = dels[i][1] if i is not None else None, adds[j][1] if j is not None else None
+            if d is not None and a is not None:
+                d, a, c = trim_pair(d, a)
+                cut = cut or c
+            res.extend(["-" + d] + dels[i][2:] if d is not None else [])
+            res.extend(["+" + a] + adds[j][2:] if a is not None else [])
+        block.clear()
+    for line in out.split("\n"):
+        if hunk and line[:1] in ("-", "+", "\\"):
+            if line[0] == "\\":   # `\ No newline at end of file`, kept after the line it is about
+                block[-1].append(line) if block else res.append(line)
+                continue
+            if head is not None:   # the section of the hunk's first change
+                name = section_of(lines, at if line[0] == "+" else at - 1)
+                res[head], head = res[head] + (" " + name if name else ""), None
+            if line[0] == "+":
+                at += 1
+            if block and block[-1][0] == "+" and line[0] == "-":
+                flush()
+            block.append([line[0], line[1:]])   # sign, text, then any `\` line
+            continue
+        flush()
+        m = HUNK.match(line) if hunk or line.startswith("@@") else None
+        if line.startswith("diff --git "):
+            hunk, old, lines = False, "", []
+        elif not hunk and line.startswith("--- a/"):
+            old = line[6:].rstrip("\t")   # git ends a path holding a space with a tab
+        elif not hunk and line.startswith("+++ "):
+            path = line[6:].rstrip("\t") if line.startswith("+++ b/") else old   # `+++ /dev/null`: the file was deleted
+            full = os.path.join(root, path)
+            if os.path.isfile(full):
+                with open(full, encoding="utf-8", errors="replace") as fh:
+                    lines = fh.read().split("\n")
+            else:
+                lines = (logfiles.git_blob(root, "", path) or b"").decode("utf-8", "replace").split("\n")
+        elif m:
+            hunk, head, at, line = True, len(res), int(m.group(1)), m.group(0)
+        elif hunk and line[:1] in (" ", ""):
+            at += 1
+            tokens, c = trim_run(WORD_TOKENS.findall(line[1:]), DIFF_CONTEXT, 0)
+            line, cut = " " + "".join(tokens), cut or c
+        res.append(line)
+    flush()
+    return "\n".join(res), cut
+
+
 def cmd_diff(root, paths):
     files = list(paths) + ([f for f in ("README.md", "stories.md", "profile.md") if os.path.isfile(os.path.join(root, f))]
                            if len(paths) > 1 else [])
@@ -3025,12 +3282,16 @@ def cmd_diff(root, paths):
     new = [p for p in paths if p not in tracked]
     if new:
         git(root, "add", "-N", "--", *new)
-    out = git(root, "diff", "--no-color", "--no-ext-diff", "--", *files)
+    out = git(root, "-c", "diff.suppressBlankEmpty=false", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--no-relative", "--src-prefix=a/",
+              "--dst-prefix=b/", "-U3", "--", *files)
     if not out.strip():
         print("no change: %s" % " ".join(files))
         return 0
+    out, cut = word_diff(root, out.rstrip("\r\n"))
+    if cut:
+        out = "# [… N words unchanged …]: N unchanged words this diff leaves out; it shows every added and deleted word\n" + out
     f = fence(out)
-    print("%sdiff\n%s\n%s" % (f, out.rstrip("\r\n"), f))
+    print("%sdiff\n%s\n%s" % (f, out, f))
     return 0
 
 
@@ -3455,6 +3716,7 @@ REPEATED = ("--type", "--field", "--field-source", "--marker", "--cut")
 FLAGS = {   # each subcommand's flags; --root is every one's
     "list": {"--series", "--date", "--window", "--course-work", "--today"}, "check": {"--consolidated", "--today"},
     "story-coverage": {"--type", "--talking-points", "--application-questions"}, "story-wordings": {"--type"},
+    "story-leads": {"--type", "--check"},
     "story-add": {"--marker", "--label", "--summary"}, "story-confirm": {"--type"}, "answer-row": {"--angle"},
     "answer-row-add": {"--scope"}, "answer-set": {"--angle", "--remove"},
     "new": {"--month", "--status", "--field", "--field-source", "--visibility-source", "--today"}, "readme-row": {"--status"},
@@ -3466,8 +3728,9 @@ TAKES = {"list": 0, "rulings-hits": 0, "story-coverage": 0, "story-wordings": 0,
          "period": 1, "story-wording-add": 2, "phrasing-add": 2, "pending-add": 2, "set-visibility": 2,
          "story-type-add": 1, "story-add": 2, "story-core": 2, "story-confirm": 1, "answer-row": 1,
          "answer-row-add": 1, "answer-set": 2, "drop": 1,
-         "check": None, "state": None, "split": None, "diff": None}
-# None: check takes entries with --consolidated only, state any number, split and diff one or more
+         "check": None, "state": None, "split": None, "diff": None, "story-leads": None}
+# None: check takes entries with --consolidated only, state any number, split and diff one or more,
+# story-leads a pack with --check only
 FREE_TEXT = ("story-wording-add", "phrasing-add", "pending-add")   # their text may follow `--`
 
 
@@ -3531,6 +3794,7 @@ def main(argv):
              " period <entry> --cover YYYY-MM-DD|--ongoing | set-visibility <entry> public|private|nda [--source <source>] |"
              " phrasing-add <entry> --angle <angle> --source <citation> [--distinct|--replace <n>] <wording> |"
              " story-coverage [--type <question type>]... | story-candidates <question type> |"
+             " story-leads --type <question type>... | story-leads --check <pack> |"
              " story-stale <talking points file> | story-finish <entry> |"
              " story-wording-add <question type> <wording> | story-wordings [--type <question type>]... |"
              " story-type-add <question type> | story-add <question type> <target> [--marker raw|pending|core]..."
@@ -3591,7 +3855,8 @@ def main(argv):
     if set(opts) - FLAGS.get(cmd, set()) or (cmd == "list" and "--today" in opts and "--window" not in opts):
         return bad_usage([] if takes == 2 or consolidated else rest[takes or 0:])
     if takes is None:
-        if cmd == "check" and bool(rest) != consolidated or cmd in ("split", "diff") and not rest:
+        if cmd == "check" and bool(rest) != consolidated or cmd in ("split", "diff") and not rest \
+                or cmd == "story-leads" and (len(rest) != ("--check" in opts) or ("--check" in opts) == bool(opts.get("--type"))):
             return bad_usage([] if consolidated else rest)
     elif len(rest) != takes:
         return bad_usage(rest[takes:])
@@ -3633,6 +3898,8 @@ def main(argv):
         if cmd == "story-coverage":
             return cmd_story_coverage(root, opts.get("--type", []), "--talking-points" in opts,
                                       "--application-questions" in opts)
+        if cmd == "story-leads":
+            return cmd_story_leads_check(root, rest[0]) if rest else cmd_story_leads(root, opts["--type"])
         if cmd == "story-type-add":
             return cmd_story_type_add(root, rest[0])
         if cmd == "story-add":

@@ -991,7 +991,7 @@ class StoryCoverageTest(Log):
 
 class StoryCandidatesTest(Log):
     def setUp(self):
-        super().setUp()
+        Log.setUp(self)   # StoryLeadsTest borrows this setUp
         self.write(W, entry(one_line="Sorted widgets.", series="widget"))
         self.write(S, entry(title="Widget Sorter v2", period="2031-06 – 2031-08", one_line="Sorted faster.",
                             series="widget"))
@@ -1042,6 +1042,112 @@ class StoryCandidatesTest(Log):
         lines = self.candidates("Conflict")
         self.assertEqual(lines[1], "talking points: none; a new file is stories/conflict.md")
         self.assertEqual([l.split(":")[0] for l in lines[2:4]], ["indexed", "indexed, not an entry"])
+
+
+class StoryLeadsTest(Log):
+    setUp, candidates = StoryCandidatesTest.setUp, StoryCandidatesTest.candidates
+
+    def test_candidates_per_question_then_the_ask(self):
+        code, lines = self.run_tool("story-leads", "--type", "Debugging", "--type", "Leading a team", "--root", self.root)
+        self.assertEqual(code, 0, lines)
+        self.assertEqual(lines[0], "question 1: Debugging")
+        self.assertEqual(lines[1:lines.index("question 2: Leading a team")], self.candidates("Debugging"))
+        rest = lines[lines.index("question 2: Leading a team") + 1:]
+        self.assertEqual(rest[:-1], self.candidates("Leading a team"))
+        self.assertTrue(rest[-1].startswith("next: now, show the user each question's proposed type"), rest[-1])
+        self.assertIn("then end your turn", rest[-1])
+
+    def leads(self, pack):
+        self.write("outputs/applications/a/interview-screen.md", pack)
+        return self.run_tool("story-leads", "--check", "outputs/applications/a/interview-screen.md", "--root", self.root)
+
+    def test_check_passes_the_users_picks(self):
+        code, lines = self.leads("# Pack\n\n## Stories\n\n### Tell me about a hard bug\nType: Debugging\n"
+                                 "Lead: %s#dead-ends (user, 2031-06-02)\n\n### A team you led\n- **Type:** Leading a team\n"
+                                 "- **Lead**: set aside (user, 2031-06-02).\n\n## Questions to ask\n- Lead: not a question\n" % W)
+        self.assertEqual(code, 0, lines)
+        self.assertEqual(lines, ["lead: Tell me about a hard bug: %s#dead-ends (user, 2031-06-02)" % W,
+                                 "lead: A team you led: set aside (user, 2031-06-02).", "leads: ok, 2 question(s)"])
+
+    def test_check_fails_a_lead_the_user_did_not_pick(self):
+        code, lines = self.leads("## Stories\n\n### Hard bug\nType: Debugging\nLead: %s#dead-ends (proposed)\n\n"
+                                 "### Team\nLead: %s (user, 2031-06-02)\n\n### Conflict\nType: Conflict\n\n"
+                                 "### Twice\nType: Debugging\nLead: x (user, 2031-06-02)\nLead: y (user, 2031-06-02)\n" % (W, P))
+        self.assertEqual(code, 1, lines)
+        self.assertEqual(lines[0], "lead: Team: %s (user, 2031-06-02)" % P)
+        self.assertEqual(lines[1:-1], ["FAIL: lead not the user's pick: Hard bug: %s#dead-ends (proposed)" % W,
+                                       "FAIL: no type: Team", "FAIL: no lead: Conflict", "FAIL: 2 leads: Twice"])
+        self.assertTrue(lines[-1].startswith("next: fix a `no type` or `leads:` line"), lines[-1])
+        lines = self.leads("# Pack\n\n## Likely questions\n- x\n")[1]
+        self.assertEqual(lines[0], "FAIL: no ## Stories section: outputs/applications/a/interview-screen.md")
+        self.assertTrue(lines[1].startswith("next: write the pack's ## Stories"), lines)
+        self.assertEqual(self.leads("## Stories\n\nNone predicted.\n"), (0, ["leads: none predicted"]))
+        self.assertEqual(self.leads("## Stories\n\nSome text.\n")[0], 1)
+
+    def test_check_passes_a_lead_taken_from_confirmed_talking_points(self):
+        self.write("stories/debugging.md", talking("Debugging", "2031-06-01 13:00", W + "#dead-ends", P))
+        pack = ("## Stories\n\n### Hard bug\nType: Debugging\nLead: %s (stories/debugging.md, confirmed %s)\n"
+                "\n### Team\nType: Leading a team\nLead: %s#people (user, 2031-06-02)\n")
+        code, lines = self.leads(pack % (P, "2031-06-01", P))
+        self.assertEqual(code, 0, lines)
+        self.assertEqual(lines, ["lead: Hard bug: %s (stories/debugging.md, confirmed 2031-06-01)" % P,
+                                 "lead: Team: %s#people (user, 2031-06-02)" % P, "leads: ok, 2 question(s)"])
+        lines = self.leads("## Stories\n\n### Hard bug\n- **Type:** Debugging\n- **Lead:** %s#dead-ends"
+                           " (stories/debugging.md, confirmed 2031-06-01 13:00).\n" % W)[1]
+        self.assertEqual(lines[-1], "leads: ok, 1 question(s)")
+        bad = ((G, "2031-06-01", "not in the file's ## Stories"),)
+        for key, day, why in bad:
+            code, lines = self.leads(pack % (key, day, P))
+            self.assertEqual(code, 1, lines)
+            self.assertIn("FAIL: lead not in confirmed talking points: Hard bug: %s (stories/debugging.md, confirmed"
+                          " %s): %s" % (key, day, why), lines)
+        code, lines = self.leads(pack.replace("Type: Debugging", "Type: Leading a team") % (P, "2031-06-01", P))
+        self.assertIn("FAIL: lead not in confirmed talking points: Hard bug: %s (stories/debugging.md, confirmed"
+                      " 2031-06-01): the file's type is Debugging" % P, lines)
+        code, lines = self.leads(pack.replace("debugging.md", "conflict.md") % (P, "2031-06-01", P))
+        self.assertIn("FAIL: lead not in confirmed talking points: Hard bug: %s (stories/conflict.md, confirmed"
+                      " 2031-06-01): no such file" % P, lines)
+        self.assertTrue(lines[-1].startswith("next: fix a `no type` or `leads:` line"), lines[-1])
+
+    def test_check_names_a_mis_shaped_taken_lead_a_format_error(self):
+        """#530 (1): a value ending `(..., confirmed ...)` that misses the form is rewritten, not asked about."""
+        self.write("stories/debugging.md", talking("Debugging", "2031-06-01 13:00", W + "#dead-ends", P))
+        for value in (P + r" (stories\debugging.md, confirmed 2031-06-01)",
+                      P + " ([debugging](stories/debugging.md), confirmed 2031-06-01)",
+                      P + " (../../../stories/debugging.md, confirmed 2031-06-01).",
+                      P + " (stories/debugging.md confirmed 2031-06-01)"):
+            code, lines = self.leads("## Stories\n\n### Hard bug\nType: Debugging\nLead: %s\n" % value)
+            self.assertEqual(code, 1, lines)
+            self.assertEqual(lines[0], "FAIL: taken lead not in the form: Hard bug: %s" % value)
+            self.assertIn("rewrite each `taken lead not in the form` or `taken lead date out of date` Lead: without"
+                          " asking the user, keeping its key", lines[-1])
+        for value in (P + " (proposed)", "set aside (user confirmed, 2031-06-01)",
+                      P + " (confirmed by the user, 2031-06-01)", P + " (stories/debugging.md, user confirmed)"):
+            lines = self.leads("## Stories\n\n### Hard bug\nType: Debugging\nLead: %s\n" % value)[1]
+            self.assertEqual(lines[0], "FAIL: lead not the user's pick: Hard bug: %s" % value)
+
+    def test_check_names_a_date_a_reconfirm_left_behind(self):
+        """#530 (2): the file was confirmed again with the Story still in it: rewrite the date, ask nobody."""
+        self.write("stories/debugging.md", talking("Debugging", "2031-06-03 09:15", W + "#dead-ends", P))
+        code, lines = self.leads("## Stories\n\n### Hard bug\nType: Debugging\n"
+                                 "Lead: %s (stories/debugging.md, confirmed 2031-06-01 13:00)\n" % P)
+        self.assertEqual(code, 1, lines)
+        self.assertEqual(lines[0], "FAIL: taken lead date out of date: Hard bug: %s (stories/debugging.md, confirmed"
+                                   " 2031-06-01 13:00): the file is confirmed 2031-06-03 09:15" % P)
+        self.assertIn("without asking the user", lines[-1])
+        code, lines = self.leads("## Stories\n\n### Hard bug\nType: Debugging\n"
+                                 "Lead: %s (stories/debugging.md, confirmed 2031-06-03)\n" % P)
+        self.assertEqual((code, lines[-1]), (0, "leads: ok, 1 question(s)"))
+        self.write("stories/debugging.md", talking("Debugging", "someday", W + "#dead-ends", P))
+        lines = self.leads("## Stories\n\n### Hard bug\nType: Debugging\n"
+                           "Lead: %s (stories/debugging.md, confirmed 2031-06-01)\n" % P)[1]
+        self.assertEqual(lines[0], "FAIL: lead not in confirmed talking points: Hard bug: %s (stories/debugging.md,"
+                                   " confirmed 2031-06-01): the file is confirmed someday" % P)
+
+    def test_usage(self):
+        for args in (["story-leads"], ["story-leads", "pack.md"], ["story-leads", "--check"],
+                     ["story-leads", "--check", "a.md", "--type", "Debugging"], ["story-leads", "--type", "Debugging", "x"]):
+            self.assertEqual(self.run_tool(*args, "--root", self.root)[0], 2, args)
 
 
 class StoryStaleTest(Log):
@@ -2414,6 +2520,51 @@ class ConsolidateHelpersTest(WriteLog):
         heads = [l for l in lines if l.startswith("diff --git")]
         self.assertEqual(heads, ["diff --git a/%s b/%s" % (p, p) for p in ("README.md", BIG, "entries/2029-03-big-scale.md")])
         self.assertIn("+title: Widget Sorter: Scale-up", lines)
+
+    def test_diff_cuts_the_unchanged_words_of_a_long_line(self):
+        para = " ".join("word%d" % k for k in range(500))   # one ~4,400-character line
+        self.write(BIG, self.read(BIG).replace("GAP:\n", "%s\n\nOld line to delete.\n" % para, 1))
+        self.commit("long line")
+        edited = para.replace("word200 ", "word200 CHANGED ").replace("word300 word301 word302 ", "")
+        self.write(BIG, self.read(BIG).replace(para, edited.replace("word0 ", "word0  "))
+                   .replace("Old line to delete.\n", "A new line, added whole.\n"))
+        code, lines = self.tool("diff", BIG)
+        self.assertEqual(code, 0, lines)
+        self.assertLess(sum(map(len, lines)), 1500)
+        self.assertEqual(lines[1], "# [… N words unchanged …]: N unchanged words this diff leaves out;"
+                                   " it shows every added and deleted word")
+        self.assertEqual([l for l in lines if l.startswith("@@")], ["@@ -17,9 +17,9 @@ ## One line"])   # the change's section
+        old, new = [l for l in lines if l.startswith("-word0")], [l for l in lines if l.startswith("+word0")]
+        self.assertEqual(len(old), 1, lines)
+        self.assertEqual(len(new), 1, lines)
+        # the whitespace change, the inserted word and the deleted words, each with 8 words beside it
+        self.assertTrue(new[0].startswith("+word0  word1 word2 word3 word4 word5 word6 word7 word8 [… 184 words unchanged …] word193"), new)
+        self.assertIn("word193 word194 word195 word196 word197 word198 word199 word200 CHANGED word201 "
+                      "word202 word203 word204 word205 word206 word207 word208 [… 83 words unchanged …] word292", new[0])
+        self.assertIn("word299 word300 word301 word302 word303", old[0])
+        self.assertIn("word299 word303", new[0])
+        self.assertTrue(old[0].endswith("word310 [… 189 words unchanged …]"), old)
+        self.assertIn("-Old line to delete.", lines)
+        self.assertIn("+A new line, added whole.", lines)
+        # a line added whole is printed in full, however long
+        self.write(BIG, self.read(BIG) + "\n%s\n" % para.replace("word", "fresh"))
+        code, lines = self.tool("diff", BIG)
+        self.assertIn("+" + para.replace("word", "fresh"), lines)
+
+    def test_diff_names_the_section_and_pairs_a_last_line(self):
+        para = " ".join("word%d" % k for k in range(300))
+        text = self.read(BIG).rstrip("\n") + "\n\n## Notes\n```sh\n# not a heading\n```\n\n" + para   # no newline at the end
+        self.write(BIG, text)
+        self.commit("fence")
+        self.write(BIG, text.replace("word150 ", "word150 CHANGED "))
+        code, lines = self.tool("diff", BIG)
+        self.assertEqual(code, 0, lines)
+        self.assertEqual([l for l in lines if l.startswith("@@")][-1][-len(" @@ ## Notes"):], " @@ ## Notes")
+        changed = [l for l in lines if l[:1] in "-+" and "word150" in l]
+        self.assertEqual(len(changed), 2, lines)
+        self.assertTrue(all(len(l) < 300 for l in changed), changed)
+        self.assertEqual([lines[k - 1][:1] for k, l in enumerate(lines) if l == "\\ No newline at end of file"],
+                         ["-", "+"])   # each mark after the line it is about
 
     def test_undo_a_split(self):
         # the draft extended the period before the split: undo keeps the draft's, from the parts' span

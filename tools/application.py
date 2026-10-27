@@ -71,10 +71,22 @@ target's outputs/resumes/<target>.md, or a report outputs/reports/<YYYY-MM-DD>-<
   .md at that commit; a target's .md or a report; else `risks: none (saved before the section
   existed)`.
 - `phrasings <saved, or a draft in .build/> --angle <angle> [<entry>...] [--today YYYY-MM-DD]`: the
-  bullets of the resume (its .tex) or of the `resume bullets` report (its list items; a draft .md's), `bullet <n>: <wording>`, each followed, per
+  bullets of the resume (its .tex's `\\item`s, less those under an Education or Skills heading:
+  tools/logfiles.py tex_bullets) or of the `resume bullets` report (its list items; a draft .md's), `bullet <n>: <wording>`, each followed, per
   entry, by `  <entry>: <ratio> <line>: <its closest wording for the angle>` (or `none for
-  <angle>`); then `cite: <citation>` (write step 10's form for that output) and `entry: <entry>:
-  <n> lines for <angle>`. An Archived output prints `archived: ... feeds nothing`.
+  <angle>`), then one verdict line for the bullet:
+  - `  same: <entry>:<line>: adds no line`: a wording an entry keeps for the angle at a ratio of
+    tools/entries.py's SIMILAR or more;
+  - else the bullet's entry is the one holding the largest share of its words (three letters or
+    more, less a few such as `and`, `with`; the first entry given on a tie; a bullet merged from two
+    claims goes to the one holding more), and the line is `  add: <entry>` (it differs from every
+    wording kept for the angle, and goes in whole); `  none: ...` when the entries given hold less
+    than half its words together (a line from profile.md, such as education); or `  older
+    form: <entry>: ...` when that entry's ## Past phrasings has lines in neither the template's
+    form nor its `none yet` or `GAP:` line (the older `**<label>**` form), which adds no line;
+  then `cite: <citation>` (write step 10's form for that output), `entry: <entry>: <n> lines for
+  <angle>`, and last `adds: <the --add flags for each add: bullet>` (or `adds: none`), the flags to
+  run the same command with. An Archived output prints `archived: ... feeds nothing`.
   - `--add <n>=<entry>[,distinct|,replace=<line>]...` writes bullet <n> into the entry through
     tools/entries.py phrasing-add with that citation, and prints its lines.
   - `--cap <entry>=<line>,<line>,...` names the lines of one claim for the angle: keeps the two
@@ -642,7 +654,7 @@ def list_items(text):
 def approved_bullets(root, rel, day):
     """([wording], citation or None, Archived?) for a saved output or a draft .tex."""
     if rel.endswith(".tex"):
-        items = [i for _, i in logfiles.tex_items(read(root, rel))]
+        items = [i for _, i in logfiles.tex_bullets(read(root, rel))]
         return [wording(i) for i in items], None, False
     if rel.startswith(".build/") and rel.endswith(".md"):   # a bullets draft, before its Kind: line
         return list_items(read(root, rel)), None, False
@@ -657,7 +669,7 @@ def approved_bullets(root, rel, day):
         if mark[0] != "resume bullets":
             raise AppError("%s is no `Kind: resume bullets` report: only those feed Past phrasings" % rel)
         return list_items(text), rel, mark[1]
-    items = [i for _, i in logfiles.tex_items(read(root, tex))] if os.path.isfile(at(root, tex)) else []
+    items = [i for _, i in logfiles.tex_bullets(read(root, tex))] if os.path.isfile(at(root, tex)) else []
     return [wording(i) for i in items], cite, is_archived(root, rel, kind)
 
 
@@ -711,19 +723,62 @@ def cmd_phrasings(root, saved, angle, names, adds, caps, day):
             worst = max(worst, code)
         out += now_lines(root, sorted({rel_of(root, re.match(r"\d+=([^,]+)", a).group(1)) for a in adds}), angle)
         return (out, worst) if worst else out
-    out = []
+    out, add = [], []
     kept = {e: entry_lines(root, e, angle) for e in erels}
+    held = {e: content_words(read(root, e)) for e in erels}
+    older = {e: older_lines(root, e) for e in erels}
     for n, b in enumerate(bullets, 1):
         out.append("bullet %d: %s" % (n, b))
+        same = None
         for e in erels:
             best = max(kept[e], key=lambda k: entries.similar((angle, k[1]), (angle, b)), default=None)
             if best is None:
                 out.append("  %s: none for %s" % (e, angle))
             else:
-                out.append("  %s: %.2f %d: %s" % (e, entries.similar((angle, best[1]), (angle, b)), best[0], best[3]))
+                ratio = entries.similar((angle, best[1]), (angle, b))
+                out.append("  %s: %.2f %d: %s" % (e, ratio, best[0], best[3]))
+                if ratio >= entries.SIMILAR and (same is None or ratio > same[0]):
+                    same = ratio, e, best[0]
+        own = content_words(b)
+        share = {e: len(own & held[e]) / len(own) for e in erels} if own else {}
+        owner = max(erels, key=lambda e: share[e], default=None) if share else None
+        if same:
+            out.append("  same: %s:%d: adds no line" % same[1:])
+        elif owner is None or len(own & set().union(*held.values())) / len(own) < OWNS:
+            out.append("  none: the entries given hold less than half its words: adds no line")
+        elif older[owner]:
+            out.append("  older form: %s: %d Past phrasings lines in a form this command cannot read: adds no line "
+                       "until they are in the template's form" % (owner, older[owner]))
+        else:
+            out.append("  add: %s" % owner)
+            add.append("--add %d=%s" % (n, owner))
     out.append("cite: %s" % (cite or "(the saved output: run this on it after the save)"))
     out += ["entry: %s: %d lines for %s" % (e, len(kept[e]), angle) for e in erels]
-    return out
+    return out + ["adds: %s" % (" ".join(add) or "none")]
+
+
+OWNS = 0.5   # the share of a bullet's words the entries given must hold for it to be theirs
+STOP = {"and", "the", "for", "with", "from", "into", "that", "this", "its", "our", "their", "via", "per", "over",
+        "under", "across", "using", "used", "was", "were", "are", "has", "had", "have", "than", "then", "each"}
+
+
+def content_words(text):
+    """The words of a text that name something: three letters or more, not a STOP word."""
+    return {w.strip(".") for w in entries.words(text) if len(w.strip(".")) >= 3 and w.strip(".") not in STOP}
+
+
+def older_lines(root, erel):
+    """The lines under an entry's ## Past phrasings that are neither in the template's form, nor its
+    `none yet` or `GAP:` line: the older `**<label>**` form, which entry_lines cannot read."""
+    _, lines = entries.read_lines(at(root, erel))
+    bounds = entries.section_bounds(lines, "Past phrasings")
+    bare = dict(entries.lines_of("".join(lines)))
+    n = 0
+    for i in range(bounds[0] + 1, bounds[1]) if bounds else []:
+        line = bare.get(i + 1, "").strip()
+        if line and not entries.PHRASING_PARTS.fullmatch(line) and not re.match(r"(?:-\s*)?(?:none yet|GAP:)", line, re.I):
+            n += 1
+    return n
 
 
 def cap(root, angle, caps):

@@ -433,6 +433,27 @@ def tex_items(text):
     return [(n, " ".join(" ".join(chunks).split())) for n, chunks in out]
 
 
+NO_BULLETS = ("education", "skill")   # the resume skeleton's sections whose items are no bullet
+BULLETS = ("experience", "project")
+
+
+def tex_bullets(text):
+    """tex_items less the items under a `\\section` whose title holds "education" or "skill" (a
+    coursework line, a Skills row) and neither "experience" nor "project" (`Experience and Skills`
+    keeps its bullets): an experience or project bullet, under any other heading, is what feeds
+    Past phrasings. A bold label is no sign: `\\textbf{Topic:} Built ...` starts many a bullet."""
+    sections = []
+    for n, raw in enumerate(text.splitlines(), 1):
+        m = re.search(r"\\section\*?\{([^}]*)\}", re.sub(r"(?<!\\)%.*$", "", raw))
+        if m:
+            sections.append((n, m.group(1).lower()))
+    def heading(n):
+        return next((title for at, title in reversed(sections) if at <= n), "")
+    def kept(title):
+        return any(w in title for w in BULLETS) or not any(w in title for w in NO_BULLETS)
+    return [(n, item) for n, item in tex_items(text) if kept(heading(n))]
+
+
 # ---- git ----
 
 def git_run(root, *args, timeout=60):

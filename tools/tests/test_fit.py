@@ -175,6 +175,29 @@ class FitTest(unittest.TestCase):
                                       "| Mentor juniors | duty | - | - | gap | - |"])
         self.assertEqual(lines[-1], "map: ok")
 
+    def test_show_prints_one_block_to_paste(self):
+        """#518 (3): write step 9 pastes one fenced block, not a table of its own."""
+        agent = dict(self.AGENT, category="shallow")
+        path = self.map_file(requirements=["Go", "Mentor juniors", "Debug flaky services"], rows=[ROW, GAP, agent])
+        code, lines = self.run_tool("map", path, "--show")
+        self.assertEqual(code, 0, lines)
+        self.assertEqual(lines, [
+            "show: paste the block below into your reply whole, as printed, its fence lines included",
+            "```text",
+            "Course work: none (3 entries listed)",
+            "Map: 3 requirements and duties, 3 rows; no row: none",
+            "",
+            "| Requirement | Kind | Written by | Category | Entry |",
+            "|---|---|---|---|---|",
+            "| Go | required | user | covered | 2025-01-widget.md |",
+            "| Mentor juniors | duty | - | gap | - |",
+            "| Debug flaky services | required | AI agent (debugging) | shallow | 2025-02-agent.md |",
+            "```",
+            "map: ok"])
+        code, lines = self.run_tool("map", self.map_file(rows=[dict(ROW, entry="`2025-01-widget.md` (a ```b```)")]), "--show")
+        self.assertEqual((lines[1], lines[-2]), ("````text", "````"))
+        self.assertEqual(self.run_tool("map", path, "--show", "--several")[0], 1)
+
     def test_a_good_map_passes(self):
         course = dict(ROW, requirement="Distributed systems", row_type="understanding", written_by="coursework",
                       entry="2024-09-course.md")

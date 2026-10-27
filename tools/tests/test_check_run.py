@@ -419,6 +419,18 @@ class Transcript(unittest.TestCase):
         self.assertEqual(grade, "FAIL")
         self.assertIn("no Map: line above its table", ev)
 
+    def test_map_table_shown_without_its_lines_fails(self):
+        """#511: a Requirement table shown with neither the Course work: nor the Map: line; the heatmap is no map."""
+        reworded = text("## Requirement map\nOf 11 rows, 1 is covered.\n\n| Requirement | Category | Entry |\n|---|---|---|\n| Go | covered | widget |")
+        grade, ev = self.map_count([*fit_map(), reworded])
+        self.assertEqual(grade, "FAIL")
+        self.assertIn("no Map: line above its table; the map shown has no Course work: line", ev)
+        interview = fit_map(cmd='py -3 -I tools/fit.py map m.jsonl --category gap --category "claimed, unbacked"')
+        self.assertEqual(self.map_count([*interview, reworded])[0], "PASS")   # a map not to show: its rows may be quoted
+        self.assertEqual(self.map_count([text("Here is the map.\n\n" + TABLE)])[0], "SKIP")   # no fit.py map run
+        heatmap = text("| Priority | Skill | Category | Postings | Which |\n|---|---|---|---|---|\n| high | Go | covered | 2 | a, b |")
+        self.assertEqual(self.map_count([*fit_map(), heatmap])[0], "PASS")
+
     def test_map_line_after_the_table_fails(self):
         self.assertEqual(self.map_count([*fit_map(), text(COURSE + "\n\n" + TABLE + "\n\n" + MAP)])[0], "FAIL")
 
@@ -862,6 +874,15 @@ class Copy(CopyBase):
         # chained after the commit, it checks nothing before it
         cmd = "git commit -m 'write(example): Engineer' && py -3 -I tools/check_save.py %s" % FOLDER
         self.assertEqual(self.printed([bash(cmd), result(PROVENANCE_LINE + "\ncheck_save: ok")])[0], "FAIL")
+
+    def test_check_save_commit_is_the_save_commit(self):
+        """#518: check_save.py --commit checks, then commits; an earlier fact commit is not the cutoff."""
+        self.save()
+        early = bash("py -3 -I tools/sync.py commit 'log(example): a fact' -- entries/x.md")
+        cmd = "py -3 -I tools/check_save.py %s --humanizer none --commit 'write(example): Engineer'" % FOLDER
+        out = PROVENANCE_LINE + "\ncheck_save: ok\ncommit: write(example): Engineer\ncommitted: [master 1a2b3c4] write(example): Engineer"
+        grade, ev = self.printed([early, result("committed: [master 0f0f0f0] log(example): a fact"), bash(cmd), result(out)])
+        self.assertEqual(grade, "PASS", ev)
 
     def test_result_as_a_list_of_text_blocks_is_read(self):
         self.save()
@@ -1459,12 +1480,81 @@ class Subjects(CopyBase):
         self.assertIn("PASS commit-subject: ", out.getvalue())
         self.assertIn("'upgrade: Template 0.2.0' (`upgrade: Template <version>`)", out.getvalue())
 
+    def test_deny_coverage_subjects(self):
+        """#507: the commits the repo's own deny_coverage.py makes (`entry --commit`, `line --commit`)
+        pass, read from the tool at the head under test; a near miss still fails."""
+        with open(os.path.join(HERE, "..", "deny_coverage.py"), encoding="utf-8") as f:
+            tool = f.read()
+        rx = check_run.subject_templates([tool])
+        for subject in ("export-cleared: Foo", "export-deny: clear Foo"):   # `clear`'s two commits
+            self.assertTrue(any(r.fullmatch(subject) for r in rx.values()), subject)
+        self.write("tools/deny_coverage.py", tool)
+        self.commit("tools")
+        self.base = self.git("rev-parse", "HEAD").strip()
+        for n, subject in enumerate(("export-deny: names from 2026-01-a.md, 2026-02-b.md",
+                                     "export-deny: names from 4 entries", "export-deny: add Foo, Bar")):
+            self.write(".export-deny", "x%d\n" % n)
+            self.commit(subject)
+        os.makedirs(os.path.join(self.copy, ".build"), exist_ok=True)
+        path = os.path.join(self.copy, ".build", "run.jsonl")
+        write_transcript(path, GOOD_RUN)
+
+        def graded():
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                check_run.main(["check_run.py", "--transcript", path, "--copy", self.copy, "--base", self.base])
+            return next(l for l in out.getvalue().splitlines() if " commit-subject: " in l)
+        line = graded()
+        self.assertTrue(line.startswith("PASS "), line)
+        self.assertIn("'export-deny: add Foo, Bar' (`export-deny: add <", line)
+        self.write(".export-deny", "y\n")
+        self.commit("export-deny: update")
+        line = graded()
+        self.assertTrue(line.startswith("FAIL "), line)
+        self.assertIn("'export-deny: update' fits no subject", line)
+
     def test_tool_printed_subject_passes(self):
         self.write("outputs/reports/2026-02-01-scan-daily.md", "x\n")
         self.commit("scan(daily): 4 postings")
         self.assertEqual(self.grade()[0], "FAIL")
         evs = transcript(self.copy, [bash("python3 -I tools/scan.py report"), result("saved: x\ncommit: scan(daily): 4 postings")])[0]
         self.assertEqual(self.grade(evs)[0], "PASS")
+
+    def test_subject_printed_in_a_subagent_passes(self):
+        """#511: a subagent the run started printed the commit: line; one only another transcript there printed still fails."""
+        session = os.path.join(self.copy, ".build", "session")
+        os.makedirs(os.path.join(session, "subagents"))
+        write_transcript(session + ".jsonl", [lookup(), result("Done.\nagentId: a1b2c3 (use SendMessage with to: 'a1b2c3')")])
+        for agent_id, subject in (("a1b2c3", "sponsorship: Example Corp"), ("d4e5f6", "sponsorship: Other Inc")):
+            write_transcript(os.path.join(session, "subagents", "agent-%s.jsonl" % agent_id),
+                             [bash("py -3 -I tools/sponsorship.py --root . add .build/sponsorship.jsonl"),
+                              result("added: 1\ncommit: %s" % subject)])
+
+        def graded():
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                check_run.main(["check_run.py", "--transcript", session + ".jsonl", "--copy", self.copy, "--base", self.base])
+            return next(l for l in out.getvalue().splitlines() if " commit-subject: " in l)
+        self.write("outputs/reports/sponsorship.jsonl", "{}\n")
+        self.commit("sponsorship: Example Corp")
+        line = graded()
+        self.assertTrue(line.startswith("PASS "), line)
+        self.assertIn("'sponsorship: Example Corp' (a tool's commit: line)", line)
+        self.write("outputs/reports/sponsorship.jsonl", "{}\n{}\n")
+        self.commit("sponsorship: Other Inc")
+        line = graded()
+        self.assertTrue(line.startswith("FAIL "), line)
+        self.assertIn("'sponsorship: Other Inc' fits no subject", line)
+
+    def test_subagents_of_a_run_that_is_itself_a_subagent(self):
+        """--agent: the run is <session>/subagents/agent-<id>.jsonl, and its subagents sit beside it."""
+        folder = os.path.join(self.copy, ".build", "session", "subagents")
+        os.makedirs(folder)
+        run = os.path.join(folder, "agent-r1.jsonl")
+        write_transcript(run, [lookup(), result("Done.\nagentId: s1"), lookup(), result("Done.\nagentId: gone")])
+        write_transcript(os.path.join(folder, "agent-s1.jsonl"), [])
+        write_transcript(os.path.join(folder, "agent-other.jsonl"), [])
+        self.assertEqual(check_run.subagent_transcripts(run, check_run.events(run)), [os.path.join(folder, "agent-s1.jsonl")])
 
     def test_consolidate_slugs_are_the_entries_changed(self):
         self.write("entries/2026-01-queue.md", ENTRY + "x\n")

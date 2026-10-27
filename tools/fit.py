@@ -4,6 +4,7 @@ scan report keeps (skills/career-log/modes/fit.md › Requirement map; scan.md s
 
   python3 -I tools/fit.py name <company> <role> [--today YYYY-MM-DD]
   python3 -I tools/fit.py map <map file>... [--several] [--category <category>]... [--save-name] [--today YYYY-MM-DD]
+  python3 -I tools/fit.py map <map file> --show
   python3 -I tools/fit.py heatmap <map file>...
   python3 -I tools/fit.py check <result.jsonl> [--capture <capture path>]
   (Windows: py -3 -I tools/fit.py ...)
@@ -70,6 +71,12 @@ row has one of those kinds (a map from before kinds were kept), every row counts
   `save: outputs/reports/<YYYY-MM-DD>-fit-posting-<company>-<role>.md` and
   `commit: fit(<company>-<role>): <n> gaps`, <n> the rows whose category is `gap`, named as `name`
   names them; then `map: ok`, or one `bad:` line per problem and exit 1.
+  With --show (one map file; no --several, --category or --save-name), a `show:` line and one block
+  to paste whole into a reply (write step 9) take the place of the two lines and the table: in a
+  `text` code fence longer than any run of backticks in it, the same `Course work:` and `Map:`
+  lines, a blank line, and the map as a table with the headers of SHOW (COLUMNS less Own work), an
+  `AI agent` row's Written by naming its own work's label (`AI agent (design)`, `AI agent (none)`).
+  The checks, and the `map: ok` or `bad:` lines, are the same.
   The problems:
   - a field above missing or not in its form, an `of` that is no `requirements` item's number;
     `company` or `role` that is not a string; with --several, two map files whose company and role
@@ -137,6 +144,7 @@ HEATMAP = ("Priority", "Skill", "Category", "Postings", "Which")
 PRIORITIES = ((0.6, "critical"), (0.3, "high"), (0.1, "medium"), (0.0, "low"))
 COLUMNS = [("Requirement", "requirement"), ("Kind", "kind"), ("Written by", "written_by"),
            ("Own work", "own_work"), ("Category", "category"), ("Entry", "entry")]
+SHOW = [c for c in COLUMNS if c[1] != "own_work"]   # map --show's table
 # An entry's file name as a map cites it: dated, any letters (an entry named in Chinese, say)
 ENTRY_NAME = re.compile(r"(?<![0-9A-Za-z])(\d{4}-\d{2}-[^\s`|/\\()\[\]<>\"',;:!?]+?\.md)"
                         r"(?=\Z|[\s`|/\\()\[\]<>\"',;:!?]|\.(?!\w))")
@@ -210,6 +218,22 @@ def map_lines(result):
     if result.get("notes"):
         out += list(result["notes"]) + [""]
     return out + table(result["rows"])
+
+
+def show_block(lines, rows):
+    """`map --show`'s lines: a `show:` line, then the `Course work:` and `Map:` lines and the map as a
+    table with the headers of SHOW (an `AI agent` row's Written by naming its own work's label), in a
+    `text` code fence longer than any run of backticks in it."""
+    body = lines + ["", "| " + " | ".join(h for h, _ in SHOW) + " |", "|" + "---|" * len(SHOW)]
+    for r in rows:
+        cells = {k: r.get(k) for _, k in SHOW}
+        if r.get("written_by") == "AI agent":
+            own = split_own_work(r.get("own_work"))
+            cells["written_by"] = "AI agent (%s)" % (own[0] if own else "none")
+        body.append(logfiles.md_row("-" if cells[k] in (None, "") else str(cells[k]) for _, k in SHOW))
+    fence = "`" * max([3] + [len(m) + 1 for m in re.findall(r"`+", "\n".join(body))])
+    return ["show: paste the block below into your reply whole, as printed, its fence lines included",
+            fence + "text"] + body + [fence]
 
 
 def table(rows):
@@ -518,7 +542,9 @@ def cmd_check(root, path, capture=None):
     return 0, ["check: ok"]
 
 
-def cmd_map(root, paths, several=False, categories=(), save_name=False, today=None):
+def cmd_map(root, paths, several=False, categories=(), save_name=False, today=None, show=False):
+    if show and (several or categories or save_name or len(paths) != 1):
+        raise FitError("--show takes one map file, with no --several, --category or --save-name")
     listed = listed_entries(root)
     out, bad, results = [], [], []
     for path in paths:
@@ -543,8 +569,11 @@ def cmd_map(root, paths, several=False, categories=(), save_name=False, today=No
             else:
                 rules.append("company, role: --several needs both in the map file")
         rows = [r for r in result.get("rows") if isinstance(r, dict)] if isinstance(result.get("rows"), list) else []
-        out += count_lines(result, listed, label) + [""]
-        out += table([r for r in rows if not categories or r.get("category") in categories]) + [""]
+        if show:
+            out += show_block(count_lines(result, listed), rows)
+        else:
+            out += count_lines(result, listed, label) + [""]
+            out += table([r for r in rows if not categories or r.get("category") in categories]) + [""]
         bad += [where + b for b in shape + rules]
     if save_name and not bad:
         name = posting_name(results[0]) if len(results) == 1 else None
@@ -689,6 +718,7 @@ def main(argv):
     sp.add_argument("--several", action="store_true")
     sp.add_argument("--category", action="append", choices=CATEGORIES, default=[])
     sp.add_argument("--save-name", action="store_true")
+    sp.add_argument("--show", action="store_true")
     sp.add_argument("--today", type=date_arg)
     sp = sub.add_parser("heatmap")
     sp.add_argument("files", nargs="+")
@@ -709,7 +739,7 @@ def main(argv):
         if a.cmd == "check":
             code, lines = cmd_check(root, a.result, a.capture)
         elif a.cmd == "map":
-            code, lines = cmd_map(root, a.files, a.several, a.category, a.save_name, a.today)
+            code, lines = cmd_map(root, a.files, a.several, a.category, a.save_name, a.today, a.show)
         elif a.cmd == "heatmap":
             code, lines = cmd_heatmap(root, a.files)
         else:

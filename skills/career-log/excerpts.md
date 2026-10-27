@@ -2,6 +2,10 @@
 
 Read this when a fact you are writing into an entry cites an agent session: the user's words in it, or a decision reached in it ([SKILL.md › Provenance](SKILL.md#rules-for-every-mode)). The transcript is perishable (Claude Code deletes it after about 30 days), so the passages the fact cites are copied into `sources/<agent>/<YYYY-MM-DD>-<slug>.md`, one file per session and topic (a forked session is a session of its own), and from then on the excerpt is the durable source the entry cites.
 
+## Citing an excerpt
+
+The user's words in this session are cited `(user, YYYY-MM-DD; <key> U<k>)` once excerpted, dated the day of the turn, and `(user, YYYY-MM-DD)` alone while no excerpt holds them. A turn first read from another session's transcript or from an imported chat is cited by its key alone: the user has not confirmed it in this session. A fact already tagged `(user, …)` keeps its tag when its key is added.
+
 ## The key's date
 
 An excerpt's key is `<agent>-<YYYY-MM-DD>-<slug>`, its file's name. The tool dates it by the rules at the end of `<tool> --help` (`<tool>` below), so one session keeps one date in all its files, and its `- Key date:` line says which rule it used; a key without that line is read as written.
@@ -19,3 +23,9 @@ An excerpt's key is `<agent>-<YYYY-MM-DD>-<slug>`, its file's name. The tool dat
 ## Other agents and lost transcripts
 
 An agent the tool does not read, or a quote whose transcript is already gone, gets its excerpt from `<tool> quote` (`<tool> --help` gives its arguments and the form of its `--turns` file). Yours are the choices: the turns to quote, the title, a slug the session's files do not have yet, and the `--note` paragraph saying where the turns came from (for a quote copied from an entry: the transcript is gone and the text is the entry's quote). Then read the file as step 4 says and cite it as step 5 says. Done when the tool has printed the key.
+
+## Files
+
+| Path | What |
+|---|---|
+| `sources/<agent>/<YYYY-MM-DD>-<slug>.md` | Excerpts of agent sessions (`claude-code/`, ...), one session per file: the turns entries cite, added to by the tool, the only hand edit a redaction ([excerpts.md](excerpts.md)) |

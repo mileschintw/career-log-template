@@ -7,7 +7,8 @@ Template's source repo; the checks apply to any run of the skill, past-phrasings
 <run.jsonl> is the run's own transcript (Claude Code: `<session>/subagents/agent-<id>.jsonl` for a
 run started as a subagent; `<session>.jsonl` in the project folder of the run's working directory,
 under its CLAUDE_CONFIG_DIR's projects/, for a run started as its own `claude -p` process). The
-subagents it started are read from its Agent tool calls, so their own transcripts are not needed.
+subagents it started are read from its Agent tool calls; only commit-subject also reads their own
+transcripts, where it says.
 --agent <id> finds it from the agent id the Agent tool's result gave: `agent-<id>.jsonl` in the
 `subagents/` folder of any session in Claude Code's project folder for the working directory (as
 tools/chat_export.py finds it, under CLAUDE_CONFIG_DIR or ~/.claude), so run it in the session
@@ -69,9 +70,10 @@ call's description.
   read as one line). The last line each posting's label has across those outputs must say `no row:
   none` and have m >= n, and the output it is in must hold a line `map: ok` (a run that printed
   `bad:` lines has none). A map
-  shown in the reply (a text message with a `Course work:` line and a table below it; the last such
-  message counts, or the last message with a `Course work:` line when none has a table) must show
-  above its table, in that message, a
+  shown in the reply (a text message with a `Course work:` line and a table below it, or, once a
+  fit.py map call has no --category and no --several, a message with a table whose first header
+  cell is `Requirement`, as fit.py's is; the last such message counts, or the last message with a
+  `Course work:` line when none has a table) must show above its table, in that message, a
   `Map:` line equal to the last one fit.py printed for its label, and its `Course work:` line must
   equal the last one fit.py printed. Otherwise FAIL. With no fit.py map output, a `Map:` line the
   run wrote itself (in a reply or an `echo`) or a map shown is a FAIL: the count is the tool's, not
@@ -91,10 +93,15 @@ Save checks, on the changes between <sha> and the copy's HEAD:
 - git-status: `git status --porcelain` prints nothing. Otherwise FAIL.
 - commit-subject: each commit in <sha>..HEAD (merges set aside) has a subject the skill gives, or
   one a tool printed in the run as a `commit: <subject>` line (in the result of a shell call that
-  runs a .py script). The subjects the skill gives are read from SKILL.md, every file in
-  skills/career-log/modes/ and tools/sync.py, as they are at the head under test and at the copy's
-  HEAD (an upgrade run commits by the mode of the release it installs): each quoted subject in a
-  `sync.py commit "..."`, `sync.py settle commit --subject "..."` or `git commit -m "..."` command; each code span shaped
+  runs a .py script), the run's subagents included: `agent-<id>.jsonl` for each <id> an Agent call's
+  result names on its `agentId:` line, in `<session>/subagents/` beside the run's `<session>.jsonl`
+  (or beside the run, for a subagent's run), one level deep; a transcript not there is not read.
+  The subjects the skill gives are read from SKILL.md, every file in
+  skills/career-log/modes/, tools/sync.py and tools/deny_coverage.py, as they are at the head under
+  test and at the copy's HEAD (an upgrade run commits by the mode of the release it installs): each
+  quoted subject in a `sync.py commit "..."`, `sync.py settle commit --subject "..."` or
+  `git commit -m "..."` command; each subject deny_coverage.py commits with
+  (`commit(root, f"...", <path>)`, each `{...}` in it matching any text); each code span shaped
   `name(...): text` on a line that says commit; and each code span shaped `name: text` that follows
   "commit" or "subject" on its line with no other code span between, or right after "as" or
   "subject" (sync.py's own `commit:` and `committed:` lines set aside). In those, each `<...>` matches any text, `...` any text or none,
@@ -116,9 +123,9 @@ Save checks, on the changes between <sha> and the copy's HEAD:
   FAIL. A provenance file with no
   provenance table: NOTE.
 - printed-lines, only when a commit in <sha>..HEAD is a write save (SKIP otherwise): write step
-  10's **Run the save check** lines, in the output of a tools/check_save.py run before the save's
-  commit. A commit call is a shell (Bash, PowerShell) `git ... commit`, or a tools/sync.py `commit`
-  or `settle commit`, whose `committed: [<branch> <sha>] <subject>` line counts as git's own. The
+  10's **Save and commit** lines, in the output of a tools/check_save.py run before the save's
+  commit. A commit call is a shell (Bash, PowerShell) `git ... commit`, a tools/sync.py `commit`
+  or `settle commit`, or a tools/check_save.py `--commit` (its own check counts as a check run), whose `committed: [<branch> <sha>] <subject>` line counts as git's own. The
   save's commit is the commit call that made the
   first write commit touching a provenance file: its result names that commit's short sha, or else
   its command holds that commit's subject before a closing quote (a run may commit facts with
@@ -484,6 +491,8 @@ MAP_LABEL = re.compile(r"^[\s>|-]*(Map(?:\s*\(.*?\))?:)", re.M)
 MAP_RE = re.compile(r"Map(?:\s*\((.*?)\))?:\s*(\d+)\s+requirements? and dut(?:y|ies)\s*,\s*"
                     r"(\d+)\s+rows?\s*;\s*no row:?\s*([^\n]*)")
 COURSE_WORK = re.compile(r"^[\s>|-]*(Course work:[^\n]*)", re.M)
+MAP_TABLE = re.compile(r"^[ \t>]*\|\s*Requirement\s*\|", re.M)   # a table headed as fit.py's map table is
+TABLE_ROW = re.compile(r"^\s*\|", re.M)
 # a shell command that runs tools/fit.py's map subcommand (--root may come before it)
 FIT_MAP = re.compile(r"\bfit\.py[\"']?\s(?:[^;&|\n]*?\s)?map(?=\s|$)")
 
@@ -493,26 +502,30 @@ def one_line(text):
 
 
 def fit_map_lines(evs):
-    """([(Map line match, whether its output says `map: ok`)], last Course work line) in the outputs
-    of the run's fit.py map calls."""
+    """([(Map line match, whether its output says `map: ok`)], last Course work line, whether a call
+    builds a map to show: one with no --category or --several, which interview and several postings
+    add) in the outputs of the run's fit.py map calls."""
     results = {e[2]: e[1] for e in evs if e[0] == "result"}
-    maps, course = [], None
+    maps, course, to_show = [], None, False
     for e in evs:
-        if FIT_MAP.search(re.sub(r"[\\`]\r?\n", " ", command(e))):
+        cmd = re.sub(r"[\\`]\r?\n", " ", command(e))
+        if FIT_MAP.search(cmd):
+            to_show = to_show or not re.search(r"\s--(?:category|several)\b", cmd)
             out = results.get(e[3]) or ""
             ok = bool(re.search(r"^map: ok[ \t\r]*$", out, re.M))
             maps += [(m, ok) for m in MAP_RE.finditer(out)]
             found = COURSE_WORK.findall(out)
             course = one_line(found[-1]) if found else course
-    return maps, course
+    return maps, course, to_show
 
 
 def check_map_count(evs):
-    tool, course = fit_map_lines(evs)
+    tool, course, to_show = fit_map_lines(evs)
     lines, in_call, unparsed = printed(evs, MAP_LABEL, MAP_RE)
-    shown = [(i, m.start(), t) for i, e in enumerate(evs) if e[0] == "text"
-             for t in [EMPHASIS.sub("", e[1])] for m in [COURSE_WORK.search(t)] if m]
-    shown = [s for s in shown if re.compile(r"^\s*\|", re.M).search(s[2], s[1])] or shown
+    shown = [(i, m.start(), t, bool(cw)) for i, e in enumerate(evs) if e[0] == "text"
+             for t in [EMPHASIS.sub("", e[1])] for cw in [COURSE_WORK.search(t)]
+             for m in [cw or (to_show and MAP_TABLE.search(t))] if m]
+    shown = [s for s in shown if TABLE_ROW.search(s[2], s[1])] or shown
     if not tool:
         if lines or in_call or unparsed:
             first = (lines or in_call)[-1][1].group(0) if lines or in_call else unparsed[-1][1]
@@ -537,8 +550,8 @@ def check_map_count(evs):
         else:
             ok.append("%r" % line)
     if shown:
-        i, at, text = shown[-1]
-        table = re.compile(r"^\s*\|", re.M).search(text, at)
+        i, at, text, has_course = shown[-1]
+        table = TABLE_ROW.search(text, at)
         above = [m for m in MAP_RE.finditer(text[:table.start() if table else len(text)])]
         if not above:
             bad.append("the map shown has no Map: line above its table")
@@ -548,8 +561,10 @@ def check_map_count(evs):
             if not want or one_line(m.group(0)) != one_line(want.group(0)):
                 bad.append("the map shown says %r, fit.py printed %r" % (one_line(m.group(0))[:120],
                                                                           one_line(want.group(0))[:120] if want else None))
-        cw = one_line(COURSE_WORK.search(text, at).group(1))
-        if course and cw != course:
+        cw = one_line(COURSE_WORK.search(text, at).group(1)) if has_course else None
+        if not has_course:
+            bad.append("the map shown has no Course work: line above its table")
+        elif course and cw != course:
             bad.append("the map shown says %r, fit.py printed %r" % (cw[:120], course[:120]))
         if not bad:
             ok.append("shown as fit.py printed it")
@@ -570,8 +585,10 @@ CHECK_SAVE = re.compile(r"(?:^|[;&|(\n])\s*(?:\w+=\S+\s+)*(?:&\s*)?[\"']?(?:\"[^
                         r"[\"']?(?:\"[^\"]*[\\/]|'[^']*[\\/]|[^\s\"']*[\\/])?check_save\.py\b",
                         re.I)
 EDITS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
-# `git ... commit`, or tools/sync.py's commit or settle commit, which the modes run in its place
+# `git ... commit`, tools/sync.py's commit or settle commit, which the modes run in its place, or
+# tools/check_save.py --commit, which runs sync.py commit on its own exit 0
 COMMIT = re.compile(r"\bgit\b(?:\s+(?:-[Cc]\s+(?:\"[^\"]*\"|'[^']*'|\S+)|--\S+))*\s+commit\b"
+                    r"|\bcheck_save\.py\b[^\n;&|]*?\s--commit\b"
                     r"|\bsync\.py[\"']?(?:\s+--root(?:=|\s+)(?:\"[^\"]*\"|'[^']*'|\S+))?"
                     r"\s+(?:settle(?:\s+--root(?:=|\s+)(?:\"[^\"]*\"|'[^']*'|\S+))?\s+)?commit\b")
 SHELLS = ("Bash", "PowerShell")
@@ -630,7 +647,7 @@ def check_printed_lines(evs, calls, copy, base, saved):
     save = made or [i for i in commits if "write(" in command(evs[i]) and not failed(evs[i])]
     upto = save[0] if save else commits[-1] if commits else len(evs)
     where = "before the save's git commit call" if commits else "in the run"
-    chained = lambda i: i == upto and CHECK_SAVE.search(command(evs[i])).start() < COMMIT.search(command(evs[i])).start()
+    chained = lambda i: i == upto and CHECK_SAVE.search(command(evs[i])).start() <= COMMIT.search(command(evs[i])).start()
     runs = [i for i, e in enumerate(evs[:upto + 1]) if CHECK_SAVE.search(command(e)) and (i < upto or chained(i))]
     after = [i for i, e in enumerate(evs) if i > upto and CHECK_SAVE.search(command(e))]
     prov, hum, unparsed = [], [], []
@@ -899,7 +916,7 @@ def check_phrasings(copy, base, saved):
     return "PASS", "; ".join(ok) if ok else "no Past phrasings line changed"
 
 
-SUBJECT_FILES = ("skills/career-log/SKILL.md", "tools/sync.py")   # and every file in skills/career-log/modes/
+SUBJECT_FILES = ("skills/career-log/SKILL.md", "tools/sync.py", "tools/deny_coverage.py")   # and every file in skills/career-log/modes/
 # a subject in a commit command: sync.py's commit or settle commit (--subject), or git commit -m
 SUBJECT_CMD = re.compile(r'(?:sync\.py(?:\s+--[\w-]+)*\s+(?:settle\s+)?commit(?:\s+--[\w-]+)*\s+(?:--subject\s+)?'
                          r'|\bgit\b[^`\n]*?\scommit\s+(?:-\S+\s+)*?-m\s+)"([^"`\n]+)"')
@@ -908,6 +925,8 @@ SUBJECT_CMD = re.compile(r'(?:sync\.py(?:\s+--[\w-]+)*\s+(?:settle\s+)?commit(?:
 SUBJECT_SPAN = re.compile(r"`([a-z][a-z-]*\([^`()]*\): [^`]+)`")
 SUBJECT_AFTER = re.compile(r"(?:\bcommit|\bsubject)[^`\n]*`([a-z][a-z-]*: [^`]+)`", re.I)
 SUBJECT_AS = re.compile(r"(?:\bas|\bsubject)\s+`([a-z][a-z-]*: [^`]+)`")   # "commit it as `...`", "with the subject `...`"
+# a subject deny_coverage.py commits with: commit(root, f"...", path), each {...} any text
+TOOL_COMMIT = re.compile(r'\bcommit\(root, f"([^"\n]+)"')
 TOOL_LINES = ("commit:", "committed:")   # sync.py's own output lines, not subjects
 SUBJECT_PART = re.compile(r"(<[^<>]+>|\.\.\.|\u2026|(?<=[a-z])\((?:s|es|y/ies)\))")
 SLUGGED = re.compile(r"^(log|consolidate)\(([^)]*)\)")
@@ -920,6 +939,7 @@ def subject_templates(texts):
     out = {}
     for text in texts:
         found = SUBJECT_CMD.findall(text) + SUBJECT_AS.findall(text)
+        found += [re.sub(r"\{([^{}]+)\}", r"<\1>", f) for f in TOOL_COMMIT.findall(text)]
         for line in text.splitlines():
             if "commit" in line.lower():
                 found += SUBJECT_SPAN.findall(line)
@@ -940,13 +960,34 @@ def subject_templates(texts):
     return out
 
 
-def check_subjects(evs, copy, base, templates):
+AGENT_ID = re.compile(r"^agentId: ([0-9A-Za-z_-]+)", re.M)   # the line an Agent call's result names its subagent with
+
+
+def subagent_transcripts(path, evs):
+    """The transcripts of the subagents this run started: `agent-<id>.jsonl` for each <id> an Agent
+    call's result names on its `agentId:` line, in the `<session>/subagents/` folder beside the run's
+    `<session>.jsonl`, or beside the run itself when it is a subagent's. Others there are not the run's."""
+    calls = {e[3] for e in evs if e[0] == "tool" and e[1] in ("Agent", "Task")}
+    ids = dict.fromkeys(i for e in evs if e[0] == "result" and e[2] in calls for i in AGENT_ID.findall(e[1]))
+    folder = os.path.dirname(path)
+    if os.path.basename(folder) != "subagents":
+        folder = os.path.join(os.path.splitext(path)[0], "subagents")
+    return [p for i in ids for p in [os.path.join(folder, "agent-%s.jsonl" % i)] if os.path.isfile(p)]
+
+
+def printed_subjects(evs):
+    """The subjects of the `commit: <subject>` lines in the results of shell calls that run a .py script."""
+    scripts = {e[3] for e in evs if re.search(r"\.py\b", command(e))}
+    return {l[len("commit: "):].strip() for e in evs if e[0] == "result" and e[2] in scripts
+            for l in e[1].splitlines() if l.startswith("commit: ")}
+
+
+def check_subjects(evs, copy, base, templates, subagents=()):
+    """subagents: the events of each subagent transcript the run started, whose commit: lines count too."""
     commits = [w.split(" ", 1) for w in git(copy, "log", "--no-merges", "--format=%H %s", "%s..HEAD" % base).splitlines()]
     if not commits:
         return "SKIP", "no commit in %s..HEAD" % base
-    scripts = {e[3] for e in evs if re.search(r"\.py\b", command(e))}
-    printed = {l[len("commit: "):].strip() for e in evs if e[0] == "result" and e[2] in scripts
-               for l in e[1].splitlines() if l.startswith("commit: ")}
+    printed = set().union(*map(printed_subjects, [evs, *subagents]))
     bad, ok = [], []
     for sha, subject in reversed(commits):
         fits = [t for t, rx in templates.items() if rx.fullmatch(subject)]
@@ -1074,7 +1115,8 @@ def grade_all(a, evs, review_md, typed, subject_texts, diff):
         results += [("outside-root", check_outside(evs, a.copy)),
                     ("save-branch", check_branch(a.copy)),
                     ("git-status", check_status(a.copy)),
-                    ("commit-subject", check_subjects(evs, a.copy, a.base, subject_templates(subject_texts)))]
+                    ("commit-subject", check_subjects(evs, a.copy, a.base, subject_templates(subject_texts),
+                                                      [events(p) for p in subagent_transcripts(a.transcript, evs)]))]
         if saved:
             results += [("resume-identical", check_resume(a.copy, saved, a.base)),
                         ("provenance", check_provenance(a.copy, saved)),

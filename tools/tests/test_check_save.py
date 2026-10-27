@@ -160,6 +160,17 @@ class CheckSave(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("6 rows; citing another output: none", out)
 
+    def test_sponsorship_records_are_a_source(self):
+        """#511: rank cites a `none found` record to the sponsorship records; another output beside it is still listed."""
+        self.app(with_row("| Sponsorship records | Example Corp: none found | outputs/reports/sponsorship.jsonl (commit abc1234) |\n"))
+        code, out = self.run_tool(FOLDER, "--humanizer", "none")
+        self.assertEqual(code, 0, out)
+        self.assertIn("4 rows; citing another output: none", out)
+        self.app(with_row("| Sponsorship records | Example Corp | outputs/reports/sponsorship.jsonl, outputs/reports/2026-01-01-ranking.md |\n"))
+        code, out = self.run_tool(FOLDER, "--humanizer", "none")
+        self.assertEqual(code, 1, out)
+        self.assertIn("line 8, names another output (outputs/)", out)
+
     def test_entry_section_naming_another_file_is_listed(self):
         for section in ("stories.md › Application questions", "outputs/resumes/backend.md › Skills",
                         "entries/2026-02-missing.md › What happened", "entries/_template.md › Results",
@@ -465,7 +476,7 @@ class CheckSave(unittest.TestCase):
         cases = [
             (self.NEW, "removed [backend]"),   # a removal beside an addition is listed, not failed
             ('- **backend:** "Built a job queue in Go" (%s)\n' % FOLDER, "rewritten"),
-            ("", "1 line(s) removed, 0 added"),
+            ("", "not this save's"),   # #521: no line it gained or lost names the output: not checked
             (self.OLD + self.NEW.replace(FOLDER, FOLDER + ", 2026-02-01"), "cite it as (%s)" % FOLDER),
             (self.OLD + '- **backend:** "Led the queue team" (%s)\n' % FOLDER, "no bullet of the approved resume"),
             (self.OLD + '- "Cut retry latency to one second with backoff" (%s)\n' % FOLDER, "not in the form"),
@@ -474,7 +485,23 @@ class CheckSave(unittest.TestCase):
             self.entry(phrasings)
             code, out = self.run_tool(FOLDER, "--humanizer", "none")
             self.assertIn(says, out, phrasings)
-            self.assertEqual(code, 0 if says.startswith("removed") else 1, out)
+            self.assertEqual(code, 0 if says.startswith(("removed", "not this save")) else 1, out)
+
+    def test_education_item_is_no_bullet(self):
+        """#524: a coursework line under the Education heading feeds no Past phrasings line."""
+        self.app()
+        tex = TEX.replace(r"\end{itemize}", r"""\end{itemize}
+\section*{Education}
+\begin{itemize}
+  \item {\small \textbf{Related Courses:} Distributed Systems}
+\end{itemize}""", 1)
+        self.write(FOLDER + "/resume.tex", tex)
+        self.write(DRAFT + "/resume.tex", tex)
+        self.entry(self.OLD + '- **backend:** "**Related Courses:** Distributed Systems" (%s)\n' % FOLDER)
+        self.failing(FOLDER, "--humanizer", "none", says="no bullet of the approved resume")
+        self.entry(self.OLD + self.NEW)
+        code, out = self.run_tool(FOLDER, "--humanizer", "none")
+        self.assertEqual(code, 0, out)
 
     def test_word_only_addition_is_listed_not_failed(self):
         self.app()
@@ -625,6 +652,259 @@ class CheckSave(unittest.TestCase):
         self.assertNotIn("scan.md", out)
         self.assertTrue(out.endswith("check_save: 5 findings: report each\n"), out)
         self.assertEqual(self.run_tool("--audit", FOLDER)[0], 2)
+
+    # ---- --commit (#518) ----
+
+    def commit_setup(self):
+        self.git("config", "user.email", "t@example.com")
+        self.git("config", "user.name", "t")
+        self.app(PROVENANCE)
+
+    def head(self):
+        return subprocess.run(["git", "-C", self.root, "log", "-1", "--format=%s"], capture_output=True,
+                              text=True, check=True).stdout.strip()
+
+    def status(self):
+        st = subprocess.run(["git", "-C", self.root, "status", "--short"], capture_output=True, text=True).stdout
+        return st.replace("?? .build/\n", "")   # the drafts, which a Log's .gitignore leaves out
+
+    def test_commit_waits_for_exit_0(self):
+        """#518 (1): a check that fails commits nothing; the same command after the fix is the commit."""
+        self.commit_setup()
+        os.remove(os.path.join(self.root, *FOLDER.split("/"), "resume.pdf"))
+        code, out = self.run_tool(FOLDER, "--humanizer", "none", "--commit", "write(example): Engineer")
+        self.assertEqual(code, 1, out)
+        self.assertNotIn("commit: ", out)
+        self.assertEqual(self.head(), "base")
+        self.app(PROVENANCE)
+        self.write("profile.md", "# Profile\n\n## Skills\nGo, Rust.\n\n## Education\nBSc.\n")   # a fact: committed when recorded
+        self.write("direction.md", "# Direction\n\n## Constraints\nNone.\n")   # not a file a write save commits
+        code, out = self.run_tool(FOLDER, "--humanizer", "none", "--commit", "write(example): Engineer")
+        self.assertEqual(code, 0, out)
+        self.assertIn("check_save: ok\ncommit: write(example): Engineer\n", out)
+        self.assertEqual(self.head(), "write(example): Engineer")
+        st = self.status()
+        self.assertNotIn("outputs/", st)
+        self.assertIn("profile.md", st)
+        self.assertIn("direction.md", st)
+        # #521: the left lines come before sync.py's, so the output still ends with `sync: ok`
+        self.assertIn("left: direction.md: differs from HEAD, not written by this save: not committed\n"
+                      "left: profile.md: differs from HEAD, not written by this save: not committed\ncommitted: ", out)
+        self.assertTrue(out.endswith("sync: ok\n"), out)
+
+    def test_commit_refuses_a_subject_the_mode_does_not_give(self):
+        """#518 (2): a fix-up subject of the run's own is a failing line, and nothing is committed."""
+        self.commit_setup()
+        for bad in ("write(example): restore the phrasing line", "fix: provenance", "write(other): Engineer"):
+            code, out = self.run_tool(FOLDER, "--humanizer", "none", "--commit", bad)
+            self.assertEqual(code, 1, out)
+            self.assertIn("Commit subject: %r is not this save's" % bad, out)
+            self.assertNotIn("commit: ", out)
+        self.assertEqual(self.head(), "base")
+        self.assertIsNone(check_save.subject_problem(self.root, FOLDER + "-2", "write(example): Engineer"))
+        self.assertIsNone(check_save.subject_problem(self.root, "outputs/resumes/backend.md", "write(backend): resume"))
+        self.assertIsNotNone(check_save.subject_problem(self.root, "outputs/resumes/backend.md", "write(backend): fix"))
+        self.write("outputs/reports/2026-02-02-pitch.md", "Kind: Elevator pitch\n\n" + PROVENANCE)
+        self.assertIsNone(check_save.subject_problem(self.root, "outputs/reports/2026-02-02-pitch.md",
+                                                     "write(pitch): elevator pitch"))
+
+    def test_commit_holds_on_check_lines(self):
+        """A `check:` line is a call to make before the commit: --checked says it was made."""
+        self.commit_setup()
+        self.write("entries/2026-01-queue.md", ENTRY.replace(
+            '(sources/resumes/2026-01-old.tex)\n',
+            '(sources/resumes/2026-01-old.tex)\n- **backend:** "Built a job queue in Go" (%s)\n' % FOLDER))
+        code, out = self.run_tool(FOLDER, "--humanizer", "none", "--commit", "write(example): Engineer")
+        self.assertEqual(code, 1, out)
+        self.assertIn("  check: ", out)
+        self.assertIn("held: not committed", out)
+        self.assertEqual(self.head(), "base")
+        code, out = self.run_tool(FOLDER, "--humanizer", "none", "--commit", "write(example): Engineer", "--checked")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.head(), "write(example): Engineer")
+        self.assertEqual(self.status(), "")
+
+    def test_commit_paths_by_kind(self):
+        """A target commits its .tex and .pdf; an application folder a scan accept's report and dashboard."""
+        self.target()
+        self.write("outputs/reports/2026-02-01-scan.md", "x\n")
+        self.write("outputs/reports/2026-02-01-notes.md", "x\n")
+        self.write("outputs/dashboard/index.html", "x\n")
+        self.assertEqual(check_save.commit_paths(self.root, ["outputs/resumes/backend.md"], []),
+                         ["outputs/resumes/backend.md", "outputs/resumes/backend.tex", "outputs/resumes/backend.pdf"])
+        # #521: a scan report goes with an application folder only when a line it gained names the folder
+        self.assertEqual(check_save.commit_paths(self.root, [FOLDER], []), [FOLDER])
+        self.write("outputs/reports/2026-02-01-scan.md", "| https://example.com/jobs/1 | accepted | %s/ |\n" % FOLDER)
+        self.assertEqual(check_save.commit_paths(self.root, [FOLDER], []),
+                         [FOLDER, "outputs/reports/2026-02-01-scan.md", "outputs/dashboard/index.html"])
+        self.assertEqual(check_save.commit_paths(self.root, [FOLDER + "-2"], []), [FOLDER + "-2"])
+
+    def test_subjects_of_names_with_no_ascii(self):
+        """scan.py names a company with no ASCII letter `posting`; a ranking may name its event in Chinese."""
+        self.assertIsNone(check_save.subject_problem(self.root, "outputs/applications/2026-02-01-posting-engineer",
+                                                     "write(台積電): Engineer"))
+        rel = "outputs/reports/2026-02-03-台大徵才-ranking.md"
+        self.write(rel, "# Ranking\n")
+        self.assertIsNone(check_save.subject_problem(self.root, rel, "rank(台大徵才): 4 employers"))
+        self.assertIsNone(check_save.subject_problem(self.root, self.RANKING, "rank(Career Fair): 4 employers"))
+
+    def test_a_write_report_named_ranking_is_a_report(self):
+        rel = "outputs/reports/2026-02-03-fair-ranking.md"
+        self.write(rel, "Kind: other\n\n" + PROVENANCE)
+        self.assertFalse(check_save.is_ranking(self.root, rel))
+        self.assertIsNone(check_save.subject_problem(self.root, rel, "write(fair-ranking): other"))
+        self.write("outputs/reports/2026-02-03-x.md", PROVENANCE)
+        self.assertIn("<its Kind: line's kind>", check_save.subject_problem(self.root, "outputs/reports/2026-02-03-x.md", "y"))
+
+    def test_commit_arguments(self):
+        self.app(PROVENANCE)
+        self.target()
+        self.assertEqual(self.run_tool(FOLDER, "outputs/resumes/backend.md", "--humanizer", "none",
+                                       "--commit", "write(example): Engineer")[0], 2)
+        self.assertEqual(self.run_tool(FOLDER, "--humanizer", "none", "--checked")[0], 2)
+        self.assertEqual(self.run_tool("--audit", "--commit", "x")[0], 2)
+
+    # ---- the save's files only (#521) ----
+
+    BATCH = ENTRY.replace("Built a job queue.", "Built a job queue for billing.").replace(
+        '"Built a job queue in Go" (sources', '"Built a billing job queue in Go" (sources')
+
+    def pending_batch(self, body=None):
+        """An entry a bulk change rewrote, in Past phrasings and its body, still waiting for the user's yes."""
+        self.write("entries/2026-01-billing.md", ENTRY)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "billing")
+        self.write("entries/2026-01-billing.md", body or self.BATCH)
+
+    def test_commit_leaves_a_pending_batch_entry(self):
+        """#521: a write save commits the entry it fed and leaves another changed entry, with a line;
+        that entry's Past phrasings, not checked, is a `check:` line first."""
+        self.commit_setup()
+        self.pending_batch()
+        self.entry(self.OLD + self.NEW)
+        code, out = self.run_tool(FOLDER, "--humanizer", "none", "--commit", "write(example): Engineer")
+        self.assertEqual(code, 1, out)
+        self.assertIn("Past phrasings (entries/2026-01-billing.md): not this save's", out)
+        self.assertIn("  check: check it is a bulk change waiting for its yes", out)
+        self.assertIn("held: not committed", out)
+        self.assertEqual(self.head(), "billing")
+        code, out = self.run_tool(FOLDER, "--humanizer", "none", "--commit", "write(example): Engineer", "--checked")
+        self.assertEqual(code, 0, out)
+        self.assertIn("Past phrasings (entries/2026-01-queue.md): +1 -0; ok", out)
+        self.assertIn("left: entries/2026-01-billing.md: differs from HEAD, not written by this save: not committed", out)
+        self.assertEqual(self.head(), "write(example): Engineer")
+        self.assertEqual(self.status(), " M entries/2026-01-billing.md\n")
+        with open(os.path.join(self.root, "entries", "2026-01-billing.md"), encoding="utf-8") as f:
+            self.assertEqual(f.read(), self.BATCH)
+
+    def test_commit_stories_pointer_and_prep_list(self):
+        """stories.md goes when a line it gained points into the output; profile.md when its Interview prep list grew."""
+        self.commit_setup()
+        stories = "# Stories\n\n## Application questions\n\n| Type | Scope | Answer |\n|---|---|---|\n"
+        profile = "# Profile\n\n## Skills\nGo.\n\n## Education\nBSc.\n\n## Interview prep list\n"
+        self.write("stories.md", stories)
+        self.write("profile.md", profile)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "stories")
+        self.write("stories.md", stories + "| Why us | shared | [answer](%s/answers.md) |\n" % FOLDER)
+        self.write("profile.md", profile + "- The one-second figure is from one run (2026-01-queue)\n")
+        code, out = self.run_tool(FOLDER, "--humanizer", "none", "--commit", "write(example): Engineer")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.status(), "")
+        self.assertNotIn("left: ", out)
+        # a row naming another output, or a profile change outside the list, is not this save's
+        self.write("stories.md", stories + "| Why us | shared | [answer](%s-2/answers.md) |\n" % FOLDER)
+        self.write("profile.md", profile.replace("Go.", "Go, Rust.") + "- The one-second figure is from one run (2026-01-queue)\n")
+        self.assertEqual(check_save.commit_paths(self.root, [FOLDER], []), [FOLDER])
+
+    def test_commit_scan_accept(self):
+        """A scan accept commits its report and the dashboard; another scan's report stays."""
+        self.commit_setup()
+        table = "| URL | Status | Draft |\n|---|---|---|\n"
+        self.write("outputs/reports/2026-01-20-scan.md", table)
+        self.write("outputs/reports/2026-01-27-scan.md", table)
+        self.write("outputs/dashboard/index.html", "old\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "scans")
+        self.app(PROVENANCE)
+        self.write("outputs/reports/2026-01-27-scan.md", table + "| https://example.com/jobs/1 | accepted | %s/ |\n" % FOLDER)
+        self.write("outputs/reports/2026-01-20-scan.md", table + "| https://example.com/jobs/9 | declined | - |\n")
+        self.write("outputs/dashboard/index.html", "new\n")
+        code, out = self.run_tool(FOLDER, "--humanizer", "none", "--commit", "write(example): Engineer")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.status(), " M outputs/reports/2026-01-20-scan.md\n")
+        self.assertIn("left: outputs/reports/2026-01-20-scan.md: ", out)
+
+    def test_commit_target(self):
+        """A target commits its .md, .tex and .pdf and the entry it fed, cited by its .tex."""
+        self.commit_setup()
+        self.target()
+        self.pending_batch(ENTRY.replace("Built a job queue.", "Built a job queue for billing."))   # its body only: no check
+        self.entry(self.OLD + '- **backend:** "Cut retry latency to one second with backoff" '
+                   '(outputs/resumes/backend.tex, 2026-02-01)\n')
+        code, out = self.run_tool("outputs/resumes/backend.md", "--humanizer", "none", "--commit", "write(backend): resume")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.head(), "write(backend): resume")
+        self.assertEqual(self.status().replace("?? outputs/applications/\n", ""), " M entries/2026-01-billing.md\n")
+
+    def test_entry_of_the_save_changed_elsewhere_is_a_check(self):
+        """The save commits its entry whole: a change outside Past phrasings is a `check:` line first."""
+        self.app()
+        self.entry(self.OLD + self.NEW, extra="Ran it for a year.\n")
+        code, out = self.run_tool(FOLDER, "--humanizer", "none")
+        self.assertEqual(code, 0, out)
+        self.assertIn("  check: entries/2026-01-queue.md also changed outside ## Past phrasings", out)
+
+    # ---- a ranking (#518) ----
+
+    RANKING = "outputs/reports/2026-02-03-career-fair-ranking.md"
+    APPS = ("# Applications and contacts\n\n## Applications\n\n| Date | Company | Role | Answers / notes | Source |\n"
+            "|---|---|---|---|---|\n\n## Events and contacts\n\n"
+            "| Date | Event / company | Who | What happened | Next step | Source |\n|---|---|---|---|---|---|\n")
+    ROW = "| 2026-02-03 | Career fair | - | Ranked 5 employers | - | [ranking](%s) |" % RANKING
+
+    def ranking(self, apps):
+        self.git("config", "user.email", "t@example.com")
+        self.git("config", "user.name", "t")
+        self.write("applications.md", self.APPS)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "apps")
+        self.write(self.RANKING, "# Career fair ranking\n\n## Tier A\n\n- Example ([careers](https://example.com))\n")
+        self.write("applications.md", apps)
+
+    def test_ranking_with_its_row_commits(self):
+        self.ranking(self.APPS + self.ROW + "\n")
+        self.write("direction.md", "# Direction\n")   # #521: rank step 5 commits its own direction lines
+        code, out = self.run_tool(self.RANKING, "--commit", "rank(career fair): 5 employers")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.splitlines()[:4], [
+            "Files (%s): ok" % self.RANKING, "Past phrasings: no entry changed", "Lint at save: ok", "check_save: ok"])
+        self.assertEqual(self.head(), "rank(career fair): 5 employers")
+        self.assertEqual(self.status(), "?? direction.md\n")
+        # applications.md goes only when a line it gained names the ranking
+        self.write("applications.md", self.APPS + self.ROW + "\n| 2026-02-04 | Recruiter call | x | x | x | x |\n")
+        self.assertEqual(check_save.commit_paths(self.root, [self.RANKING], []), [self.RANKING])
+
+    def test_ranking_row_below_a_blank_line_fails(self):
+        """v1s-9: `printf '\\n| ... |' >> applications.md` put the row below a blank line, outside the table."""
+        self.ranking(self.APPS + "\n" + self.ROW)
+        code, out = self.run_tool(self.RANKING, "--commit", "rank(career fair): 5 employers")
+        self.assertEqual(code, 1, out)
+        self.assertIn("Files (%s): applications.md:13: a row outside the `## Events and contacts` table" % self.RANKING, out)
+        self.assertNotIn("no row of applications.md", out)
+        self.assertEqual(self.head(), "apps")
+
+    def test_ranking_rows_checked(self):
+        self.ranking(self.APPS + "| 2026-02-03 | Career fair | x |\n")
+        code, out = self.run_tool(self.RANKING)
+        self.assertEqual(code, 1, out)
+        self.assertIn("applications.md:12: 3 cells, the table's header has 6", out)
+        self.assertIn("no row of applications.md › Events and contacts names 2026-02-03-career-fair-ranking.md", out)
+        self.ranking(self.APPS + self.ROW + "\n")
+        for bad in ("rank(career fair 2026-02-03): fix events table row", "rank(career fair 2026-02-03): 5 employers"):
+            code, out = self.run_tool(self.RANKING, "--commit", bad)
+            self.assertEqual(code, 1, out)
+            self.assertIn("Commit subject:", out)
 
     def test_audit_report_with_no_table(self):
         """#481: every saved report holds a provenance table, as an application folder does."""

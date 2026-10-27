@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Print write step 10's checks on a saved output, before its commit (skills/career-log/modes/write.md),
-or audit point 6's on every output (skills/career-log/modes/audit.md).
+and rank step 6's on a ranking (skills/career-log/modes/rank.md), then commit it on --commit; or
+audit point 6's on every output (skills/career-log/modes/audit.md).
 
   python3 -I tools/check_save.py <saved>... [--humanizer <file> | --humanizer none] [--root <root>]
+  python3 -I tools/check_save.py <saved> [--humanizer ...] --commit "<subject>" [--checked] [--root <root>]
   python3 -I tools/check_save.py --audit [--root <root>]
 
 <root> is the Log's root (default: the folder above this script's). <saved> is a path in it, read
 from <root> when relative: an application folder (outputs/applications/<folder>/, whose
-provenance.md holds the provenance table), a target-run resume's outputs/resumes/<target>.md, or a
-report, outputs/reports/<YYYY-MM-DD>-<slug>.md.
+provenance.md holds the provenance table), a target-run resume's outputs/resumes/<target>.md, a
+report, outputs/reports/<YYYY-MM-DD>-<slug>.md, or a ranking, outputs/reports/<YYYY-MM-DD>-<event>-ranking.md.
 
 Each line it prints is a check; a line that fails is followed by an indented `fix:` line saying what
 to do. In order:
@@ -29,7 +31,11 @@ to do. In order:
     application answer`, each heading above the first table followed by a `Type:` line; a line there
     starting `Archived` in the form `Archived (user, YYYY-MM-DD)`, a real date (the marker of a
     `resume bullets` report saved Archived, write › Save levels; whether the save was Archived is
-    the run's, and not read).
+    the run's, and not read);
+  - a ranking (named `-ranking.md`, with no `Kind:` line): applications.md's `## Events and contacts` table is one table (a row below a blank
+    line, or any other line, is outside it and fails), each row with as many cells as its header,
+    and a row there names the ranking's file name. A ranking has no Kind: line, provenance table,
+    Lint at save or Humanizer after review line.
 - Risks (<saved>): a resume's provenance file (an application's provenance.md, a target's .md),
   and a `resume bullets` report, has a `## Risks to handle in conversation` section after its
   provenance table.
@@ -48,16 +54,19 @@ to do. In order:
   - a column after the first cites another output: `outputs/`, `applications/`, `resumes/` or
     `reports/` outside a source citation (a `sources/` citation up to the next `;` or output path, a
     `<repo>@<sha>:<path>` key, or a URL; a URL into outputs/ still counts), `resume.tex`, or the word
-    "provenance".
+    "provenance". The sponsorship records, `outputs/reports/sponsorship.jsonl`, are a source, not an
+    output (a `none found` record cites them).
   A provenance file that is missing, not UTF-8, or has no provenance table prints a line saying so
   instead.
 - Past phrasings (<entry>): +<added> -<removed>, then `ok` or each finding, for each entry whose
-  `## Past phrasings` differs from git's HEAD (the save is not committed yet), as write step 10's
+  `## Past phrasings` this save changed since git's HEAD (the save is not committed yet; which
+  entries are this save's: --commit below), as write step 10's
   **Feed later runs** and write › Save levels say. It fails:
   - an added line not in the form entries/_template.md › Past phrasings gives (`- **<angle>:**
     "<wording>" (<citation>)`);
   - an added line whose wording is not, word for word, a bullet of a resume or `resume bullets`
-    report among <saved> (LaTeX markup and case aside);
+    report among <saved> (LaTeX markup and case aside; an `\\item` under an Education or Skills
+    heading is no bullet, as for application.py phrasings);
   - an added line whose citation is not the form for that output: `outputs/applications/<folder>`,
     `outputs/resumes/<target>.tex, YYYY-MM-DD`, or `outputs/reports/<YYYY-MM-DD>-<slug>.md`;
   - an added line citing an Archived output (a folder with archived.md, a report with the Archived
@@ -94,7 +103,27 @@ file (scan reports aside). The last line is `check_save: ok` (exit 0, no finding
 <n> findings: report each` (exit 1).
 
 For a save, the last line is `check_save: ok` (exit 0), or `check_save: fix the lines above, then run it
-again` (exit 1). Exit 2, with one line saying why, for a <saved> path that is not a saved output in the Log,
+again` (exit 1). With --commit (one <saved>), it also checks the subject: an application folder's
+`write(<company>): <role>`, whose company and role, as ASCII names (tools/logfiles.py ascii_slug),
+are the folder's name after its date (the `commit:` line tools/application.py name printed); a target's `write(<target>): resume`; a report's `write(<slug>):
+<kind>`, as its file name and Kind: line give them; a ranking's `rank(<event>): <n> employers`,
+<event> as its file name has it. A subject that is none of these is a `Commit subject:` line that
+fails. On `check_save: ok` it commits, printing `commit: <subject>`, then a `left: <path>: differs
+from HEAD, not written by this save: not committed` line for each other path that differs from HEAD
+(a bulk change waiting for its yes stays out), then tools/sync.py commit's lines, so it still ends
+with `sync: ok` or a `next:` line; it exits with sync.py's code. It commits only the files this save wrote, told by what each
+gained or lost since HEAD (new files included): <saved>, a target's .tex and .pdf with its .md; each
+entry whose `## Past phrasings` gained or lost a line naming the output (its path from outputs/ on, or
+a target's <target>.md, .tex or .pdf) or gained one holding its bullet; stories.md when a line it
+gained names the output (answer-set's pointer); profile.md when its Interview prep list gained a
+line; for an application folder each scan report whose gained lines name it (a scan accept's status
+line), and then outputs/dashboard/; for a ranking applications.md when a line it gained names it.
+A changed entry that is not this save's gets no Past phrasings check: when its section changed, a
+`Past phrasings (<entry>): not this save's (...): not checked, not committed` line and a `check:`
+line under it. An entry of this save's that also changed outside `## Past phrasings` gets a
+`check:` line too: it is committed whole. While a `check:` line printed, it prints `held: not committed: ...` instead (exit 1):
+act on each, then run it again with --checked. On exit 1 it commits nothing, so the same command,
+run again after the fixes, is the commit. Exit 2, with one line saying why, for a <saved> path that is not a saved output in the Log,
 a --humanizer file that cannot be read, or a git or writing.md read that fails: fix that path or
 file, then run it again. Standard library only, Python 3.11+.
 """
@@ -113,6 +142,7 @@ import resume   # which pdftotext tools/resume.py uses
 
 OUTPUT_REF = re.compile(r"\b(?:outputs|applications|resumes|reports)/|\bresume\.tex\b|\bprovenance\b", re.I)
 SOURCE_PATH = re.compile(r"\bsources/(?:[^;|\s]|\s+(?![^;|\s]*\b(?:outputs|applications|resumes|reports)/))*|[\w.-]+@[0-9a-f]{6,}:\S+|https?://(?![^\s]*/outputs/)\S+")
+SPONSORSHIP_RECORDS = re.compile(r"(?<![\w./-])outputs/reports/sponsorship\.jsonl(?![\w./-])")   # a source, not an output
 MD_FILE = re.compile(r"[\w./\\-]*\w\.md\b", re.I)
 SECTION_REF = re.compile(r"(?:\[[^\]]*\]\(([^)\s]+)\)|([\w./\\-]*\w))\s+›\s+([^;|]+)")
 PROVENANCE_FILE = re.compile(r"outputs/applications/[^/]+/provenance\.md$|outputs/(?:resumes|reports)/[^/]+\.md$")
@@ -120,6 +150,9 @@ APPLICATION = re.compile(r"outputs/applications/[^/]+$")
 TARGET = re.compile(r"outputs/resumes/([^/]+)\.md$")
 REPORT = re.compile(r"outputs/reports/[^/]+\.md$")
 REPORT_NAME = re.compile(r"outputs/reports/(\d{4}-\d{2}-\d{2})-[^/\s]+\.md$")
+RANKING = re.compile(r"outputs/reports/\d{4}-\d{2}-\d{2}-([^/\s]+)-ranking\.md$")   # rank step 6's report
+EVENTS = "Events and contacts"
+CHECK_LINE = re.compile(r"(?:^|\s|: )check: ")
 ARCHIVED = re.compile(r"Archived \(user, (\d{4}-\d{2}-\d{2})\)")
 KINDS = ("resume bullets", "cover letter", "bio", "elevator pitch", "application answer", "interview answer", "other")
 EMPLOYER_KINDS = ("resume bullets", "cover letter", "application answer")
@@ -222,7 +255,7 @@ def row_problem(root, rel, cells, head):
         if gone:
             return "entry section names %s, no heading there" % gone
     for c in cells[1:]:
-        m = OUTPUT_REF.search(SOURCE_PATH.sub("", c))
+        m = OUTPUT_REF.search(SPONSORSHIP_RECORDS.sub("", SOURCE_PATH.sub("", c)))
         if m:
             return "names another output (%s)" % m.group(0)
     return None
@@ -381,6 +414,9 @@ def check_files(root, rel, out):
             same_as_draft(root, rel, tex, pdf, target, out)
             email_gap(root, rel, pdf, out)
         found = rel, True, True
+    elif is_ranking(root, rel):
+        check_ranking(root, rel, out)
+        found = None, False, False
     else:
         m = REPORT_NAME.match(rel)
         try:
@@ -410,6 +446,30 @@ def check_files(root, rel, out):
     if len(out.lines) == before:
         out.ok("Files (%s): ok" % rel)
     return found
+
+
+def check_ranking(root, rel, out):
+    """The Files lines for a ranking: applications.md › Events and contacts is one table, each row
+    with the header's cells, and a row there names the report (rank step 6)."""
+    name = rel.split("/")[-1]
+    text = read(root, "applications.md") if exists(root, "applications.md") else None
+    tables = [t for t in logfiles.md_tables(text) if t.section == EVENTS] if text is not None else []
+    if not tables:
+        out.fail("Files (%s): applications.md has no `## %s` table" % (rel, EVENTS),
+                 "add the event's row to the table under `## %s` in applications.md" % EVENTS)
+        return
+    for t in tables[1:]:
+        out.fail("Files (%s): applications.md:%d: a row outside the `## %s` table (a blank line or other "
+                 "text above it ends the table)" % (rel, t.line, EVENTS),
+                 "delete the lines between the table's last row and this one, so the row joins the table")
+    head = tables[0]
+    for n, cells in head.rows:
+        if len(cells) != len(head.head):
+            out.fail("Files (%s): applications.md:%d: %d cells, the table's header has %d" % (rel, n, len(cells), len(head.head)),
+                     "give the row one cell per column, `|` between them, and `\\|` for a `|` inside a cell")
+    if not any(name in " ".join(cells) for t in tables for cells in [t.head] + [c for _, c in t.rows]):
+        out.fail("Files (%s): no row of applications.md › %s names %s" % (rel, EVENTS, name),
+                 "add the event's row there, its Source cell a link to %s" % rel)
 
 
 def check_risks(root, rel, prov, out):
@@ -448,7 +508,7 @@ def bullets_of(root, rel):
     out = []
     for tex in texs:
         if exists(root, tex):
-            out += [(words(writing_lint.tex_plain(i)),) + cite for _, i in logfiles.tex_items(read(root, tex))]
+            out += [(words(writing_lint.tex_plain(i)),) + cite for _, i in logfiles.tex_bullets(read(root, tex))]
     return out
 
 
@@ -473,9 +533,49 @@ def archived_outputs(root):
 
 def changed_entries(root):
     """The entries that differ from git's HEAD (new ones included), as paths from the root."""
-    paths = logfiles.git(root, "diff", "HEAD", "--name-only", "--relative", "--", "entries/").splitlines()
-    paths += logfiles.git(root, "ls-files", "--others", "--exclude-standard", "--", "entries/").splitlines()
-    return sorted({p for p in paths if ENTRY_PATH.fullmatch(p) and exists(root, p)})
+    return sorted(p for p in changed_paths(root, "entries/") if ENTRY_PATH.fullmatch(p) and exists(root, p))
+
+
+def changed_paths(root, *spec):
+    """The paths under spec (default: the whole Log) that differ from git's HEAD, new and deleted ones
+    included, as paths from the root."""
+    spec = spec or (".",)
+    paths = logfiles.git(root, "diff", "HEAD", "--name-only", "--relative", "--", *spec).splitlines()
+    paths += logfiles.git(root, "ls-files", "--others", "--exclude-standard", "--", *spec).splitlines()
+    return sorted({p for p in paths if p})
+
+
+def output_name(rel):
+    """A pattern for the saved output as a Past phrasings citation, a stories.md pointer, a scan
+    report's Draft cell or an applications.md row names it (`outputs/` optional, as older citations
+    leave it off)."""
+    if TARGET.match(rel):
+        name = re.escape(rel[len("outputs/"):-len(".md")]) + r"\.(?:md|tex|pdf)"
+    else:
+        name = re.escape(rel[len("outputs/"):])
+    return r"(?<![\w.-])" + name + r"(?![\w.-])"
+
+
+def names_output(text, saved):
+    return any(re.search(output_name(rel), text) for rel in saved)
+
+
+def added_lines(root, rel, old=None):
+    """The lines a file has that HEAD's version lacks (all of a new file's)."""
+    new = read(root, rel) if exists(root, rel) else ""
+    old = at_head(root, rel) if old is None else old
+    return list((Counter(new.splitlines()) - Counter(old.splitlines())).elements())
+
+
+def saves_entry(old, new, saved, approved):
+    """Whether this save changed the entry: a line its `## Past phrasings` gained or lost names the
+    saved output, or one it gained holds a bullet of it (a cap's drop lies beside such an addition)."""
+    before, after = Counter(phrasings(old)), Counter(phrasings(new))
+    moved = list(((after - before) + (before - after)).elements())
+    said = [b[0] for b in approved]
+    return any(names_output(l[1], saved) for l in moved) or any(
+        (m := PHRASING_PARTS.fullmatch("- **%s:** %s" % l)) and words(writing_lint.tex_plain(m.group(2))) in said
+        for l in (after - before).elements() if l[0])
 
 
 def at_head(root, rel):
@@ -541,20 +641,32 @@ def check_phrasings(root, entry, old, new, approved, archived, out):
 
 
 def check_entries(root, saved, out):
-    """The Past phrasings and Entries lines for the entries the save changed."""
+    """The Past phrasings and Entries lines for the entries the save changed; the save's entries."""
     archived = archived_outputs(root)
     approved = [b for rel in saved for b in bullets_of(root, rel)]
-    changed = changed_entries(root)
+    changed, mine = changed_entries(root), []
     if not changed:
         out.ok("Past phrasings: no entry changed")
     for entry in changed:
         new, old = read(root, entry), at_head(root, entry)
-        check_phrasings(root, entry, old, new, approved, archived, out)
         strip = lambda t: re.sub(r"^## Past phrasings[^\n]*\n.*?(?=^## |\Z)", "", t, flags=re.M | re.S).splitlines()
+        if saves_entry(old, new, saved, approved):
+            mine.append(entry)
+            check_phrasings(root, entry, old, new, approved, archived, out)
+            if strip(old) != strip(new):
+                out.lines.append("  check: %s also changed outside ## Past phrasings, and the save commits it whole: "
+                                 "check that change is a fact this run recorded, not a bulk change waiting for its yes"
+                                 % entry)
+        elif Counter(phrasings(old)) != Counter(phrasings(new)):
+            out.ok("Past phrasings (%s): not this save's (no line it gained or lost names the output or holds "
+                   "its bullet): not checked, not committed" % entry)
+            out.lines.append("  check: check it is a bulk change waiting for its yes; a line this save added "
+                             "names the output in its citation and is a bullet of it, word for word")
         cited = [l.strip() for l in (Counter(strip(new)) - Counter(strip(old))).elements() if entries_output.search(l)]
         for l in cited:
             out.fail("Entries (%s): added a line naming an output: %s" % (entry, l[:160]),
                      "take it out: the provenance table already says where the material was used")
+    return mine
 
 
 entries_output = re.compile(r"(?<![\w-])outputs/[\w.-]")
@@ -565,6 +677,8 @@ entries_output = re.compile(r"(?<![\w-])outputs/[\w.-]")
 def check_lint(root, saved, out):
     texts = []
     for rel in saved:
+        if is_ranking(root, rel):
+            continue   # the user's own list, never sent
         if APPLICATION.match(rel):
             texts += [rel + "/resume.tex", rel + "/answers.md"]
         elif TARGET.match(rel):
@@ -613,6 +727,95 @@ def humanizer_lines(arg):
 
 HUMANIZER_FIX = ("for each such line: when it had its humanizer call after the review, write it in the form; "
                  "otherwise give it its humanizer pass (review.md › Apply the review) and its call line first")
+
+
+# ---- Commit ----
+
+def is_ranking(root, rel):
+    """Whether a saved path is rank step 6's ranking: named `-ranking.md`, with no `Kind:` line (a
+    write report may end its slug in `ranking`)."""
+    return bool(RANKING.match(rel)) and (not exists(root, rel) or report_marks(read(root, rel))[0] is None)
+
+
+def name_part(text, fallback=""):
+    """A company, role or event as a file name has it: tools/logfiles.py ascii_slug (tools/scan.py
+    names a name with no ASCII letter or digit `posting`)."""
+    return logfiles.ascii_slug(text) or fallback
+
+
+def subject_problem(root, rel, subject):
+    """Why a --commit subject is not the one the save's mode gives for rel, or None."""
+    if APPLICATION.match(rel):
+        m = re.fullmatch(r"write\((.+?)\): (\S.*)", subject)
+        folder = rel.split("/")[-1]
+        names = {"%s-%s" % (name_part(m.group(1), c), name_part(m.group(2), r))
+                 for c in ("", "posting") for r in ("", "posting")} if m else set()
+        if any(re.fullmatch(r"\d{4}-\d{2}-\d{2}-%s(?:-\d+)?" % re.escape(n), folder) for n in names):
+            return None
+        return ("`write(<company>): <role>`, the `commit:` line tools/application.py name printed (a scan accept: "
+                "company and role as the folder's name gives them after its date)")
+    if TARGET.match(rel):
+        want = "write(%s): resume" % TARGET.match(rel).group(1)
+        return None if subject == want else "`%s`" % want
+    if is_ranking(root, rel):
+        event = RANKING.match(rel).group(1)
+        m = re.fullmatch(r"rank\((.+?)\): \d+ employers", subject)
+        if m and event in (logfiles.ascii_slug(m.group(1)), "-".join(m.group(1).lower().split())):
+            return None
+        return "`rank(<event>): <n> employers`, <event> the event the file is named for (%s)" % event
+    slug = rel.split("/")[-1][len("YYYY-MM-DD-"):-len(".md")]
+    kind = report_marks(read(root, rel))[0] if exists(root, rel) else None
+    want = "write(%s): %s" % (slug, kind or "<its Kind: line's kind>")
+    return None if subject == want else "`%s`" % want
+
+
+def commit_paths(root, saved, entries):
+    """The paths a save commits: each <saved> (a target's .tex and .pdf with its .md), then each Log
+    file this save wrote, by what it gained since HEAD: <entries> (check_entries' list); stories.md
+    when a line it gained names the output (answer-set's pointer); profile.md when its Interview prep
+    list gained a line; for an application folder each scan report whose gained lines name it (a scan
+    accept's status line) and then outputs/dashboard/; for a ranking applications.md when a line it
+    gained names it."""
+    paths = []
+    for rel in saved:
+        paths.append(rel)
+        if TARGET.match(rel):
+            paths += [p for p in (rel[:-3] + ".tex", rel[:-3] + ".pdf") if exists(root, p)]
+    paths += entries
+    if any(names_output(l, saved) for l in added_lines(root, "stories.md")):
+        paths.append("stories.md")
+    if exists(root, "profile.md"):
+        prep = lambda t: logfiles.section(t, "Interview prep list") or ""
+        if Counter(prep(read(root, "profile.md")).splitlines()) - Counter(prep(at_head(root, "profile.md")).splitlines()):
+            paths.append("profile.md")
+    if any(APPLICATION.match(rel) for rel in saved):
+        scans = [p for p in changed_paths(root, "outputs/reports/") if SCAN_REPORT.fullmatch(p.split("/")[-1])
+                 and exists(root, p) and any(names_output(l, saved) for l in added_lines(root, p))]
+        if scans:
+            paths += scans + changed_paths(root, "outputs/dashboard/")
+    if any(is_ranking(root, rel) for rel in saved) and any(names_output(l, saved) for l in added_lines(root, "applications.md")):
+        paths.append("applications.md")
+    return list(dict.fromkeys(paths))
+
+
+def left_paths(root, paths):
+    """The paths that differ from HEAD and are not among the committed ones (nor in a committed folder)."""
+    inside = lambda p: any(p == c or p.startswith(c.rstrip("/") + "/") for c in paths)
+    return [p for p in changed_paths(root) if not inside(p)]
+
+
+def commit(root, saved, subject, entries):
+    """`commit: <subject>`, a `left:` line for each other path that differs from HEAD, then
+    tools/sync.py commit's own lines; sync.py's exit code."""
+    print("commit: %s" % subject)
+    paths = commit_paths(root, saved, entries)
+    for path in left_paths(root, paths):
+        print("left: %s: differs from HEAD, not written by this save: not committed" % path)
+    sys.stdout.flush()
+    p = subprocess.run([sys.executable, "-I", os.path.join(HERE, "sync.py"), "commit", "--root", root, subject, "--"]
+                       + paths, capture_output=True, encoding="utf-8", errors="replace")
+    sys.stdout.write(p.stdout + p.stderr)
+    return p.returncode
 
 
 # ---- Audit ----
@@ -679,14 +882,22 @@ def main(argv):
     ap.add_argument("saved", nargs="*", help="an application folder, a target's .md, or a report")
     ap.add_argument("--humanizer", help="`none`, or a file of `<changed line> -> <Humanizer call: line>` lines")
     ap.add_argument("--audit", action="store_true", help="audit point 6's checks on every output")
+    ap.add_argument("--commit", metavar="SUBJECT", help="on exit 0, commit the save with this subject (tools/sync.py commit)")
+    ap.add_argument("--checked", action="store_true", help="with --commit: each `check:` line was acted on")
     logfiles.add_root(ap, __file__)
     a = ap.parse_args(argv[1:])
     root = os.path.abspath(a.root)
     if a.audit:
-        if a.saved:
-            print("--audit reads every output: give it no <saved>")
+        if a.saved or a.commit:
+            print("--audit reads every output: give it no <saved> and no --commit")
             return 2
         return audit(root)
+    if a.checked and not a.commit:
+        print("--checked goes with --commit")
+        return 2
+    if a.commit is not None and len(a.saved) != 1:
+        print("--commit takes one saved output: the one this save wrote")
+        return 2
     if not a.saved:
         print("give a saved output (an application folder, outputs/resumes/<target>.md, outputs/reports/<file>.md), or --audit")
         return 2
@@ -707,13 +918,19 @@ def main(argv):
             needs_humanizer = needs_humanizer or employer
             if holds_resume:
                 check_risks(root, rel, prov, out)
+            if prov is None:   # a ranking: its sources are URLs, with no provenance table
+                continue
             line, good = check_file(root, prov)
             if good:
                 out.ok(line)
             else:
                 out.fail(line, PROVENANCE_FIX)
-        check_entries(root, saved, out)
+        entries = check_entries(root, saved, out)
         check_lint(root, saved, out)
+        if a.commit is not None:
+            want = subject_problem(root, saved[0], a.commit)
+            if want:
+                out.fail("Commit subject: %r is not this save's" % a.commit, "pass --commit with " + want)
     except (logfiles.LogError, writing_lint.LintError) as e:
         print(e)
         return 2
@@ -739,7 +956,18 @@ def main(argv):
     for line in out.lines:
         print(line)
     print("check_save: fix the lines above, then run it again" if out.failed else "check_save: ok")
-    return 1 if out.failed else 0
+    if out.failed:
+        return 1
+    if a.commit is None:
+        return 0
+    if not a.checked and any(CHECK_LINE.search(l) for l in out.lines):
+        print("held: not committed: act on each `check:` line above, then run this again with --checked added")
+        return 1
+    try:
+        return commit(root, saved, a.commit, entries)
+    except logfiles.LogError as e:
+        print(e)
+        return 2
 
 
 if __name__ == "__main__":
