@@ -396,8 +396,9 @@ class ScanTest(unittest.TestCase):
         self.jsonl(os.path.relpath(os.path.join(d, "screen", name), self.root), items)
 
     def rows(self, required, touched):
-        return [{"requirement": "r%d" % i, "kind": "required", "entries": ["2025-01-widget.md"] if i < touched else []}
-                for i in range(required)] + [{"requirement": "nice", "kind": "preferred", "entries": []}]
+        return [{"requirement": "r%d" % i, "kind": "required", "entries": ["2025-01-widget.md"] if i < touched else [],
+                 "skill": "S%d" % i} for i in range(required)] + [{"requirement": "nice", "kind": "preferred", "entries": [],
+                                                                   "skill": "Nice"}]
 
     def test_screen_budgets_must_hold_the_fit(self):
         d = self.screen_log()
@@ -649,6 +650,155 @@ class ScanTest(unittest.TestCase):
         for l in lines[4:6]:   # a kind unknown or unset names no session
             self.assertNotIn(" | session ", l)
 
+    # ---- exploratory query run (#570) ----
+
+    EXPLORE_SOURCES = ("# Sources\n\n## Board\n- URL: https://board.example/jobs\n- Kind: public job board\n"
+                       "- Query: https://board.example/search?q={query}&days=7\n\n"
+                       "## List\n- URL: https://github.com/o/l\n- Kind: GitHub list\n- Read: README.md\n\n"
+                       "## Odd\n- URL: https://odd.example\n- Kind: public job board\n- Query: https://odd.example/search\n\n"
+                       "## Later\n- URL: https://later.example\n- Kind: signed-in job board\n- Query: GAP: not found yet\n\n"
+                       "## Repo\n- URL: https://github.com/o/r\n- Kind: GitHub list\n- Query: the rows of README.md that hold {query}\n")
+
+    def explore(self, query="Fintech  backend", date=TODAY):
+        code, lines = self.run_tool("explore", query, date=date)
+        self.assertEqual(code, 0, lines)
+        return next(l[len("dir: "):] for l in lines if l.startswith("dir: ")), lines
+
+    def test_explore_names_the_sources_it_reads_and_skips(self):
+        self.write("scan-sources.md", self.EXPLORE_SOURCES)
+        d, lines = self.explore()
+        self.assertEqual(d, ".build/scan/explore-fintech-backend-" + scan.short_hash("fintech backend"))
+        self.assertEqual(lines, [
+            "query: Fintech  backend",
+            "name: " + d.split("/")[-1],
+            "dir: " + d,
+            "read: Board | https://board.example/search?q=Fintech%20backend&days=7",
+            "skip: List (no Query: line)",
+            "skip: Odd (its Query: line has no {query})",
+            "skip: Later (no Query: line)",
+            "read: Repo | the rows of README.md that hold Fintech backend",
+            "sources: 2 read with the query, 3 skipped",
+            "reuse: none (the first run of this query)",
+            "records: none (an exploratory run writes no scan report, declined line, seen date, draft or branch)"])
+        self.assertEqual(json.loads(self.read(d + "/explore.json")), {"query": "Fintech  backend"})
+        self.assertEqual(self.explore("fintech backend")[0], d)   # the same query, in other letters: the same run
+        self.assertNotEqual(self.explore("fintech frontend")[0], d)
+        d, lines = self.explore("金融科技 後端")   # no ASCII letters: the hash names it
+        self.assertEqual(d, ".build/scan/explore-" + scan.short_hash("金融科技 後端"))
+        self.assertIn("read: Board | https://board.example/search?q=%E9%87%91%E8%9E%8D%E7%A7%91%E6%8A%80%20%E5%BE%8C%E7%AB%AF"
+                      "&days=7", lines)
+        self.assertIn("read: Repo | the rows of README.md that hold 金融科技 後端", lines)
+
+    def test_explore_refuses_with_no_source_to_query(self):
+        self.assertEqual(self.run_tool("explore", "fintech"), (1, ["scan: explore: no source to read (no scan-sources.md)"]))
+        self.write("scan-sources.md", "## List\n- URL: https://github.com/o/l\n- Kind: GitHub list\n")
+        code, lines = self.run_tool("explore", "fintech")
+        self.assertEqual(code, 1)
+        self.assertEqual(lines, ["scan: explore: no source has a Query: line with {query}; nothing written",
+                                 "skip: List (no Query: line)"])
+        self.assertFalse(os.path.exists(os.path.join(self.root, ".build")))
+        self.assertEqual(self.run_tool("explore", "  ")[0], 1)
+
+    def test_explore_dedup_keeps_applied_and_declined(self):
+        self.write("scan-sources.md", self.EXPLORE_SOURCES)
+        d = self.explore()[0]
+        self.write("outputs/applications/2026-09-01-acme-backend-engineer/posting.md",
+                   "URL: https://boards.greenhouse.io/acme/jobs/111\n\nBackend Engineer\n")
+        self.jsonl("outputs/reports/scan-declined.jsonl", [{"url": "https://umbrella.com/jobs/5", "date": "2026-10-01", "reason": ""}])
+        self.report("2026-10-15", [["https://stark.com/jobs/3", "Stark", "ML Engineer", "undecided", "-", "-"]])
+        self.jsonl(d + "/collected.jsonl", [
+            {"url": "https://acme.com/careers?gh_jid=111", "company": "Acme", "role": "Backend Engineer", "posted": TODAY},
+            {"url": "https://umbrella.com/jobs/5", "company": "Umbrella", "role": "SWE", "posted": TODAY},
+            {"url": "https://stark.com/jobs/3", "company": "Stark", "role": "ML Engineer", "posted": TODAY},
+            {"url": "https://www.stark.com/jobs/3#apply", "company": "Stark", "role": "ML Engineer", "posted": TODAY},
+            {"url": "https://old.com/jobs/1", "company": "Old", "role": "SWE", "posted": "2026-09-01"}])
+        code, lines = self.run_tool("dedup", d + "/collected.jsonl", "--out", d + "/kept.jsonl", "--window", "7")
+        self.assertEqual(code, 0, lines)
+        self.assertEqual(lines, [
+            "dropped: https://www.stark.com/jobs/3#apply (repeated in this batch)",
+            "dropped: https://old.com/jobs/1 (posted 2026-09-01, before the window (from 2026-10-15))",
+            "kept: 3; dropped: 2; written to %s" % os.path.join(self.root, d + "/kept.jsonl"),
+            "dropped by reason: before the window 1, applied 0, declined 0, repeated 1",
+            "explore: applied and declined postings kept, no seen dates (an exploratory run)"])
+        kept = self.lines(os.path.join(self.root, d, "kept.jsonl"))
+        self.assertEqual([k["url"] for k in kept], ["https://acme.com/careers?gh_jid=111", "https://umbrella.com/jobs/5",
+                                                    "https://stark.com/jobs/3"])
+        self.assertFalse(any("seen" in k for k in kept))
+        out = os.path.join(self.tmp, "elsewhere.jsonl")   # the postings file alone in the run's folder: still exploratory
+        self.assertEqual(self.run_tool("dedup", d + "/collected.jsonl", "--out", out)[1][-1],
+                         "explore: applied and declined postings kept, no seen dates (an exploratory run)")
+
+    def test_explore_writes_no_records(self):
+        self.write("scan-sources.md", self.EXPLORE_SOURCES)
+        self.write(".gitignore", ".build/\n")   # as the Log ignores it
+        d = self.explore()[0]
+        self.commit("sources")
+        before = git(self.root, "status", "--porcelain")
+        row = {"url": "https://a.com/1", "company": "A", "role": "SWE", "status": "undecided", "draft": "", "fit_commit": ""}
+        self.jsonl(d + "/rows.jsonl", [row])
+        self.jsonl(d + "/ranked.jsonl", [dict(row, rank=1, recommendation="apply", folder="2026-10-22-a-swe")])
+        self.jsonl(d + "/collected.jsonl", [{"url": "https://a.com/1", "company": "A", "role": "SWE"}])
+        refused = "is an exploratory run (query \"Fintech  backend\")"
+        for args in (("report", d + "/rows.jsonl", "--name", TODAY, "--screen", d), ("report", d + "/rows.jsonl"),
+                     ("drafts", d, "--m", "1"), ("drafts", d, "--save")):
+            code, lines = self.run_tool(*args)
+            self.assertEqual(code, 1, (args, lines))
+            self.assertIn(refused, lines[0], args)
+        code, lines = self.run_tool("summary", d)
+        self.assertEqual(code, 0, lines)
+        self.assertIn("report: none (an exploratory run writes no scan report)", lines)
+        self.assertEqual(git(self.root, "status", "--porcelain"), before)
+        self.assertEqual(git(self.root, "branch", "--list", "scan/*", "-a"), "")
+        self.assertFalse(os.path.exists(os.path.join(self.root, "outputs")))
+
+    def test_explore_again_reuses_captures_and_screen_results(self):
+        self.write("scan-sources.md", self.EXPLORE_SOURCES)
+        self.write("entries/2025-01-widget.md", "# Widget\n")
+        self.write("direction.md", self.DIRECTION)
+        self.commit("log")
+        d = self.explore()[0]
+        posts = [{"url": "https://c%d.com/j/%d" % (i, i), "company": "C%d" % i, "role": "SWE", "tier": 1} for i in (1, 2)]
+        self.jsonl(d + "/prefiltered.jsonl", posts)
+        args = ("screen", d, "--screen-budget", "5", "--fit-budget", "1")
+        self.assertEqual(self.run_tool(*args)[0], 0)
+        listed = self.lines(os.path.join(self.root, d, "screen-list.jsonl"))
+        for p in listed:
+            self.write(p["capture"], "%s\n\ntext\n" % p["url"])
+        self.result(os.path.join(self.root, d), "batch-1.jsonl", [
+            {"url": "https://c1.com/j/1", "gate": "yes", "tier": 1, "rows": self.rows(2, 2)},
+            {"url": "https://c2.com/j/2", "gate": "no", "reason": "US only: \"London\""}])
+        self.assertEqual(self.run_tool(*args, "--sort")[0], 0)
+
+        later = "2026-10-25"   # a second run, days on: its capture paths are the first run's
+        self.assertEqual(self.explore(date=later)[1][-2], "reuse: 2 capture(s) and 2 Screen result(s) from an earlier run of this query")
+        posts.insert(0, {"url": "https://c3.com/j/3", "company": "C3", "role": "SWE", "tier": 1})
+        self.jsonl(d + "/prefiltered.jsonl", posts)
+        code, lines = self.run_tool(*args, date=later)
+        self.assertEqual(code, 0, lines)
+        cap = lambda i: "%s/postings/c%d-swe.md" % (os.path.join(self.root, d).replace(os.sep, "/"), i)
+        self.assertEqual(lines[1:], [
+            "posting: https://c3.com/j/3 | capture %s (need) | screen batch-1" % cap(3),
+            "posting: https://c1.com/j/1 | capture %s (have) | screen reused an earlier run" % cap(1),
+            "posting: https://c2.com/j/2 | capture %s (have) | screen reused an earlier run" % cap(2),
+            "screen: 3 posting(s) listed, 2 reused, 1 in 1 batch(es); 0 not screened (past the budget)"])
+        reused = self.lines(os.path.join(self.root, d, "screen", "reused.jsonl"))
+        self.assertEqual([(r["url"], r["gate"], len(r.get("rows") or [])) for r in reused],
+                         [("https://c1.com/j/1", "yes", 3), ("https://c2.com/j/2", "no", 0)])
+        self.write(cap(3), "https://c3.com/j/3\n\ntext\n")
+        self.result(os.path.join(self.root, d), "batch-1.jsonl", [
+            {"url": "https://c3.com/j/3", "gate": "yes", "tier": 1, "rows": self.rows(2, 1)}])
+        code, lines = self.run_tool(*args, "--sort", date=later)
+        self.assertEqual(code, 0, lines)
+        self.assertEqual(lines[-1], "screen: 1 to fit, 1 screened, not fully fitted, 1 dropped at screen, 0 unreadable (no capture)")
+
+        # a third run: c1 has left the list, and another posting of C1's SWE takes its folder's name
+        self.jsonl(d + "/prefiltered.jsonl", [{"url": "https://c1.com/j/9", "company": "C1", "role": "SWE", "tier": 1}])
+        code, lines = self.run_tool(*args, date=later)
+        self.assertEqual(code, 0, lines)
+        self.assertEqual(lines[1], "posting: https://c1.com/j/9 | capture %s (need) | screen batch-1" % cap(1))
+        with open(cap(1) + ".stale", encoding="utf-8") as f:
+            self.assertEqual(f.readline().strip(), "https://c1.com/j/1")
+
     def test_pending_gives_each_rows_fit_map(self):
         self.write("entries/2025-01-widget.md", "# widget\n")
         sha = self.commit("entries")
@@ -881,6 +1031,14 @@ class ScanTest(unittest.TestCase):
         self.assertEqual((code, len(lines)), (1, 3))
         self.assertEqual([l[:12] for l in lines[1:]], ["bad: line 1 ", "bad: line 3 "])
         self.assertEqual(self.run_tool("screen", d, "--check", res)[0], 2)   # --check takes no dir
+        # #569: each row names its skill, as a map row does, for fit.py heatmap's rough rows
+        for skill in (None, "  ", 3):
+            rows = self.rows(2, 1)
+            rows[1] = dict(rows[1], skill=skill) if skill is not None else {k: v for k, v in rows[1].items() if k != "skill"}
+            self.result(d, "batch-1.jsonl", [{"url": "https://c0.com/j/0", "gate": "yes", "tier": 1, "rows": rows}])
+            code, lines = self.run_tool("screen", "--check", res)
+            self.assertEqual((code, lines[1:]), (1, ["bad: line 1: https://c0.com/j/0: each row needs a skill, "
+                                                     "named as a map row's (tools/fit.py --help)"]), skill)
         self.assertEqual(self.run_tool("screen", d, "--screen-budget", "3", "--fit-budget", "1", "--give-up")[0], 2)
 
     def test_screen_result_tier_is_a_target_roles_place(self):
@@ -962,7 +1120,7 @@ class ScanTest(unittest.TestCase):
         self.assertRegex(lines[0], r"^capture: \.build/scan/x/postings/a\.md \(https://jobs\.lever\.co/acme/\S+, fetch, \d+ characters\)$")
         self.assertTrue(lines[1].startswith("next: read the capture's first 30 lines"), lines)
         text =self.read(".build/scan/x/postings/a.md")
-        self.assertTrue(text.startswith(url + "\n\nJobs\nBackend Engineer\n"), text[:120])
+        self.assertTrue(text.startswith(url + "\nread: fetch, open\n\nJobs\nBackend Engineer\n"), text[:120])
         self.assertIn("Build the queue & its workers.", text)
         self.assertNotIn("not text", text)
         rec = json.loads(self.read(".build/scan/x/fetched.jsonl").splitlines()[-1])
@@ -1043,7 +1201,8 @@ class ScanTest(unittest.TestCase):
         code, lines = self.run_tool("capture", ".build/scan/x/postings/a.md", "https://acme.example/jobs/1.", page)
         self.assertEqual(code, 0, lines)
         self.assertEqual(lines, ["capture: .build/scan/x/postings/a.md (https://acme.example/jobs/1, 30 characters)"])
-        self.assertEqual(self.read(".build/scan/x/postings/a.md"), "https://acme.example/jobs/1\n\nBackend Engineer\nAcme | Remote\n")
+        self.assertEqual(self.read(".build/scan/x/postings/a.md"),
+                         "https://acme.example/jobs/1\nread: browser, open\n\nBackend Engineer\nAcme | Remote\n")
         self.assertEqual(scan.capture_url(os.path.join(self.root, ".build/scan/x/postings/a.md")), "https://acme.example/jobs/1")
         txt = self.write("page.txt", "Plain text page\n")
         self.assertEqual(self.run_tool("capture", ".build/scan/x/postings/b.md", "https://b.example/1", txt)[0], 0)
@@ -1055,10 +1214,91 @@ class ScanTest(unittest.TestCase):
         self.write(".playwright-cli/cr-page.json", json.dumps("one\rtwo"))
         self.assertEqual(self.run_tool("capture", "cr.md", "https://c.example/1", ".playwright-cli/cr-page.json")[0], 0)
         with open(os.path.join(self.root, "cr.md"), "rb") as f:
-            self.assertEqual(f.read(), b"https://c.example/1\n\none\ntwo\n")
+            self.assertEqual(f.read(), b"https://c.example/1\nread: browser, open\n\none\ntwo\n")
         self.write(".playwright-cli/obj-page.json", json.dumps({"text": "x"}))
         self.assertEqual(self.run_tool("capture", "c.md", "https://c.example/1", ".playwright-cli/obj-page.json")[0], 1)
         self.assertEqual(self.run_tool("capture", "c.md", "not a url", txt)[0], 1)
+
+    # ---- a capture's state: open or closed, and how it was read (#568) ----
+
+    POSTING = "<html><body><h1>Backend Engineer</h1>" + "<p>Build the queue and its workers.</p>" * 30 + "%s</body></html>"
+
+    def test_fetch_records_a_closed_posting(self):
+        self.fake_get(404, "", "")
+        self.assertEqual(self.run_tool("fetch", ".build/scan/x/postings/a.md", "https://a.example/1")[0], 1)
+        self.assertEqual(self.run_tool("state", ".build/scan/x/postings/a.md")[1],
+                         ["state: .build/scan/x/postings/a.md | https://a.example/1 | no capture | closed (status 404)"])
+        self.assertEqual(scan.capture_state(os.path.join(self.root, ".build/scan/x/postings/a.md")),
+                         {"url": "https://a.example/1", "read": None, "stand_in": None, "open": False, "why": "status 404"})
+        # a page read after the fetch that found it gone is a closed posting's page
+        page = self.write(".playwright-cli/posting-page.json", json.dumps("Backend Engineer\n"))
+        code, lines = self.run_tool("capture", ".build/scan/x/postings/a.md", "https://a.example/1", page)
+        self.assertEqual(code, 0, lines)
+        self.assertEqual(lines, ["capture: .build/scan/x/postings/a.md (https://a.example/1, 16 characters, closed (status 404))"])
+        self.assertTrue(self.read(".build/scan/x/postings/a.md").startswith(
+            "https://a.example/1\nread: browser, closed (status 404)\n\nBackend Engineer\n"))
+        self.fake_get(410, "", "")
+        self.run_tool("fetch", ".build/scan/x/postings/b.md", "https://b.example/1")
+        self.assertIn("closed (status 410)", self.run_tool("state", ".build/scan/x/postings/b.md")[1][0])
+        # a page that says it takes no applications: captured, as closed
+        self.fake_get(200, "text/html", self.POSTING % "<div>This job is no longer accepting applications.</div>")
+        code, lines = self.run_tool("fetch", ".build/scan/x/postings/c.md", "https://c.example/1")
+        self.assertEqual(code, 0, lines)
+        self.assertRegex(lines[0], r", fetch, \d+ characters, closed \(the page says \"no longer accepting applications\"\)\)$")
+        self.assertEqual(self.run_tool("state", ".build/scan/x/postings/c.md")[1],
+                         ['state: .build/scan/x/postings/c.md | https://c.example/1 | read fetch'
+                          ' | closed (the page says "no longer accepting applications")'])
+        for closed in ("The position has been filled.", "Sorry, this job is no longer available",
+                       "Applications are now closed", "This posting has expired.", "Applications closed",
+                       "The job you are looking for is no longer open.", "This role is no\nlonger accepting applications"):
+            self.assertIsNotNone(scan.closed_wording("Backend Engineer\n" + closed), closed)
+        for still in ("We are accepting applications on a rolling basis.", "Close the loop with customers.",
+                      "Own the team's composition is filled in later.", "Build a job is closed-loop control system."):
+            self.assertIsNone(scan.closed_wording(still), still)
+        self.assertEqual(self.run_tool("state", ".build/scan/x/postings/none.md")[0], 1)
+        # a capture written before a later fetch found the posting gone is set to closed
+        self.fake_get(200, "text/html", self.POSTING % "")
+        self.assertEqual(self.run_tool("fetch", ".build/scan/x/postings/d.md", "https://d.example/1")[0], 0)
+        self.fake_get(410, "", "")
+        self.run_tool("fetch", ".build/scan/x/postings/d.md", "https://d.example/1")
+        self.assertEqual(self.run_tool("state", ".build/scan/x/postings/d.md")[1],
+                         ["state: .build/scan/x/postings/d.md | https://d.example/1 | read fetch | closed (status 410)"])
+        self.assertIn("Build the queue", self.read(".build/scan/x/postings/d.md"))
+
+    def test_capture_records_how_it_was_read(self):
+        self.fake_get(200, "text/html", self.POSTING % "")
+        self.assertEqual(self.run_tool("fetch", ".build/scan/x/postings/a.md", "https://a.example/1")[0], 0)
+        self.assertEqual(self.run_tool("state", ".build/scan/x/postings/a.md")[1],
+                         ["state: .build/scan/x/postings/a.md | https://a.example/1 | read fetch | open"])
+        self.fetched("https://b.example/1", "https://c.example/1")
+        page = self.write(".playwright-cli/posting-page.json", json.dumps("Backend Engineer\n"))
+        self.assertEqual(self.run_tool("capture", ".build/scan/x/postings/b.md", "https://b.example/1", page)[0], 0)
+        self.assertEqual(self.run_tool("state", ".build/scan/x/postings/b.md")[1],
+                         ["state: .build/scan/x/postings/b.md | https://b.example/1 | read browser | open"])
+        txt = self.write("api.txt", "Backend Engineer\nThis role has been filled.\n")
+        self.assertEqual(self.run_tool("capture", ".build/scan/x/postings/c.md", "https://c.example/1", txt,
+                                       "--stand-in", "https://api.c.example/jobs/1")[0], 0)
+        self.assertEqual(self.run_tool("state", ".build/scan/x/postings/c.md")[1],
+                         ['state: .build/scan/x/postings/c.md | https://c.example/1 | read stand-in https://api.c.example/jobs/1'
+                          ' | closed (the page says "role has been filled")'])
+        # pasted: no fetch on record needed, and the same record as any other
+        pasted = self.write("pasted.txt", "Backend Engineer\nAcme\n")
+        code, lines = self.run_tool("capture", ".build/scan/x/postings/d.md", "https://d.example/1", pasted, "--pasted")
+        self.assertEqual(lines, ["capture: .build/scan/x/postings/d.md (https://d.example/1, 21 characters, pasted)"])
+        self.assertEqual(self.read(".build/scan/x/postings/d.md"), "https://d.example/1\nread: pasted, open\n\nBackend Engineer\nAcme\n")
+        self.assertEqual(self.run_tool("capture", "e.md", "https://e.example/1", pasted, "--pasted",
+                                       "--stand-in", "https://api.e.example/1")[0], 1)
+        # readable from the path alone, outside any run folder: an application's saved posting
+        shutil.copyfile(os.path.join(self.root, ".build/scan/x/postings/c.md"),
+                        self.write("outputs/applications/c/posting.md", ""))
+        self.assertEqual(scan.capture_state(os.path.join(self.root, "outputs/applications/c/posting.md")),
+                         {"url": "https://c.example/1", "read": "stand-in", "stand_in": "https://api.c.example/jobs/1",
+                          "open": False, "why": 'the page says "role has been filled"'})
+        # a capture from before these records: its state is unknown
+        self.write("old.md", "https://f.example/1\n\nBackend Engineer\n")
+        self.assertEqual(self.run_tool("state", "old.md")[1],
+                         ["state: old.md | https://f.example/1 | read unknown | unknown (a capture from before read lines)"])
+        self.assertEqual(scan.capture_state(os.path.join(self.root, "old.md"))["open"], None)
 
     def test_cleanup_deletes_decided_run_folders(self):
         for name in ("2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22"):

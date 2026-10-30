@@ -10,6 +10,7 @@ visibility: GAP             # public | private | nda
 links: []                   # repo roots and main sites only; a PR, issue or commit is cited in the body
 series:                     # a part of a split experience only: the earliest part's slug
 last_updated: YYYY-MM-DD
+status: stub                # stub | imported | consolidated; a short note in parentheses may follow
 ---
 
 # <title>

@@ -215,6 +215,11 @@ class SponsorshipTest(unittest.TestCase):
         self.assertIn("bad: line 12: sources names the pages read", lines[10])
         self.assertIn("bad: line 14: data_date is how recent", lines[12])
         self.assertFalse(os.path.exists(os.path.join(self.root, sponsorship.RECORDS)))
+        # a line in the records' format, with a date (#558): the message says what to do
+        self.write("dated.jsonl", json.dumps(dict(answered({"employer": "S", "kind": "lca", "records": []}),
+                                                  date="2026-10-01")) + "\n")
+        self.assertEqual(self.run_tool("add", "dated.jsonl"),
+                         (1, ['bad: line 1: remove "date": add sets it (--date, default today)']))
         self.write("empty.jsonl", "\n")
         self.assertEqual(self.run_tool("add", "empty.jsonl"), (1, ["bad: empty.jsonl holds no result line"]))
 
@@ -440,6 +445,11 @@ class SponsorshipTest(unittest.TestCase):
         with redirect_stdout(io.StringIO()) as out:
             self.assertEqual(sponsorship.main(["--help"]), 0)
         self.assertIn("REUSE_DAYS", out.getvalue())
+        # the result file's fields are listed under `add`, and date is not one of them (#558)
+        add = out.getvalue().split("- `add`:")[1].split("\n- `")[0]
+        for field in ("`employer`", "`kind`", "`records`", "`sources`", "`data_date`", "`parent`", "`unanswered`"):
+            self.assertIn("\n    %s " % field, add)
+        self.assertIn("no `date`", add)
 
     def test_runs_as_a_script_and_leaves_no_pycache(self):
         tools = os.path.join(self.root, "tools")

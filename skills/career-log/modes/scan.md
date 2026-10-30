@@ -33,7 +33,10 @@ Before step 1, run `<scan> name --screen-budget <screen_budget> --fit-budget <fi
 - Kind: signed-in job board | public job board | GitHub list
 - Read: <how the last run read it: the page's own JSON API and how it was called, the pages, or the file in the repository>
 - Fields: <what the list gives per posting: title, company, location, date posted, link>
+- Query: <the search URL, or how to search the source in words, with {query} where the search words go>
 ```
+
+`Query:` is optional: an exploratory run reads it (`<scan> explore`). Write it when the user gives one, or when step 3 reads the source through a search page or API that takes search words.
 
 Before step 1, run `<scan> sources`. On `sources: none`, ask the user which sources to scan (their names and URLs), write the sections with `Read:` and `Fields:` lines as `GAP:` until step 3 fills them, and commit with step 9's report. An unattended run stops instead, and its result says the sources are not set. For a `kind unknown (...)` line, ask the user the source's kind and write it (an unattended run skips the source and names it on the report's top line). The user adds, changes or removes a source by saying so; write it here and commit it as a small data change.
 
@@ -70,7 +73,7 @@ Before step 1, run `<scan> sources`. On `sources: none`, ask the user which sour
 11. **Publish** the dashboard once, as [scan-results.md › Dashboard](scan-results.md#dashboard) says, then run `<scan> summary <dir>`. For each finding it lists about a run file, redo the step that writes that file, then run it again; a finding that stays goes in the last message, and so does each `no sponsorship record:`, `sponsorship unanswered:` or `sponsorship unreadable:` line (step 7.4 ran once), and each `restricts:` line step 7.4 returned, as a requirement the user may not meet at that employer; and, once, step 7.4's empty-item line, if it gave one. Then write the **last message:** its `top:` lines and rank's `only <x> found`, when it printed one, its counts, the findings that stayed, the drafts and where they are, the pending rows carried over, any source skipped, the dashboard's published URL (or its path), and that saying "accept", "decline" or "look at" a posting continues from here or from any later session.
 12. **Next up**, ending step 11's last message: run the command [SKILL.md › Next up](../SKILL.md#rules-for-every-mode) gives, with `scan`.
 
-Done when the report is committed and pushed with `outputs/dashboard/`, the last line of `<scan> summary <dir>` starts with `summary: ok` (or the last message names each finding that stayed), and every draft step 10 started is on its branch (or in the `drafts:` folder) with its row's Draft cell set. The last message ends with the Next up block.
+Done when the report is committed and pushed with `outputs/dashboard/`, the last line of `<scan> summary <dir>` starts with `summary: ok` (or the last message names each finding that stayed), and every draft step 10 started is on its branch (or in the `drafts:` folder) with its row's Draft cell set. The last message follows [SKILL.md › Chat output](../SKILL.md#rules-for-every-mode) and ends with the Next up block.
 
 ## Draft a posting
 

@@ -35,8 +35,8 @@ A GitHub template for keeping a career log (a "brag document") in git and lettin
 
 Entries appear here as you log them.
 
-| Period | Entry | Type | Tags | Status |
-|---|---|---|---|---|
+| Period | Entry | Type | Status |
+|---|---|---|---|
 
 ## Upstream
 

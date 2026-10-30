@@ -82,12 +82,14 @@ come from the flows table of docs/guide.md (tools/guide.py flows): a step whose 
 
   python3 -I tools/check.py done <mode> [--since <sha>@<time>] [--for <mode>] [--no-posting]
 
-(--root as above) prints the Next up block that ends <mode>: the commits made since `mode start` (pulled ones, older,
+(--root as above) prints the Next up block that ends <mode>, as English data lines the agent renders in the user's
+language (SKILL.md › Next up): the count and subjects of the commits made since `mode start` (pulled ones, older,
 left out), the next step from the flows table for this Log's state (consolidate again while an
 entry is `stub` or `imported`, import again while the Log has no entries, and import in place
 of a step that reads entries while the Log has none; a step whose work is
 done is skipped: import once there are entries, consolidate once no entry is `stub` or
-`imported`, stories once stories/ holds a Talking points file), the fresh-session line, and the modes in no flow under "Also available". `--for <mode>`: setup ran because the Trigger check of <mode>
+`imported`, stories once stories/ holds a Talking points file; no line when the mode has no fixed next step or ends
+its flow), the fresh-session line, and the modes in no flow under "Also available". `--for <mode>`: setup ran because the Trigger check of <mode>
 started it, so the block sends the user back to <mode> in this session. `--no-posting` (fit only):
 the run answered a question with no posting ("does <company> sponsor?"), so no next step follows
 from a posting's fit, and the block names none. With Log changes
@@ -1210,9 +1212,8 @@ SAVED_TOO = [".export-deny", ".export-cleared"]
 
 
 def consolidated(root):
-    """True when no README row has the status `stub` or `imported`."""
-    rows, _ = tools_module("entries").readme_rows(root)
-    return not any(re.match(r"(stub|imported)\b", row.get("status", "")) for row in rows.values())
+    """True when no entry's status (its front matter's `status:`) is `stub` or `imported`."""
+    return not any(re.match(r"(stub|imported)\b", e.status) for e in tools_module("entries").load(root))
 
 
 # A step of the first-use flow is done, and skipped, when the Log's state says so. The inbox is no
@@ -1293,7 +1294,7 @@ def saved_lines(root, since):
     if not since:
         return ["Saved: not listed (no --since)"]
     sha, _, at = since.partition("@")
-    out = git_out(root, "log", "--no-show-signature", "--format=%ct %h %s", "%s..HEAD" % sha)
+    out = git_out(root, "log", "--no-show-signature", "--format=%ct %s", "%s..HEAD" % sha)
     if out is None or not at.isdigit():
         return ["Saved: not listed (%s is not a `mode start` value of this Log)" % since]
     commits = []
@@ -1304,7 +1305,8 @@ def saved_lines(root, since):
     if not commits:
         return ["Saved: no commit (this mode changed nothing in the Log)"]
     shown = ["  " + c for c in commits[:10]] + (["  ... and %d more" % (len(commits) - 10)] if len(commits) > 10 else [])
-    return ["Saved: %d commit(s) in the Log:" % len(commits)] + shown
+    head = "1 commit; its subject:" if len(commits) == 1 else "%d commits; their subjects:" % len(commits)
+    return ["Saved: " + head] + shown
 
 
 def unsaved(ctx):
@@ -1338,7 +1340,7 @@ def pushable(root):
 
 # Why a step comes again when the Log's state says its work is not done yet. An import answered No
 # leaves no entries; the steps after it, which read entries, are not done but cannot start.
-AGAIN = {"consolidate": "Entries still marked `stub` or `imported` in README.md have gaps and pending notes too",
+AGAIN = {"consolidate": "Entries whose status is still `stub` or `imported` have gaps and pending notes too",
          "import": "The Log has no entries yet: the import was undone, or found nothing to keep"}
 # The steps that read entries: on a Log with none, import comes first, whichever mode ran (#424)
 READS_ENTRIES = ("consolidate", "stories", "fit", "write", "interview")
@@ -1395,17 +1397,15 @@ def done(argv, root=ROOT):
             out.append("Not saved yet: %s. Save it before you go on." % "; ".join(missing))
     else:
         row = None if no_posting else next_step(guide, mode, root)   # its Next follows from a posting's fit
+        if row and row["next"] == "-":
+            row = None   # the flow's last step: like no fixed step, no Next line (#549)
         if guide.error:
             out.append("Next: not found (docs/guide.md: %s)." % guide.error)
-        elif row is None:
-            out.append("Next: no fixed step after `%s`; pick what you need from the modes below." % mode)
-        elif row["next"] == "-":
-            out.append("Next: none in this flow. %s." % row["why"].rstrip("."))
-        else:
+        elif row:
             out.append("Next: %s. %s." % (guide.said(row["next"]), row["why"].rstrip(".")))
         if missing:
             out.append("Not saved yet: %s. Save it before you leave this session." % "; ".join(missing))
-        elif row and row["next"] != "-" and row["session"] == "same":
+        elif row and row["session"] == "same":
             out.append("Go on in this session: the guide runs `%s` right after `%s`, in the same session."
                        % (row["next"], mode))
         else:
@@ -1416,11 +1416,9 @@ def done(argv, root=ROOT):
         if not tools_module("entries").load(root):
             also = []   # with no entries, the modes outside the flows have nothing to read
         out.append("Also available: " + ", ".join(guide.said(m) for m in also + ["guide"]))
-    show = ("end your last message with the block above, from `Next up` on" if "--for" not in opts else
-            "show the user the block above, from `Next up` on, then go on with %s, starting with its Trigger"
-            " check" % opts["--for"])
-    as_printed = (", line for line, translated into the user's language; commit subjects, backticked names and"
-                  " quoted requests stay as printed.")
+    show = ("end your last message with the block above, nothing after it" if "--for" not in opts else
+            "show the user the block above, then go on with %s, starting with its Trigger check" % opts["--for"])
+    as_printed = ", rendered as SKILL.md › Next up says: its Saved line included, its requests to say translated."
     if missing:
         push = ""
         if any(m.endswith(PUSHES) for m in missing):   # no other command only pushes

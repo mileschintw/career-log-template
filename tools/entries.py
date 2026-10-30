@@ -16,13 +16,35 @@ the file name without `.md` and the leading `<YYYY-MM>-`. A series is a long exp
 parts: every part, the first one included, has `series: <slug>` in its front matter, where <slug> is
 the first part's slug (the first part keeps the original path).
 
+Status: `stub`, `imported` or `consolidated`, a short note in parentheses after it if any
+(`consolidated (two gaps)`; STATUS). It is kept in the entry's front matter as `status:`, and read
+from there only.
+
+README.md's Entries table is generated from the entries' front matter (`readme` below); nothing in
+it is a record. Its columns are Period, Entry, Type and Status, one row per plain entry and one per
+series, newest first:
+- a plain entry: its period, `[<title>](<path>)`, its type and its status;
+- a series: the period from the earliest part's start to the latest part's end (either end `GAP`
+  when a part's is GAP or does not read); `**<short name>**`, the series title (the title less its
+  `: <phase>`) before ` — `, then a link per part, newest first, joined by ` · `, each part's text its
+  slug less `<series slug>-` (the part whose slug is the series slug: its start month); the parts'
+  type, or each distinct type comma-separated; the parts' status when all are the same, note
+  included, else a count per status without notes, most first (`consolidated ×5, imported ×1`).
+The rows sort as follows: rows whose period holds a `GAP` (or does not read), newest known date
+first; then the ongoing rows, newest start first; then the rest, newest end first, ties by newest
+start (a month without a day sorts below the days of that month). A series sorts by its whole period:
+with the GAP rows when a part's period holds a GAP or does not read, by the newest date any part
+sorts by; else with the ongoing rows when a part is ongoing, by its earliest start; else by its latest
+end, then its earliest start. Its parts go newest first: an ongoing part, then by the newest date a
+part's period holds, then its oldest (a GAP is unknown, not first). Ties go by path.
+
 Size: the estimated tokens of an entry are its ASCII characters / 2.7 plus 4/3 per other character,
 a little above what Claude Code's Read counted on English and on Traditional Chinese Markdown. An
 entry is over the threshold at more than THRESHOLD tokens, half of what Read returns in one call
 (25,000).
 
 - `list`: one line per entry: path, slug, series, type, org, period (and whether it is ongoing),
-  tags, README status (`- (no README row)` without one), estimated tokens (and `over threshold`),
+  tags, status (*Status* above; `-` without one), estimated tokens (and `over threshold`),
   then `one line:` and its text. `--series <slug>` lists that series' parts only, then
   `series <slug>: period <earliest start> – <latest end>`, the end `ongoing` when a part is, and
   either end `GAP` when a part's is GAP or does not read (`period -` for a series with no part). The flags below add lines after the entry lines, and without them the output is
@@ -49,12 +71,9 @@ entry is over the threshold at more than THRESHOLD tokens, half of what Read ret
   - `series <slug> has more than one ongoing part:`;
   - `series <slug> has overlapping periods:` two parts share more than the month where one ends and
     the next starts (the day, when both periods give days there);
-  - `no README row:` no row of README.md links the entry;
-  - `README row names a missing file:` a row links an entry file that does not exist;
-  - `README row differs:` the row's title, period or type differs from the entry's front matter, or
-    it lists a tag the front matter lacks (a row may list fewer tags);
-  - `README row status unknown:` its status does not start with `stub`, `imported` or
-    `consolidated` (SKILL.md › Layout);
+  - `README table not generated: README.md:<n>: <k> of its lines differ ...; run <command>`: the
+    Entries table is not the one `readme` writes from the entries now (<n> the first line that
+    differs); `README table not generated: <why>` when README.md has no place for it;
   - `ongoing entry not updated in over two months:` or `ongoing entry with no readable
     last_updated:`, from its `last_updated` (a period `GAP – ongoing` is ongoing here too);
   then the shape entries/_template.md gives an entry, where a value or line that is `GAP` or
@@ -63,7 +82,8 @@ entry is over the threshold at more than THRESHOLD tokens, half of what Read ret
   - `front matter: <entry> <field> <value> not allowed (<what is>)`: `type` other than TYPES;
     `visibility` other than public, private, nda; `period` other than `YYYY-MM – YYYY-MM` or
     `YYYY-MM – ongoing` (a day may follow the month, either end may be GAP); `last_updated` not a
-    `YYYY-MM-DD` date (an ongoing entry's is the staleness line's); a list in `period`,
+    `YYYY-MM-DD` date (an ongoing entry's is the staleness line's); `status` other than a status
+    (*Status* above, its note included; a GAP too); a list in `period`, `status`,
     `last_updated` or `series` (shown as `one slug`), which each take one value: a list `period`
     or `series` is read as none, and `series: []` passes. A field it lacks is not read;
   - `link not a repo root: <entry> <url>; root <root>`: a GitHub or GitLab URL in `links:` that
@@ -150,8 +170,8 @@ every other byte of the file as it was, its byte order mark and line ends includ
 
   python3 -I tools/entries.py new <slug> --month YYYY-MM --status stub|imported --field title=<title>
       --field period=<period> [--field <name>=<value>]... [--field-source <name>=<source>]...
-  python3 -I tools/entries.py readme-row <entry> [--status <status>]
-  python3 -I tools/entries.py readme-sort [--check]
+  python3 -I tools/entries.py readme
+  python3 -I tools/entries.py set-status <entry> <status>
   python3 -I tools/entries.py state [<entry>...]
   python3 -I tools/entries.py pending-add <entry> <text>
   python3 -I tools/entries.py period <entry> --cover YYYY-MM-DD | --ongoing
@@ -160,46 +180,38 @@ every other byte of the file as it was, its byte order mark and line ends includ
       [--distinct | --replace <n>] <wording>
   python3 -I tools/entries.py split <entry> --phase <phase> --cut [<end>..]<start>:<part>:<phase>...
   python3 -I tools/entries.py split --undo <entry> <part>...
-  python3 -I tools/entries.py diff <entry> [<part>...]
+  python3 -I tools/entries.py diff <entry> [<part>...] [--paste]
   python3 -I tools/entries.py drop <entry> --reason <reason>
 
 A text or wording that starts with `-` goes after `--`, with every flag before the `--`.
 
-- `new`: writes `entries/<YYYY-MM>-<slug>.md` from entries/_template.md, then its README row as
-  `readme-row` does. <slug> is lowercase ASCII letters and digits joined by `-`; `--month` names
+- `new`: writes `entries/<YYYY-MM>-<slug>.md` from entries/_template.md, then README.md's table as
+  `readme` does. <slug> is lowercase ASCII letters and digits joined by `-`; `--month` names
   the file (the mode says which month). `--field` sets a front matter field: title and period
   (required), type, org, my_role, collaborators, tags and links (comma-separated), visibility,
   series. An unknown start is `GAP – ongoing`, `GAP – YYYY-MM` or `GAP – GAP`. A field not given
   holds `GAP: <what>` (`my_role: GAP: role title`), tags and links `[]`, series nothing,
-  visibility `GAP`, last_updated today. Each field keeps the template's comment, except one named by
+  visibility `GAP`, last_updated today, status `--status` (the line added before the closing `---`
+  when the template has none). Each field keeps the template's comment, except one named by
   a `--field-source <name>=<source>` (org, my_role, collaborators, tags, visibility; the field given
   by `--field` too), whose comment becomes `# (<source>)`; a visibility other than GAP needs one
   (`--visibility-source <source>` is the same as `--field-source visibility=<source>`). In
   the body, `# <title>`, and `GAP:` in each of the ten prose sections (One line through Likely
   questions; after each of My contribution's labels), except the two tables, which stay as the
-  template has them, as do Past phrasings, Conflicts and Pending. Prints `created: <path>` and the
-  row's line. Exit 1, writing nothing, when the file exists (`exists: <path>`).
-- `readme-row`: writes the entry's row of README.md's Entries table (the first table with an
-  Entry column whose rows link an entry, else the first with Entry and Period columns, else the
-  first with Entry) from its front matter: period, `[<title>](<path>)`, type, every tag, and
-  `--status` (stub, imported or consolidated, a note in parentheses after it if any), or the row's
-  status as it stands without `--status` (an entry with no row needs it). The row replaces the one
-  that links the entry, or is added, and goes above the first entry row it sorts before (the
-  order below). When the table was in that order, the rows of the entry's series move with it as
-  one block, so the table stays in order.
-  Prints `readme row <added|replaced|unchanged>: README.md:<n>: <row>`. Exit 0.
-- `readme-sort`: sorts the Entries table's rows that link an entry, by their Period cells, top to
-  bottom: rows whose period holds a `GAP` (or does not read), newest known date first; then the
-  ongoing rows, newest start first; then the rest, newest end first, ties by newest start (a month
-  without a day sorts below the days of that month). The rows of a series (entries with the same
-  `series`) stay together, newest part first (an ongoing part, then by the newest date a part's
-  period holds, then its oldest; a GAP is unknown, not first), and the block sorts by the whole
-  series: with the GAP rows when a part's period holds a GAP or does not read, by the newest date
-  any part sorts by; else with the ongoing rows when a part is ongoing, by its earliest start;
-  else by its latest end, then its earliest start, newest first as above. Ties keep their order,
-  and rows that link no entry keep their places. Prints `sorted: <n> entry rows, <m> moved`, or
-  `OK: <n> entry rows in order`; exit 0. `--check` writes nothing: one `out of order: README.md:<n>: <entry>` per row
-  that would move, and exit 1.
+  template has them, as do Past phrasings, Conflicts and Pending. Prints `created: <path>` and
+  `readme`'s line. Exit 1, writing nothing, when the file exists (`exists: <path>`).
+- `readme`: writes README.md's Entries table from the entries' front matter (the table *README.md's
+  Entries table* above describes) in place of the first table whose header has an Entry column, or,
+  without one, at the end of the `## Entries` section. Once the table has a row, it drops the
+  Template's line `Entries appear here as you log them.` from that section (and a blank line, so
+  one stays between the lines around it). Every other line of README.md stays as it is.
+  Prints `readme <written|unchanged>: README.md:<first>-<last>: <n> rows`. Exit 0. Run it after any
+  change to an entry's title, period, type, series or status by hand; the commands below that change
+  them run it themselves. Exit 2, writing nothing, when README.md has neither the table nor the heading.
+- `set-status`: writes `status: <status>` in the entry's front matter (the line added before the
+  closing `---` when missing; *Status* above), then README.md's table as `readme` does. Prints
+  `status: <entry>: <status>` and `readme`'s line. Exit 0. Exit 2, writing nothing, for a status
+  not in that form or a README.md with no place for the table.
 - `state`: lines for each entry given, or for every entry without one, in this order:
   - `state: <entry>: gaps <n>; gap sections <k> of 10; pending <p> (oldest <date>)`: <n> counts
     each `GAP` outside HTML comments, front matter included; a gap section is one of the ten prose
@@ -222,10 +234,10 @@ A text or wording that starts with `-` goes after `--`, with every flag before t
   when the text starts with a date and a colon, after any leading list mark (`- `, `* `) or bold
   (`**2031-04-20**:` counts) (`leading date:`, then a `next:` line).
 - `period`: `--cover <date>` extends the period's end to the date (at the end's precision) when
-  the date is past it; `--ongoing` makes the end `ongoing`. Then it rewrites the README row as
-  `readme-row` does, the status kept. `unchanged: ...` (exit 0) when the period covers the date
+  the date is past it; `--ongoing` makes the end `ongoing`. Then it writes README.md's table as
+  `readme` does. `unchanged: ...` (exit 0) when the period covers the date
   already, is ongoing, or ends in GAP; exit 1, changing nothing, for a date before the start, a
-  period that does not read, an entry with no README row, or a series part when another part
+  period that does not read, a README.md with no place for the table, or a series part when another part
   ends later or its end is ongoing or GAP (`not the series' last part:`). When a `before the
   start:` or `not the series' last part:` refusal's date falls between two parts of the series
   (no part covers it), `between parts:` and a `next:` line follow. Every other refusal, and
@@ -259,22 +271,21 @@ A text or wording that starts with `-` goes after `--`, with every flag before t
   `entries/<cut's YYYY-MM>-<series
   slug>-<part>.md`, written as `new` writes an entry, with `series`, the title `<series title>:
   <phase>`, the period from its cut to the next (or that cut's `<end>`; the last to the entry's
-  end, or `ongoing`), and the entry's type, org, my_role, collaborators, tags, visibility and links
-  lines as they stand (a block list's lines included). Then
-  each part's README row, as `readme-row` writes it, a new part's status copied from the entry's
-  row. Prints `kept: <entry>: <title>; period <period>`, `created: <part>: <title>; period
-  <period>` per part, and the rows' lines. The facts stay in the entry: moving them is the mode's.
+  end, or `ongoing`), the entry's status, and its type, org, my_role, collaborators, tags, visibility
+  and links lines as they stand (a block list's lines included). Then README.md's table, as `readme`
+  writes it. Prints `kept: <entry>: <title>; period <period>`, `created: <part>: <title>; period
+  <period>` per part, and `readme`'s line. The facts stay in the entry: moving them is the mode's.
   Exit 2, writing nothing, when the title is a gap (`GAP`, `GAP: ...`), the period does not read
-  (or holds a GAP), the entry has no README
-  row, there is no entries/_template.md, a part's file exists or two cuts name one, a cut is not
+  (or holds a GAP), the entry has no `status:` (`set-status` gives it one), README.md has no place
+  for the table, there is no entries/_template.md, a part's file exists or two cuts name one, a cut is not
   after the one before it (the first after the start) and before the end (two parts that start in
   the same month both give days), or an `<end>` is empty, before the earlier part's start or after
   its cut.
-- `split --undo <entry> <part>...` (a rejected split): deletes each part's file and README row,
+- `split --undo <entry> <part>...` (a rejected split): deletes each part's file,
   `git rm --cached` first for one in the index (`diff` adds it), and gives the entry back its
   title, `# ` heading and series, and the period from the earliest start to the latest end of
-  the entry and its parts (`period unchanged:` when one does not read), then rewrites its README
-  row. The title: the series title as the draft has it, then HEAD's `: <phase>` when HEAD's entry
+  the entry and its parts (`period unchanged:` when one does not read), then writes README.md's
+  table as `readme` does. The title: the series title as the draft has it, then HEAD's `: <phase>` when HEAD's entry
   is a part already (HEAD's title as it stands when it holds no `: `); else the title less the `: <phase>` split added (so a title the draft
   corrected stays corrected); the series: HEAD's, or none (no
   `series:` line when HEAD's has none). An entry not in HEAD (new since the last commit) whose
@@ -282,33 +293,62 @@ A text or wording that starts with `-` goes after `--`, with every flag before t
   empty `series:`; any other one keeps both as they stand (`not in HEAD:`, then a `next:` line).
   The heading is rewritten as `split` rewrites it. Move
   the parts' content back into the entry first: the files are gone after it. Prints `restored:
-  <entry>: <title>; period <period>; series <slug or ->`, `deleted: <part>[; README row]` per
-  part, then `still names <part>: <file>:<line>: <text>` for each line `refs` finds naming a part
+  <entry>: <title>; period <period>; series <slug or ->`, `deleted: <part>` per part,
+  `readme`'s line (`readme not written: <why>` when README.md has no place for the table), then `still names <part>: <file>:<line>: <text>` for each line `refs` finds naming a part
   (point it back at the entry). Exit 2, writing nothing, when a part is named twice, is not
   another entry of the entry's series, or is in HEAD (an earlier split's part).
-- `diff <entry> [<part>...]` (consolidate step 5): `git add -N` for each one not in the index
-  (so a new part shows), then `git diff` of them, and with parts also of README.md, stories.md
-  and profile.md, printed in a `diff` code fence longer than any run of backticks in it, to be
-  pasted as printed. Each hunk header names the section of its first change, and each hunk has
-  3 lines of context. A deleted line and the added line that rewrites it (difflib's ratio of
-  their words at least 0.5) print every changed word with 8 unchanged words beside each change;
-  the rest of an unchanged run, the same in both lines, prints as `[… N words unchanged …]` when
-  that leaves out more than 8 words, as does the rest of a context line after its first 8 words,
-  and a `#` line at the top of the block explains the mark. Every added and deleted word is printed, and a line
-  added or deleted whole is printed in full. `no change: <files>` when the diff is empty. Exit 0.
+- `diff <entry> [<part>...] [--paste]` (consolidate step 5): `git add -N` for each one not in the
+  index (so a new part shows), then `git diff` of every Log file (logfiles.LOG_PATHS) against
+  the index, and `git ls-files --others` of them for new files. Prints, in this order:
+  - a `paste:` line naming the block below it, then the change list, in a `changes` code fence
+    (as the diff block below), to be pasted as printed. First the usual files: the entry, its
+    parts, README.md, stories.md, profile.md and a new file in `sources/` (an excerpt). Then each
+    other changed Log file under its own heading line, `other Log file: <file>` (`direction.md`,
+    another entry), and last each file consolidate leaves as it is, under `not consolidate's to
+    change: <file>: <why>` (`outputs/`, a file already in `sources/`, `stories/`,
+    `applications.md`, `scan-sources.md`, `config.toml`). A new file not in the index is one
+    line, `new file: <file>`, and a changed file with no text line to list (a binary, a mode
+    change) is `changed: <file>: no line to list (a binary file, or its mode)`. Each other file
+    lists every deleted line of the diff that is not blank, in file and line order, each naming
+    `<file>:<old line number>` and, in parentheses, the section it was in:
+    `changed: <where>: <old> => <new>` for a line and the added line that rewrites it (difflib's
+    ratio of their words at least 0.5), each cut as the block below cuts it;
+    `moved: <where> -> <file>:<new line number>: <text>` for a line added in a usual file with
+    the same text (a fact a split moved to a part), the text after its first 8 words cut,
+    and for a run of them in a row in both files (only blank lines, deleted or added, between them),
+    one line, `moved: <file>:<first>-<last> (<section>) -> <file>:<first>-<last>: <N> lines, the
+    first: <text>`; `deleted: <where>: <text>` for any other, in full. In a file outside the
+    usual ones, each non-blank added line no `changed:` line covers is also `added: <file>:<new
+    line number> (<section>): <text>`, after its file's other lines. A diff that only adds lines
+    to the usual files prints `(no line deleted: lines were added only)` in the fence;
+  - `size: <file>: <N> tokens, <K> KB` for each entry and part named (tokens as `list` counts them);
+  - `diff file: .build/diff/<entry's file name>.diff`, the full diff, nothing cut (rewritten on
+    each run), and `open: <command>`, a command that opens it in an editor (notepad, `open -t`,
+    `xdg-open`);
+  - the block, only when the diff has a line, and then only with one entry and at most
+    PASTE_WORDS (300) words on its changed lines, or with `--paste`: the diff in a `diff` code fence longer than any run of backticks in it, to be
+    pasted as printed. Each hunk header names the section of its first change, and each hunk has
+    3 lines of context. A rewritten line (as `changed:`) prints every changed word with 8
+    unchanged words beside each change; the rest of an unchanged run, the same in both lines,
+    prints as `[… N words unchanged …]` when that leaves out more than 8 words, as does the rest
+    of a context line after its first 8 words, and a `#` line at the top of the block explains
+    the mark. Every added and deleted word is printed, and a line added or deleted whole is
+    printed in full.
+  `no change: <entry> [<part>...]` when no Log file changed. Exit 0.
 - `drop <entry> --reason <reason>` (SKILL.md › Dropped experiences, on the user's word): deletes
-  the entry's README row (`README row: <row>`, or `none`), each Story index item that links it
+  each Story index item that links it
   (`story removed: <question type>: <item>`) and its file (`deleted: <entry>`; out of the index
   too when HEAD lacks it); appends a section `## <today> — Dropped: <title>` holding one line,
   `- Removed `<entry>` (<title>, <period>): <reason>`, to sources/import-log.md (`import log:
   ...`). When one part of its series is left, that part is a plain entry again: its title less the
-  `: <phase>` (its heading too, as `split` rewrites it), an empty `series:` and its README row
-  rewritten (`series folded: <part>: <title>; series -`), then a `next:` line and `old title:
-  <file>:<line>: <text>` for each line outside outputs/ and sources/ that names the part and holds
-  its old title. Else, when the entry was a series' first part, the earliest part left names the
-  series: `series renamed: <part>: series <slug>` for each part. When a removed item was `core` and the
+  `: <phase>` (its heading too, as `split` rewrites it) and an empty `series:` (`series folded:
+  <part>: <title>; series -`). Else, when the entry was a series' first part, the earliest part left
+  names the series: `series renamed: <part>: series <slug>` for each part. Then README.md's table as
+  `readme` writes it (`readme`'s line, or `readme not written: <why>`), and, after a fold, a `next:`
+  line and `old title: <file>:<line>: <text>` for each line outside README.md, outputs/ and sources/
+  that names the part and holds its old title. When a removed item was `core` and the
   series has parts left, a `next:` line. Last, a `next:` line and `still names: <file>:<line>:
-  <text>` for each line `refs` finds naming the entry outside outputs/ and sources/ (frozen or
+  <text>` for each line `refs` finds naming the entry outside README.md, outputs/ and sources/ (frozen or
   historical, left as they are): take the entry out of it, or delete the line when it says
   nothing else. Exit 0.
 
@@ -594,6 +634,8 @@ import glob
 import os
 import posixpath
 import re
+import shlex
+import subprocess
 import sys
 import urllib.parse
 
@@ -609,6 +651,8 @@ from logfiles import (INBOX, LOG_FILES, LOG_FOLDERS, as_list, front_matter, head
 ENTRY_PATH = re.compile(r"entries/(?!_template\.md$)[^/]+\.md")   # fullmatch, on a /-separated path
 THRESHOLD = 12500
 STATUSES = ("stub", "imported", "consolidated")
+STATUS = re.compile(r"(%s)( \(.+\))?" % "|".join(STATUSES))   # fullmatch: a status, a note in parentheses or not
+STATUS_FORM = "%s, a note in parentheses after it if any" % " | ".join(STATUSES)
 URL = re.compile(r"https?://[^\s<>\"'`\]|]+")
 MD_TARGET = re.compile(r"\]\(([^)\s]+)\)")
 PERIOD = re.compile(r"(\d{4}-\d{2}(?:-\d{2})?)(?: – (ongoing|\d{4}-\d{2}(?:-\d{2})?))?", re.I)
@@ -718,6 +762,7 @@ class Entry:
         self.ongoing = bool(span) and span[1] is None
         self.gap_ongoing = bool(re.fullmatch(r"GAP – ongoing", self.period, re.I))   # start month unknown
         self.tags = as_list(self.fields.get("tags"))
+        self.status = one_value(self.fields.get("status")).strip()
         self.one_line = section(self.text, "One line")
         self.tokens = tokens(self.text)
         self.over = self.tokens > THRESHOLD
@@ -732,44 +777,16 @@ def over_threshold(entries):
     return ["entry over threshold: %s %d tokens" % (e.path, e.tokens) for e in entries if e.over]
 
 
-# ---- README rows ----
-
-def readme_rows(root):
-    """{entry path: row cells by lowercase header} for README.md's rows that link an entry file,
-    and the link targets that name no file."""
-    path = os.path.join(root, "README.md")
-    rows, missing = {}, []
-    if not os.path.isfile(path):
-        return rows, missing
-    for table in logfiles.md_tables(read(path)):
-        if "entry" not in table.header:
-            continue
-        for row in table.dicts():
-            m = re.search(r"\[(.*)\]\(\.?/?(entries/[^)#\s]+)(?:#[^)]*)?\)", row.get("entry", ""))
-            if not m:
-                continue
-            row["title"] = m.group(1)
-            target = m.group(2)
-            if os.path.isfile(os.path.join(root, target)):
-                rows[target] = row
-            else:
-                missing.append(target)
-    return rows, missing
-
-
 # ---- Subcommands ----
 
 def cmd_list(root, series=None):
-    rows, _ = readme_rows(root)
     for e in load(root):
         if series and e.series != series:
             continue
-        row = rows.get(e.path)
-        status = row.get("status", "") if row else "- (no README row)"
         print("%s: slug %s; series %s; type %s; org %s; period %s%s; tags %s; status %s; tokens %d%s;"
               " one line: %s" % (e.path, e.slug, e.series or "-", e.fields.get("type") or "-",
                                  e.fields.get("org") or "-", e.period or "-", " (ongoing)" if e.ongoing else "",
-                                 ", ".join(e.tags) or "-", status or "-", e.tokens,
+                                 ", ".join(e.tags) or "-", e.status or "-", e.tokens,
                                  " (over threshold)" if e.over else "", e.one_line or "-"))
     return 0
 
@@ -814,27 +831,7 @@ def findings(root, today, entries=None):
                 if same_start or (before(a.span[0], b_end) and before(b.span[0], a_end)):
                     out.append(((a.path, b.path), "series %s has overlapping periods: %s (%s), %s (%s)"
                                 % (name, a.path, a.period, b.path, b.period)))
-    rows, missing = readme_rows(root)
-    out += [((), "README row names a missing file: %s" % t) for t in missing]
-    for e in entries:
-        row = rows.get(e.path)
-        if row is None:
-            out.append(((e.path,), "no README row: %s" % e.path))
-            continue
-        differ = []
-        if row["title"] != (e.fields.get("title") or ""):
-            differ.append("title %r, front matter %r" % (row["title"], e.fields.get("title") or ""))
-        if "period" in row and norm_period(row["period"]) != e.period:
-            differ.append("period %r, front matter %r" % (row["period"], e.period))
-        if "type" in row and row["type"] != (e.fields.get("type") or ""):
-            differ.append("type %r, front matter %r" % (row["type"], e.fields.get("type") or ""))
-        only_readme = sorted(set(as_list(row.get("tags"))) - set(e.tags))
-        if only_readme:
-            differ.append("tags not in front matter: %s" % ", ".join(only_readme))
-        out += [((e.path,), "README row differs: %s: %s" % (e.path, d)) for d in differ]
-        if "status" in row and not re.match(r"(%s)\b" % "|".join(STATUSES), row["status"]):
-            out.append(((e.path,), "README row status unknown: %s %r (starts with %s)"
-                        % (e.path, row["status"], ", ".join(STATUSES))))
+    out += readme_findings(root, entries)
     cutoff = months_before(today, 2)
     for e in entries:
         updated = e.fields.get("last_updated") or ""
@@ -931,7 +928,8 @@ def front_matter_findings(e):
     checks = [("type", lambda v: v in TYPES, " | ".join(TYPES)),
               ("visibility", lambda v: v in VISIBILITIES, " | ".join(VISIBILITIES + ("GAP",))),
               ("period", lambda v: period_ok(norm_period(v)), "YYYY-MM – YYYY-MM or YYYY-MM – ongoing"),
-              ("series", lambda v: True, "one slug")]
+              ("series", lambda v: True, "one slug"),
+              ("status", STATUS.fullmatch, STATUS_FORM)]
     if not (e.ongoing or e.gap_ongoing):
         checks.append(("last_updated", date_ok, "YYYY-MM-DD"))
     for field, ok, allowed in checks:
@@ -940,7 +938,7 @@ def front_matter_findings(e):
         value = e.fields[field]
         if field == "series" and value == []:   # read as no series, as it always was
             continue
-        if isinstance(value, str) and (GAP_VALUE.match(value) or ok(value.strip())):
+        if isinstance(value, str) and ((GAP_VALUE.match(value) and field != "status") or ok(value.strip())):
             continue
         out.append("front matter: %s %s %r not allowed (%s)" % (e.path, field, value, allowed))
     return out
@@ -2660,46 +2658,177 @@ def append_in_section(lines, bounds, new):
 
 # ---- README.md's Entries table ----
 
-class ReadmeTable:
-    """README.md's Entries table: the first table whose header has an Entry column and whose rows link
-    an entry (else the first with Entry and Period columns, else the first with Entry), as raw lines: header (its cells,
-    lowercased), rule (the index of its rule row) and rows (the indexes of the rows under it)."""
+README_HEADER = ("Period", "Entry", "Type", "Status")
+README_RULE = "|---|---|---|---|"
+README_COMMAND = "python3 -I <root>/tools/entries.py readme --root <root>"
+README_PLACEHOLDER = "Entries appear here as you log them."   # the Template's line for an empty Log
 
-    def __init__(self, root):
-        self.path = os.path.join(root, "README.md")
-        if not os.path.isfile(self.path):
-            raise Error("no README.md in %s" % root)
-        self.bom, self.lines = read_lines(self.path)
-        tables, i = [], 0
-        while i < len(self.lines):
-            if self.lines[i].strip().startswith("|"):
-                head = [c.strip("*` ").lower() for c in logfiles.md_cells(self.lines[i])]
-                j = i + 1
-                while j < len(self.lines) and self.lines[j].strip().startswith("|"):
-                    j += 1
-                if "entry" in head and j > i + 1 and logfiles.is_rule(logfiles.md_cells(self.lines[i + 1])):
-                    tables.append((head, i + 1, list(range(i + 2, j))))
-                i = j
-            else:
-                i += 1
-        for self.header, self.rule, self.rows in tables:   # the first that links an entry, else the first
-            if any(self.entry_of(r) for r in self.rows):
-                return
-        if tables:
-            self.header, self.rule, self.rows = next((t for t in tables if "period" in t[0]), tables[0])
-            return
-        raise Error("README.md has no table with an Entry column (| Period | Entry | Type | Tags | Status |)")
 
-    def cells(self, i):
-        return dict(zip(self.header, logfiles.md_cells(self.lines[i])))
+def entries_section(lines):
+    """(heading, end): the `## Entries` heading's index in lines and the index of the next heading (or
+    len(lines)); None without the heading."""
+    heading = next((k for k, line in enumerate(lines) if re.fullmatch(r"##\s+Entries", line.strip())), None)
+    if heading is None:
+        return None
+    return heading, next((k for k in range(heading + 1, len(lines)) if lines[k].startswith("#")), len(lines))
 
-    def entry_of(self, i):
-        """The entries/ path the row's Entry cell links, or None."""
-        m = ENTRY_LINK.search(self.cells(i).get("entry", ""))
-        return m.group(1) if m else None
 
-    def save(self):
-        write_lines(self.path, self.bom, self.lines)
+def readme_span(root):
+    """(byte order mark, lines, start, end): README.md's lines and the span [start, end) its Entries
+    table takes: the first table whose header has an Entry column, one in the `## Entries` section
+    first; without one, the empty span after the last line of that section. Error with neither."""
+    path = os.path.join(root, "README.md")
+    if not os.path.isfile(path):
+        raise Error("no README.md in %s" % root)
+    bom, lines = read_lines(path)
+    tables, section, i = [], None, 0
+    while i < len(lines):
+        if lines[i].startswith("## "):
+            section = lines[i][3:].strip()
+        if not lines[i].strip().startswith("|"):
+            i += 1
+            continue
+        j = i + 1
+        while j < len(lines) and lines[j].strip().startswith("|"):
+            j += 1
+        if "entry" in [c.strip("*` ").lower() for c in logfiles.md_cells(lines[i])]:
+            tables.append((section != "Entries", i, j))
+        i = j
+    if tables:
+        _, start, end = min(tables)
+        return bom, lines, start, end
+    section = entries_section(lines)
+    if section is None:
+        raise Error("README.md has no Entries table and no `## Entries` heading: add the heading where the table goes")
+    heading, end = section
+    while end > heading + 1 and not lines[end - 1].strip():
+        end -= 1
+    return bom, lines, end, end
+
+
+def unique(values):
+    return list(dict.fromkeys(values))
+
+
+def series_name(parts):
+    """A series' short name: its title (series_title) before ` — `, read from the part whose slug is the
+    series slug, else from the part that starts first."""
+    named = [p for p in parts if p.slug == p.series] or \
+        sorted(parts, key=lambda p: ((period_ends(p)[0] or "9999")[:7], p.path))
+    return series_title(named[0]).split(" — ")[0].strip()
+
+
+def part_label(p):
+    """A part's link text in its series' row: its slug less `<series slug>-`; for the part whose slug is
+    the series slug, its start month (its file name's when its start is GAP)."""
+    if p.slug == p.series:
+        return (period_ends(p)[0] or p.path[len("entries/"):])[:7]
+    return p.slug[len(p.series) + 1:] if p.slug.startswith(p.series + "-") else p.slug
+
+
+def series_status(parts):
+    """The parts' status when all are the same (note included), else a count per status without notes,
+    most first (`consolidated ×5, imported ×1`); a part with no status counts as `-`."""
+    statuses = [p.status or "-" for p in parts]
+    if len(set(statuses)) == 1:
+        return statuses[0]
+    names = [STATUS.fullmatch(s).group(1) if STATUS.fullmatch(s) else s for s in statuses]
+    rank = {s: k for k, s in enumerate(STATUSES[::-1])}
+    counts = sorted(unique(names), key=lambda s: (-names.count(s), rank.get(s, len(rank))))
+    return ", ".join("%s ×%d" % (s, names.count(s)) for s in counts)
+
+
+def readme_rows(entries):
+    """[(row, the entry paths it links)] of README.md's Entries table, rows without line ends: one per
+    plain entry (period, `[<title>](<path>)`, type, status) and one per series (the parts' period, its
+    short name in bold and a link per part, newest first, its type and status); newest first, as
+    row_order (a plain entry) and block_order (a series) sort them, ties by path."""
+    blocks, series = [], {}
+    for e in entries:
+        if not e.series:
+            blocks.append([e])
+        elif e.series in series:
+            series[e.series].append(e)
+        else:
+            series[e.series] = [e]
+            blocks.append(series[e.series])
+    rows = []
+    for b in blocks:
+        if not b[0].series:
+            e = b[0]
+            rows.append((row_order(e.period), [e.period, "[%s](%s)" % (e.fields.get("title") or "", e.path),
+                                               one_value(e.fields.get("type")), e.status or "-"], [e.path]))
+            continue
+        parts = sorted(b, key=lambda p: part_order(p.period), reverse=True)
+        starts, end = [period_ends(p)[0] for p in parts], experience_end(parts)
+        period = "%s – %s" % ("GAP" if None in starts else min(starts), "GAP" if end is False else end or "ongoing")
+        name = "**%s** %s" % (series_name(parts), " · ".join("[%s](%s)" % (part_label(p), p.path) for p in parts))
+        types = ", ".join(t for t in unique(one_value(p.fields.get("type")) for p in parts) if t)
+        rows.append((block_order([p.period for p in parts]), [period, name, types, series_status(parts)],
+                     [p.path for p in parts]))
+    rows.sort(key=lambda r: r[0][1], reverse=True)   # stable: ties keep the paths' order
+    rows.sort(key=lambda r: r[0][0])
+    return [(logfiles.md_row(cells), paths) for _, cells, paths in rows]
+
+
+def readme_table(rows):
+    """The Entries table's lines, without line ends: header, rule, then the rows (readme_rows)."""
+    return [logfiles.md_row(README_HEADER), README_RULE] + [row for row, _ in rows]
+
+
+def readme_findings(root, entries):
+    """[(the entry paths, line)]: check's finding when README.md's Entries table is not the one `readme`
+    writes from the entries (none for a Log with no entries and no README.md)."""
+    if not entries and not os.path.isfile(os.path.join(root, "README.md")):
+        return []
+    try:
+        _, lines, start, end = readme_span(root)
+    except Error as err:
+        return [((), "README table not generated: %s; then run %s" % (err, README_COMMAND))]
+    rows = readme_rows(entries)
+    want, have = readme_table(rows), [line.rstrip("\r\n") for line in lines[start:end]]
+    if want == have:
+        return []
+    differ = [k for k in range(max(len(want), len(have))) if want[k:k + 1] != have[k:k + 1]]
+    links = [()] * (len(want) - len(rows)) + [paths for _, paths in rows]   # the header and rule link none
+    tagged = tuple(unique(p for k in differ if k < len(links) for p in links[k]))
+    return [(tagged, "README table not generated: README.md:%d: %d of its lines differ from what the entries'"
+                     " front matter gives; run %s" % (start + differ[0] + 1, len(differ), README_COMMAND))]
+
+
+def drop_placeholder(lines):
+    """Drop the `## Entries` section's README_PLACEHOLDER line from lines, with the blank line after it
+    when the line before it is blank too. Returns the indexes dropped (none when the section has no such line)."""
+    heading, end = entries_section(lines) or (0, 0)
+    k = next((k for k in range(heading + 1, end) if lines[k].strip() == README_PLACEHOLDER), None)
+    if k is None:
+        return []
+    gone = [k] + ([k + 1] if k + 1 < len(lines) and not lines[k + 1].strip() and not lines[k - 1].strip() else [])
+    del lines[gone[0]:gone[-1] + 1]
+    return gone
+
+
+def write_readme(root):
+    """Write README.md's Entries table from the entries (readme_table), in place of the table there or
+    at the end of the `## Entries` section. Prints `readme <written|unchanged>: README.md:<first>-<last>:
+    <n> rows`."""
+    bom, lines, start, end = readme_span(root)
+    table = readme_table(readme_rows(load(root)))
+    eol = line_end(lines)
+    last = ends(lines[-1]) if end < len(lines) or start < end else eol   # a table added at the end ends with eol
+    new = [line + eol for line in table]
+    if start == end:   # a new table: a blank line before it, and after it when a line follows
+        new = [eol] + new + ([eol] if end < len(lines) and lines[end].strip() else [])
+    old = list(lines)
+    lines[start:end] = new
+    gone = drop_placeholder(lines) if len(table) > 2 else []   # an empty Log keeps the line
+    mend_ends(lines, eol, last)
+    header = start + (1 if start == end else 0)   # past the blank line a new table gets before it
+    first = header + 1 - sum(k < header for k in gone)
+    kind = "unchanged" if lines == old else "written"
+    if kind == "written":
+        write_lines(os.path.join(root, "README.md"), bom, lines)
+    print("readme %s: README.md:%d-%d: %d rows" % (kind, first, first + len(table) - 1, len(table) - 2))
 
 
 def date_key(value):
@@ -2707,8 +2836,8 @@ def date_key(value):
 
 
 def row_order(period):
-    """(group, newest-first keys) for a README row's period: GAP rows first (either end GAP, or a
-    period the tools cannot read), then ongoing rows by start, then the rest by end, then start."""
+    """(group, newest-first keys) for a row's period: GAP rows first (either end GAP, or a period the
+    tools cannot read), then ongoing rows by start, then the rest by end, then start."""
     p = norm_period(period)
     m = re.fullmatch(r"(%s) – (ongoing|%s)" % (DATE, DATE), p, re.I) or re.fullmatch(r"(%s)()" % DATE, p)
     if not m or not parse_period(p):
@@ -2721,10 +2850,9 @@ def row_order(period):
 
 
 def block_order(periods):
-    """row_order for a block of rows: one row, or a series' rows. A series sorts by its whole
-    period: with a GAP (or unreadable) part, in the GAP group by the newest date any part sorts
-    by; else, with an ongoing part, by its earliest start; else by its latest end, then its
-    earliest start. For one row it is that row's row_order."""
+    """row_order for a series' row from its parts' periods: with a GAP (or unreadable) part, in the GAP
+    group by the newest date any part sorts by; else, with an ongoing part, by its earliest start; else
+    by its latest end, then its earliest start. For one part it is that part's row_order."""
     keys = [row_order(p) for p in periods]
     if len(keys) == 1:
         return keys[0]
@@ -2737,119 +2865,32 @@ def block_order(periods):
 
 
 def part_order(period):
-    """A series part's newest-first key inside its block: ongoing parts first, then by the newest
-    date the period holds, then its oldest (a GAP end or start counts as unknown, not first)."""
+    """A series part's newest-first key inside its row: ongoing parts first, then by the newest date the
+    period holds, then its oldest (a GAP end or start counts as unknown, not first)."""
     p = norm_period(period)
     dates = re.findall(DATE, p)
     return bool(re.search(r"ongoing", p, re.I)), max(dates, default=""), min(dates, default="")
 
 
-def sort_rows(rows):
-    """[(row line, period[, series])] in the README order: each series' rows in one block, placed
-    by block_order and newest part first inside it (part_order); ties in their current order."""
-    blocks, at = [], {}
-    for r in rows:
-        series = r[2] if len(r) > 2 else None
-        if not series:
-            blocks.append([r])
-            continue
-        if series not in at:
-            at[series] = len(blocks)
-            blocks.append([])
-        blocks[at[series]].append(r)
-    keyed = []
-    for b in blocks:
-        if len(b) > 1:
-            b = sorted(b, key=lambda r: part_order(r[1]), reverse=True)   # stable, so ties keep their order
-        keyed.append((block_order([r[1] for r in b]), b))
-    keyed = sorted(keyed, key=lambda kb: kb[0][1], reverse=True)
-    return [r for _, b in sorted(keyed, key=lambda kb: kb[0][0]) for r in b]
+def set_status(root, path, status):
+    """Write `status: <status>` in the entry's front matter (added before the closing `---` when missing)."""
+    bom, lines = read_lines(os.path.join(root, path))
+    if not set_field(lines, "status", status):
+        raise Error("%s has no front matter: its status cannot be written" % path)
+    write_lines(os.path.join(root, path), bom, lines)
 
 
-def row_series(root, path):
-    """The `series` of the entry a README row links, or None (no series, or no file to read)."""
-    try:
-        return one_value(front_matter(read(os.path.join(root, path))).get("series")) or None
-    except (OSError, UnicodeError, ValueError):
-        return None
-
-
-def entry_rows(root, table):
-    """(slots, [(row line, period, series)]) for the table's rows that link an entry."""
-    slots = [i for i in table.rows if table.entry_of(i)]
-    return slots, [(table.lines[i], table.cells(i).get("period", ""), row_series(root, table.entry_of(i)))
-                   for i in slots]
-
-
-def readme_row(root, e, status=None):
-    """Write e's README row from its front matter: replace the row that links it, or add one; place
-    it above the first entry row it sorts before (sort_rows), and when the table was in order, move
-    its series' rows with it as one block. Prints `<added|replaced|unchanged>: README.md:<n>: <row>`."""
-    table = ReadmeTable(root)
-    at = next((i for i in table.rows if table.entry_of(i) == e.path), None)
-    old = table.cells(at) if at is not None else {}
-    if status is None:
-        if at is None:
-            raise Error("%s has no README row yet: give its --status (%s)" % (e.path, " | ".join(STATUSES)))
-        status = old.get("status", "")
-    values = {"period": e.period, "entry": "[%s](%s)" % (e.fields.get("title") or "", e.path),
-              "type": e.fields.get("type") or "", "tags": ", ".join(e.tags), "status": status}
-    eol, last = line_end(table.lines), ends(table.lines[-1])
-    new = logfiles.md_row([values[h] if h in values else old.get(h, "") for h in table.header]) + eol
-    before_lines = list(table.lines)
-    current = entry_rows(root, table)[1]
-    in_order = sort_rows(current) == current   # as it stood: a part's old row still holds its series' place
-    rows = table.rows
-    if at is not None:
-        del table.lines[at]
-        rows = [i if i < at else i - 1 for i in rows if i != at]
-    table.rows = rows
-    slots, others = entry_rows(root, table)
-    row = (new, values["period"], e.series or None)
-    ordered = sort_rows(others + [row])
-    after = ordered[ordered.index(row) + 1:]
-    place = next((i for i, r in zip(slots, others) if r in after), (rows[-1] + 1) if rows else table.rule + 1)
-    table.lines.insert(place, new)
-    if in_order:   # a table in order stays in order: the row's series may move as one block
-        table.rows = [i if i < place else i + 1 for i in rows] + [place]
-        table.rows.sort()
-        slots, current = entry_rows(root, table)
-        for i, (line, _, _) in zip(slots, sort_rows(current)):
-            table.lines[i] = line
-        place = table.lines.index(new, table.rule + 1)
-    mend_ends(table.lines, eol, last)
-    kind = "added" if at is None else "unchanged" if table.lines == before_lines else "replaced"
-    if kind != "unchanged":
-        table.save()
-    print("readme row %s: README.md:%d: %s" % (kind, place + 1, table.lines[place].rstrip("\r\n")))
-
-
-def cmd_readme_row(root, path, status):
-    readme_row(root, Entry(root, path), status)
+def cmd_readme(root):
+    write_readme(root)
     return 0
 
 
-def cmd_readme_sort(root, check_only):
-    table = ReadmeTable(root)
-    slots, rows = entry_rows(root, table)
-    ordered = sort_rows(rows)
-    moved = sum(1 for a, b in zip(rows, ordered) if a[0] != b[0])
-    if not moved:
-        print("OK: %d entry rows in order" % len(rows))
-        return 0
-    if check_only:
-        for i, (a, b) in zip(slots, zip(rows, ordered)):
-            if a[0] != b[0]:
-                print("out of order: README.md:%d: %s" % (i + 1, table.entry_of(i)))
-        return 1
-    eol, last = line_end(table.lines), ends(table.lines[-1])
-    for i, (line, _, _) in zip(slots, ordered):
-        table.lines[i] = line
-    mend_ends(table.lines, eol, last)
-    table.save()
-    print("sorted: %d entry rows, %d moved" % (len(rows), moved))
+def cmd_set_status(root, path, status):
+    readme_span(root)   # refuse before writing when the table cannot be written
+    set_status(root, path, status)
+    print("status: %s: %s" % (path, status))
+    write_readme(root)
     return 0
-
 
 # ---- new, pending-add, period, set-visibility ----
 
@@ -2901,12 +2942,13 @@ def cmd_new(root, slug, month, status, fields, sources, today):
     if os.path.exists(full):
         print("exists: %s (nothing written; extend it, or pick another slug)" % path)
         return 1
-    ReadmeTable(root)   # refuse before writing when the row cannot be written
+    readme_span(root)   # refuse before writing when the table cannot be written
     bom, out = from_template(root, dict(NEW_FIELDS, **fields), today, sources)
+    set_field(out, "status", status)   # a template without the field (a Log not yet upgraded) gets it too
     os.makedirs(os.path.dirname(full), exist_ok=True)
     write_lines(full, bom, out)
     print("created: %s" % path)
-    readme_row(root, Entry(root, path), status)
+    write_readme(root)
     return 0
 
 
@@ -2971,8 +3013,8 @@ def set_heading(lines, old, new, path):
 
 def fold(root, path):
     """Make path, a series' only part left, a plain entry again: its title less the `: <phase>`, its
-    heading too, an empty `series:`, and its README row; then the lines outside outputs/ and sources/
-    that still hold the old title."""
+    heading too, and an empty `series:`. Returns the `next:` and `old title:` lines for the lines
+    outside outputs/ and sources/ that still hold the old title."""
     e = Entry(root, path)
     old, title = e.fields.get("title") or "", series_title(e)
     bom, lines = read_lines(os.path.join(root, path))
@@ -2981,12 +3023,9 @@ def fold(root, path):
     set_field(lines, "series", "")
     write_lines(os.path.join(root, path), bom, lines)
     print("series folded: %s: %s; series -" % (path, title))
-    readme_row(root, Entry(root, path))
-    stale = [ref for ref in ref_lines(root, path) if old in ref[2] and not ref[0].startswith(FROZEN)]
-    if stale:
-        print("next: write its title %r in place of %r in each line below" % (title, old))
-    for rel, n, text in stale:
-        print("old title: %s:%d: %s" % (rel, n, text))
+    stale = [ref for ref in ref_lines(root, path) if old in ref[2] and not ref[0].startswith(LEFT_OUT)]
+    return (["next: write its title %r in place of %r in each line below" % (title, old)] if stale else []) + \
+        ["old title: %s:%d: %s" % ref for ref in stale]
 
 
 def cmd_split(root, path, phase, cuts, today):
@@ -3017,17 +3056,17 @@ def cmd_split(root, path, phase, cuts, today):
     for p in parts:
         if os.path.exists(os.path.join(root, p)):
             raise Error("%s exists: pick another <part> slug" % p)
-    table = ReadmeTable(root)
-    at = next((i for i in table.rows if table.entry_of(i) == path), None)
-    if at is None:
-        raise Error("%s has no README row: give it one with readme-row --status first" % path)
-    status = table.cells(at).get("status", "")
+    status = e.status
+    if not status:
+        raise Error("%s has no status: give it one with set-status first" % path)
+    readme_span(root)   # refuse before writing when the table cannot be written
     periods = ["%s – %s" % (a, b) for a, b in zip(dates, ends_)]
     bom, lines = read_lines(os.path.join(root, path))
     written = []   # every file is built before the first is written
     for p, (_, _, _, part_phase), period in zip(parts, cuts, periods[1:]):
         values = dict(NEW_FIELDS, title="%s: %s" % (title, part_phase), period=period, series=slug)
         pbom, plines = from_template(root, values, today)
+        set_field(plines, "status", status)
         for key in SPLIT_COPY:
             block, mine = field_block(lines, key), field_block(plines, key)
             if block and mine:
@@ -3035,32 +3074,25 @@ def cmd_split(root, path, phase, cuts, today):
                 plines[k:k + len(mine)] = [l.rstrip("\r\n") + ends(mine[0]) for l in block]
         written.append((p, pbom, plines, "created: %s: %s: %s; period %s" % (p, title, part_phase, period)))
     set_heading(lines, e.fields.get("title") or "", "%s: %s" % (title, phase), path)
-    for key, value in (("title", "%s: %s" % (title, phase)), ("period", periods[0]), ("series", slug)):
+    for key, value in (("title", "%s: %s" % (title, phase)), ("period", periods[0]), ("series", slug),
+                       ("status", status)):
         set_field(lines, key, value)
     write_lines(os.path.join(root, path), bom, lines)
     print("kept: %s: %s: %s; period %s" % (path, title, phase, periods[0]))
     for p, pbom, plines, line in written:
         write_lines(os.path.join(root, p), pbom, plines)
         print(line)
-    readme_row(root, Entry(root, path))
-    for p in parts:
-        readme_row(root, Entry(root, p), status)
+    write_readme(root)
     return 0
 
 
-def drop_row(root, path):
-    """Delete the README row that links path; the row, or None when it has none (or no README.md)."""
-    if not os.path.isfile(os.path.join(root, "README.md")):
-        return None
-    table = ReadmeTable(root)
-    at = next((i for i in table.rows if table.entry_of(i) == path), None)
-    if at is None:
-        return None
-    line = table.lines.pop(at)
-    if at == len(table.lines) and table.lines:   # the last line: it now ends as the deleted one did
-        table.lines[-1] = table.lines[-1].rstrip("\r\n") + ends(line)
-    table.save()
-    return line.rstrip("\r\n")
+def readme_after(root):
+    """write_readme after an entry was deleted: `readme not written: <why>` when README.md has no place
+    for the table (check then names it)."""
+    try:
+        write_readme(root)
+    except Error as err:
+        print("readme not written: %s" % err)
 
 
 def unindex(root, path):
@@ -3128,9 +3160,8 @@ def cmd_split_undo(root, path, parts):
     for p in parts:
         unindex(root, p)
         os.remove(os.path.join(root, p))
-        row = drop_row(root, p)
-        print("deleted: %s%s" % (p, "; README row" if row else ""))
-    readme_row(root, restored)
+        print("deleted: %s" % p)
+    readme_after(root)
     for p in parts:
         for rel, n, line in ref_lines(root, p):
             print("still names %s: %s:%d: %s" % (p, rel, n, line))
@@ -3275,35 +3306,217 @@ def word_diff(root, out):
     return "\n".join(res), cut
 
 
-def cmd_diff(root, paths):
-    files = list(paths) + ([f for f in ("README.md", "stories.md", "profile.md") if os.path.isfile(os.path.join(root, f))]
-                           if len(paths) > 1 else [])
+PASTE_WORDS = 300   # a one-entry diff whose changed lines hold at most this many words prints its block too
+
+
+def file_lines(root, path, rev):
+    """path's lines in the work tree (rev None) or at rev (`""`: the index), [] when it has none."""
+    if rev is None:
+        full = os.path.join(root, path)
+        if not os.path.isfile(full):
+            return []
+        with open(full, encoding="utf-8", errors="replace") as fh:
+            return fh.read().split("\n")
+    return (logfiles.git_blob(root, rev, path) or b"").decode("utf-8", "replace").split("\n")
+
+
+def diff_blocks(out):
+    """Each run of changed lines in git diff output: [(old path, new path, [(old line, text)],
+    [(new line, text)])], a path None for /dev/null."""
+    res, old, new, dels, adds, at_old, at_new, hunk = [], None, None, [], [], 0, 0, False
+    def flush():
+        if dels or adds:
+            res.append((old, new, list(dels), list(adds)))
+        dels.clear()
+        adds.clear()
+    for line in out.split("\n"):
+        if hunk and line[:1] in ("-", "+"):
+            if line[0] == "-" and adds:
+                flush()
+            if line[0] == "-":
+                dels.append((at_old, line[1:]))
+                at_old += 1
+            else:
+                adds.append((at_new, line[1:]))
+                at_new += 1
+            continue
+        if hunk and line[:1] == "\\":
+            continue
+        flush()
+        m = re.match(r"@@ -(\d+)(?:,\d+)? \+(\d+)", line)
+        if line.startswith("diff --git "):
+            hunk = False
+        elif not hunk and line.startswith("--- "):
+            old = line[6:].rstrip("\t") if line.startswith("--- a/") else None
+        elif not hunk and line.startswith("+++ "):
+            new = line[6:].rstrip("\t") if line.startswith("+++ b/") else None
+        elif m:
+            hunk, at_old, at_new = True, int(m.group(1)), int(m.group(2))
+        elif hunk:
+            at_old, at_new = at_old + 1, at_new + 1
+    flush()
+    return res
+
+
+def change_list(root, out, usual):
+    """The change list of git diff output, as (path, line), covering each non-blank deleted line:
+    `changed:` with the added line that rewrites it (pair_lines, trim_pair), `moved:` when a line
+    added elsewhere in the usual paths is the same text (a run of them in a row, to one file in the
+    same order, as one line), else `deleted:`; each `<path>:<old line>[-<last>] (<section>)`. A path
+    outside usual also gets `added: <path>:<new line> (<section>): <text>` for each non-blank line
+    added with no deleted line it rewrites."""
+    blocks, olds, news = diff_blocks(out), {}, {}
+    def where(path, n, end=None, rev=""):
+        seen = olds if rev == "" else news
+        if path not in seen:
+            seen[path] = file_lines(root, path, rev)
+        name = section_of(seen[path], n)
+        return "%s:%d%s%s" % (path, n, "-%d" % end if end else "", " (%s)" % name if name else "")
+    items, gone, pending = [], [], []   # gone: (path, n, text) deleted with no rewrite; pending: added, unpaired
+    for old, new, dels, adds in blocks:
+        paired = set()
+        for i, j in pair_lines([t for _, t in dels], [t for _, t in adds]):
+            if i is not None and j is not None:
+                was, now, _ = trim_pair(dels[i][1], adds[j][1])
+                if was.strip():   # two blank lines pair too
+                    items.append((old, dels[i][0], "changed: %s: %s => %s" % (where(old, dels[i][0]), was, now)))
+                paired.add(j)
+            elif i is not None:
+                gone.append((old or new, dels[i][0], dels[i][1]))
+        unpaired = [(n, t) for k, (n, t) in enumerate(adds) if k not in paired]
+        if new in usual:
+            pending += [(new, n, t) for n, t in unpaired]
+        else:
+            items += [(old or new, n, "added: %s: %s" % (where(new, n, rev=None), t)) for n, t in unpaired if t.strip()]
+    added = {}
+    for path, n, text in pending:
+        added.setdefault(text.strip(), []).append((path, n))
+    # a run of moves may span blank lines deleted and added between them, never a line that stayed
+    blank_gone = {(path, n) for path, n, text in gone if not text.strip()}
+    blank_added = {(path, n) for path, n, text in pending if not text.strip()}
+    for path, n, text in gone:
+        if not text.strip():
+            continue
+        to = added.get(text.strip())
+        if to:
+            items.append((path, n, (to.pop(0), text)))   # a move, folded into runs below
+        else:
+            items.append((path, n, "deleted: %s: %s" % (where(path, n), text)))
+    order = {p: k for k, p in enumerate(dict.fromkeys(b[0] or b[1] for b in blocks))}
+    out, run = [], []   # run: the moves in a row, from one file to one file, in the same order
+    def fold():
+        if run:
+            (path, a, (dest, text)), (_, b, (last, _)) = run[0], run[-1]
+            kept, _ = trim_run(WORD_TOKENS.findall(text), DIFF_CONTEXT, 0)
+            if a == b:
+                out.append((path, "moved: %s -> %s:%d: %s" % (where(path, a), dest[0], dest[1], "".join(kept))))
+            else:
+                out.append((path, "moved: %s -> %s:%d-%d: %d lines, the first: %s"
+                            % (where(path, a, b), dest[0], dest[1], last[1], len(run), "".join(kept))))
+            run.clear()
+    # an added line sorts after the deleted ones of its file: its number is in the new file
+    for item in sorted(items, key=lambda x: (order.get(x[0], 0), isinstance(x[2], str) and x[2].startswith("added: "), x[1])):
+        if isinstance(item[2], str):
+            fold()
+            out.append((item[0], item[2]))
+            continue
+        if run:
+            (path, a, ((dest, c), _)), (_, b, ((_, d), _)) = run[-1], item
+            if not (path == item[0] and dest == item[2][0][0] and all((path, k) in blank_gone for k in range(a + 1, b))
+                    and all((dest, k) in blank_added for k in range(c + 1, d)) and c < d):
+                fold()
+        run.append(item)
+    fold()
+    return out
+
+
+def open_command(path):
+    """A command that opens path in an editor on this system."""
+    if os.name == "nt":
+        return subprocess.list2cmdline(["notepad", path])
+    return "%s %s" % ("open -t" if sys.platform == "darwin" else "xdg-open", shlex.quote(path))
+
+
+USUAL = ("README.md", "stories.md", "profile.md")   # with the entry and its parts: the files consolidate changes
+# Log files consolidate leaves as they are (a new excerpt in sources/ aside), each with why
+UNTOUCHED = (("outputs/", "an output, frozen"), ("sources/", "a source, historical: consolidate only adds new excerpts"),
+             ("stories/", "a Talking points file, the user's to confirm"), ("applications.md", "another mode's file"),
+             ("scan-sources.md", "another mode's file"), ("config.toml", "the Log's settings"))
+
+
+def diff_heading(path, usual, new):
+    """(rank, heading line) for path's change-list lines: (0, None) for a usual file (a new file in
+    sources/, an excerpt, among them), (2, `not consolidate's to change: ...`) for an UNTOUCHED one,
+    else (1, `other Log file: ...`)."""
+    if path in usual or new and path.startswith("sources/"):
+        return 0, None
+    for prefix, why in UNTOUCHED:
+        if path == prefix or prefix.endswith("/") and path.startswith(prefix):
+            return 2, "not consolidate's to change: %s: %s" % (path, why)
+    return 1, "other Log file: %s" % path
+
+
+def cmd_diff(root, paths, paste):
     tracked = set(git(root, "ls-files", "--", *paths).splitlines())
     new = [p for p in paths if p not in tracked]
     if new:
         git(root, "add", "-N", "--", *new)
-    out = git(root, "-c", "diff.suppressBlankEmpty=false", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--no-relative", "--src-prefix=a/",
-              "--dst-prefix=b/", "-U3", "--", *files)
-    if not out.strip():
-        print("no change: %s" % " ".join(files))
+    out = git(root, "-c", "diff.suppressBlankEmpty=false", "-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--no-relative", "--src-prefix=a/",
+              "--dst-prefix=b/", "--no-renames", "-U3", "--", *logfiles.LOG_PATHS)
+    changed = [p for p in git(root, "diff", "--name-only", "--no-renames", "--", *logfiles.LOG_PATHS).splitlines() if p]
+    others = [p for p in git(root, "ls-files", "--others", "--exclude-standard", "--", *logfiles.LOG_PATHS).splitlines() if p]
+    if not changed and not others:
+        print("no change: %s" % " ".join(paths))
         return 0
-    out, cut = word_diff(root, out.rstrip("\r\n"))
-    if cut:
-        out = "# [… N words unchanged …]: N unchanged words this diff leaves out; it shows every added and deleted word\n" + out
-    f = fence(out)
-    print("%sdiff\n%s\n%s" % (f, out, f))
+    out = out.rstrip("\r\n")
+    usual = set(paths) | set(USUAL)
+    files = {p: [] for p in changed}   # each changed file's change-list lines, in the diff's order, then the untracked
+    for path, line in change_list(root, out, usual):
+        files[path].append(line)
+    with_lines = {p for b in diff_blocks(out) for p in b[:2]}
+    for path in changed:
+        if path not in with_lines:
+            files[path].append("changed: %s: no line to list (a binary file, or its mode)" % path)
+    for path in others:
+        files[path] = ["new file: %s" % path]
+    # the usual files' lines first, then each other file under its heading, the untouched ones last
+    lines = []
+    for path in sorted(files, key=lambda p: diff_heading(p, usual, p in others)[0]):   # stable: the diff's order within a rank
+        heading = diff_heading(path, usual, path in others)[1]
+        lines += ([heading] if heading else []) + files[path]
+    changes = "\n".join(lines) or "(no line deleted: lines were added only)"
+    f = fence(changes)
+    print("paste: paste the lines below, from `%schanges` to the closing `%s`, into your reply whole, as"
+          " printed, every line, before the rules" % (f, f))
+    print("%schanges\n%s\n%s" % (f, changes, f))
+    for p in paths:
+        text = "\n".join(file_lines(root, p, None))
+        print("size: %s: %d tokens, %.1f KB" % (p, tokens(text), len(text.encode("utf-8")) / 1024))
+    rel = ".build/diff/%s.diff" % posixpath.splitext(posixpath.basename(paths[0]))[0]
+    full = os.path.join(root, *rel.split("/"))
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    with open(full, "w", encoding="utf-8", newline="") as fh:
+        fh.write(out + "\n")
+    print("diff file: %s" % rel)
+    print("open: %s" % open_command(os.path.abspath(full)))
+    block, cut = word_diff(root, out)
+    words = sum(len(t.split()) for _, _, dels, adds in diff_blocks(out) for _, t in dels + adds)
+    if out and (paste or (len(paths) == 1 and words <= PASTE_WORDS)):   # none when only new files changed
+        if cut:
+            block = "# [… N words unchanged …]: N unchanged words this diff leaves out; it shows every added and deleted word\n" + block
+        f = fence(block)
+        print("%sdiff\n%s\n%s" % (f, block, f))
     return 0
 
 
 FROZEN = ("outputs/", "sources/")   # drop leaves their lines as they are: frozen or historical
+LEFT_OUT = FROZEN + ("README.md",)   # and the generated table, which drop writes itself
 
 
 def cmd_drop(root, path, reason, today):
     e = Entry(root, path)
     title = e.fields.get("title") or ""
     parts = [p for p in entry_paths(root) if p != path and e.series and Entry(root, p).series == e.series]
-    row = drop_row(root, path)
-    print("README row: %s" % (row or "none"))
     core = False
     if story_index(root) is not None:
         sf = StoriesFile(root)
@@ -3328,7 +3541,7 @@ def cmd_drop(root, path, reason, today):
         pass   # a Log that is no git repository
     os.remove(os.path.join(root, path))
     print("deleted: %s" % path)
-    left = [ref for ref in ref_lines(root, path) if not ref[0].startswith(FROZEN)]   # before the import log names it
+    left = [ref for ref in ref_lines(root, path) if not ref[0].startswith(LEFT_OUT)]   # before the import log names it
     log = os.path.join(root, "sources", "import-log.md")
     if os.path.isfile(log):
         bom, lines = read_lines(log)
@@ -3343,8 +3556,9 @@ def cmd_drop(root, path, reason, today):
                                                               eol, line + eol]
     write_lines(log, bom, lines)
     print("import log: sources/import-log.md: %s" % line)
+    folded = []
     if len(parts) == 1:   # one part left: a plain entry again
-        fold(root, parts[0])
+        folded = fold(root, parts[0])
     elif parts and e.series == e.slug:   # the series' first part: the earliest part left names the series now
         first = min(parts, key=lambda p: (parse_period(Entry(root, p).period) or ("9999",))[0][:7] + p)
         for p in parts:
@@ -3352,6 +3566,9 @@ def cmd_drop(root, path, reason, today):
             set_field(plines[1], "series", slug_of(first))
             write_lines(os.path.join(root, p), *plines)
             print("series renamed: %s: series %s" % (p, slug_of(first)))
+    readme_after(root)
+    for line in folded:
+        print(line)
     if core and parts:
         print("next: core went with it; the experience has parts left: python3 -I <root>/tools/entries.py story-core"
               " <part> on --root <root>, on the user's word")
@@ -3447,16 +3664,11 @@ def cmd_period(root, path, cover, ongoing):
             for line in gap or ["next: " + LEAVE_PERIOD % "the periods as they are"]:
                 print(line)
             return 1
-    try:   # the row is rewritten after the period: refuse before writing when it cannot be
-        table = ReadmeTable(root)
+    try:   # the table is written after the period: refuse before writing when it cannot be
+        readme_span(root)
     except Error as err:
-        print("readme row not writable: %s (nothing changed)" % err)
+        print("readme not writable: %s (nothing changed)" % err)
         print("next: " + LEAVE_PERIOD % "the period as it is")
-        return 1
-    if not any(table.entry_of(i) == path for i in table.rows):
-        print("no README row: %s (nothing changed)" % path)
-        print("next: python3 -I <root>/tools/entries.py readme-row %s --status <its status> --root <root>, then"
-              " this period command again" % path)
         return 1
     new = None
     if end.lower() == "ongoing":
@@ -3483,7 +3695,7 @@ def cmd_period(root, path, cover, ongoing):
     set_field(lines, "period", new)
     write_lines(full, bom, lines)
     print("period: %s: %s to %s" % (path, e.period, new))
-    readme_row(root, Entry(root, path))
+    write_readme(root)
     return 0
 
 
@@ -3711,7 +3923,7 @@ VALUE_FLAGS = ("--series", "--today", "--type", "--month", "--status", "--field"
                "--source", "--replace", "--cover", "--date", "--window", "--marker", "--label", "--summary", "--scope",
                "--phase", "--cut", "--reason")
 SWITCHES = ("--consolidated", "--check", "--distinct", "--ongoing", "--course-work", "--remove", "--talking-points",
-            "--application-questions", "--undo")
+            "--application-questions", "--undo", "--paste")
 REPEATED = ("--type", "--field", "--field-source", "--marker", "--cut")
 FLAGS = {   # each subcommand's flags; --root is every one's
     "list": {"--series", "--date", "--window", "--course-work", "--today"}, "check": {"--consolidated", "--today"},
@@ -3719,12 +3931,12 @@ FLAGS = {   # each subcommand's flags; --root is every one's
     "story-leads": {"--type", "--check"},
     "story-add": {"--marker", "--label", "--summary"}, "story-confirm": {"--type"}, "answer-row": {"--angle"},
     "answer-row-add": {"--scope"}, "answer-set": {"--angle", "--remove"},
-    "new": {"--month", "--status", "--field", "--field-source", "--visibility-source", "--today"}, "readme-row": {"--status"},
-    "readme-sort": {"--check"}, "state": {"--today"}, "pending-add": {"--today"}, "period": {"--cover", "--ongoing"},
+    "new": {"--month", "--status", "--field", "--field-source", "--visibility-source", "--today"},
+    "state": {"--today"}, "pending-add": {"--today"}, "period": {"--cover", "--ongoing"},
     "set-visibility": {"--source", "--today"}, "phrasing-add": {"--angle", "--source", "--distinct", "--replace"},
-    "split": {"--phase", "--cut", "--undo", "--today"}, "drop": {"--reason", "--today"}}
-TAKES = {"list": 0, "rulings-hits": 0, "story-coverage": 0, "story-wordings": 0, "readme-sort": 0, "refs": 1,
-         "links-since": 1, "story-candidates": 1, "story-stale": 1, "story-finish": 1, "new": 1, "readme-row": 1,
+    "split": {"--phase", "--cut", "--undo", "--today"}, "diff": {"--paste"}, "drop": {"--reason", "--today"}}
+TAKES = {"list": 0, "rulings-hits": 0, "story-coverage": 0, "story-wordings": 0, "readme": 0, "refs": 1,
+         "links-since": 1, "story-candidates": 1, "story-stale": 1, "story-finish": 1, "new": 1, "set-status": 2,
          "period": 1, "story-wording-add": 2, "phrasing-add": 2, "pending-add": 2, "set-visibility": 2,
          "story-type-add": 1, "story-add": 2, "story-core": 2, "story-confirm": 1, "answer-row": 1,
          "answer-row-add": 1, "answer-set": 2, "drop": 1,
@@ -3789,8 +4001,8 @@ def main(argv):
              " [--window <years>] [--course-work] |"
              " check [--consolidated <entry>...] | refs <entry> | links-since <entry> | rulings-hits |"
              " new <slug> --month YYYY-MM --status stub|imported --field title=<title> --field period=<period>"
-             " [--field <name>=<value>]... [--field-source <name>=<source>]... | readme-row <entry> [--status <status>] |"
-             " readme-sort [--check] | state [<entry>...] | pending-add <entry> <text> |"
+             " [--field <name>=<value>]... [--field-source <name>=<source>]... | readme | set-status <entry> <status> |"
+             " state [<entry>...] | pending-add <entry> <text> |"
              " period <entry> --cover YYYY-MM-DD|--ongoing | set-visibility <entry> public|private|nda [--source <source>] |"
              " phrasing-add <entry> --angle <angle> --source <citation> [--distinct|--replace <n>] <wording> |"
              " story-coverage [--type <question type>]... | story-candidates <question type> |"
@@ -3804,7 +4016,7 @@ def main(argv):
              " answer-row-add <question type> --scope shared|per-angle|per-company |"
              " answer-set <question type> [--angle <angle>] [--remove] <path> |"
              " split <entry> --phase <phase> --cut [<end>..]<start>:<part>:<phase>... | split --undo <entry> <part>... |"
-             " diff <entry> [<part>...] | drop <entry> --reason <reason>"
+             " diff <entry> [<part>...] [--paste] | drop <entry> --reason <reason>"
              % ("py -3" if os.name == "nt" else "python3"))
     try:
         root, argv = logfiles.split_root(argv, __file__)
@@ -3932,8 +4144,8 @@ def main(argv):
             return cmd_story_wording_add(root, *rest)
         if cmd == "story-wordings":
             return cmd_story_wordings(root, opts.get("--type", []))
-        if cmd == "readme-sort":
-            return cmd_readme_sort(root, "--check" in opts)
+        if cmd == "readme":
+            return cmd_readme(root)
         if cmd == "new":
             month, status = opts.get("--month") or "", opts.get("--status")
             if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
@@ -3951,7 +4163,7 @@ def main(argv):
         if cmd == "state":
             return cmd_state(root, [entry_arg(root, a) for a in rest], today)
         if cmd == "diff":
-            return cmd_diff(root, [entry_arg(root, a) for a in rest])
+            return cmd_diff(root, [entry_arg(root, a) for a in rest], "--paste" in opts)
         if cmd == "split":
             paths = [entry_arg(root, a) for a in rest]
             if "--undo" in opts:
@@ -3969,11 +4181,10 @@ def main(argv):
             if not (opts.get("--reason") or "").strip() or len(opts["--reason"].splitlines()) > 1:
                 return bad("drop takes --reason <one line: what the user said, and when>")
             return cmd_drop(root, path, opts["--reason"], today)
-        if cmd == "readme-row":
-            status = opts.get("--status")
-            if status is not None and not re.match(r"(%s)\b" % "|".join(STATUSES), status):
-                return bad("--status starts with %s" % ", ".join(STATUSES))
-            return cmd_readme_row(root, path, status)
+        if cmd == "set-status":
+            if not STATUS.fullmatch(rest[1]):
+                return bad("status %r: %s" % (rest[1], STATUS_FORM))
+            return cmd_set_status(root, path, rest[1])
         if cmd == "pending-add":
             return cmd_pending_add(root, path, rest[1], today)
         if cmd == "period":

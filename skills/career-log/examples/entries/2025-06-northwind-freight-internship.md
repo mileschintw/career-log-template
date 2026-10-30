@@ -9,6 +9,7 @@ tags: [go, python, postgresql, redis, kafka, feature-flags, latency]
 visibility: public  # (user, 2025-10-02)
 links: [https://git.example.com/northwind/quotes, https://git.example.com/northwind/reconciler]
 last_updated: 2025-10-02
+status: consolidated (two gaps)
 ---
 
 # Northwind Freight — Software Engineering Intern, Quotes team

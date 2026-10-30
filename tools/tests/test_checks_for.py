@@ -217,11 +217,12 @@ class Kinds(unittest.TestCase):
     def test_kinds(self):
         for path, want in [("tools/entries.py", "engine"), ("docs/guide.md", "engine"),
                            ("docs/social-preview/banner.svg", "engine"), ("docs/social-preview/x.png", "not engine"),
-                           (".export-allow", "engine"), ("maintainer/readiness.py", "engine"),
+                           (".export-allow", "engine"), ("maintainer/coord.py", "engine"),
                            ("docs/maintaining-tests.md", "engine"), (".github/workflows/x.yml", "engine"),
                            (".export-deny", "guard"), (".export-cleared", "guard"),
-                           ("docs/coordination/plan.md", "coordination"), ("entries/2024-01-x.md", "not engine"),
-                           ("entries/_template.md", "engine")]:
+                           ("entries/2024-01-x.md", "not engine"),
+                           ("entries/_template.md", "engine"), (".claude/settings.json", "engine"),
+                           ("docs/agents/issue-tracker.md", "engine"), (".claude/worktrees/x/a.md", "not engine")]:
             self.assertEqual(checks_for.kind(path, self.root), want, path)
 
     def test_allow_read_from_the_export(self):
@@ -242,12 +243,12 @@ class InATemplate(unittest.TestCase):
         shutil.rmtree(self.root, ignore_errors=True)
 
     def test_missing_script_left_out(self):
-        lines = checks_for.report(["maintainer/readiness.py", "tools/tests/test_entries.py"], self.root)
-        self.assertFalse(any("test_readiness" in l for l in lines))
+        lines = checks_for.report(["maintainer/coord.py", "tools/tests/test_entries.py"], self.root)
+        self.assertFalse(any("test_coord" in l for l in lines))
         self.assertTrue(any("test_entries.py" in l for l in lines if l.startswith("run: ")))
 
     def test_source_only_engine_paths(self):
-        self.assertEqual(checks_for.kind("maintainer/readiness.py", self.root), "not engine")
+        self.assertEqual(checks_for.kind("maintainer/coord.py", self.root), "not engine")
         self.assertEqual(checks_for.kind(".github/workflows/x.yml", self.root), "not engine")
 
     def test_no_allow(self):

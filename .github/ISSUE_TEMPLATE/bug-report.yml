@@ -1,0 +1,57 @@
+name: Bug report
+description: The agent, a mode or a script in the Template did something wrong
+title: "<mode or script>: <what went wrong>"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Issues are public.** Remove personal content before posting: names, employers, projects, Log entries, postings, paths with your username.
+        Replace each with a placeholder such as `<employer>`.
+  - type: input
+    id: version
+    attributes:
+      label: Template version
+      description: The two lines of your repo's `tools/TEMPLATE_VERSION` (the release, then its source commit), on one line. If that file is missing, the date of your repo's first commit.
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Agent and model
+      description: For example Claude Code with Sonnet, or Codex with its model.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS and shell
+      description: For example Windows 11 with PowerShell 7, macOS 15 with zsh, Ubuntu 24.04 with bash.
+    validations:
+      required: true
+  - type: input
+    id: mode
+    attributes:
+      label: Mode
+      description: The mode that was running (log, fit, write, scan, setup, upgrade, ...), or the script you ran.
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+      description: What the agent or script did, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+      description: What you asked or ran, in order, so it can be reproduced.
+    validations:
+      required: true
+  - type: textarea
+    id: check
+    attributes:
+      label: Trigger check output
+      description: The output of `python3 -I tools/check.py <mode>` run in your Log (Windows `py -3 -I`), with personal content removed. Leave it empty for upgrade and guide, which run no check.
+      render: text

@@ -1508,7 +1508,7 @@ class ConfigCheckTest(unittest.TestCase):
 
 
 REPO = os.path.dirname(os.path.dirname(HERE))
-README_HEAD = "# Log\n\n## Entries\n\n| Period | Entry | Type | Tags | Status |\n|---|---|---|---|---|\n"
+README_HEAD = "# Log\n\n## Entries\n\n| Period | Entry | Type | Status |\n|---|---|---|---|\n"
 
 
 class ModeStateTest(unittest.TestCase):
@@ -1704,8 +1704,8 @@ class SessionTest(unittest.TestCase):
             f.write(text)
 
     def entry(self, status):
-        self.write("entries/2031-01-widget.md", "---\ntitle: Widget\nperiod: 2031-01\n---\n\n# Widget\n")
-        self.write("README.md", README_HEAD + "| 2031-01 | [Widget](entries/2031-01-widget.md) | project | go | %s |\n" % status)
+        self.write("entries/2031-01-widget.md", "---\ntitle: Widget\nperiod: 2031-01\nstatus: %s\n---\n\n# Widget\n" % status)
+        self.write("README.md", README_HEAD + "| 2031-01 | [Widget](entries/2031-01-widget.md) | project | stub |\n")
 
     def git(self, *args, env=None):
         subprocess.run(["git", "-C", self.root] + list(args), check=True, capture_output=True,
@@ -1727,7 +1727,7 @@ class SessionTest(unittest.TestCase):
         return check.done(list(args), root=self.root)
 
     def next_line(self, mode):
-        return next(l for l in self.done(mode)[1] if l.startswith("Next:"))
+        return next((l for l in self.done(mode)[1] if l.startswith("Next:")), None)
 
     # ---- mode start ----
 
@@ -1781,10 +1781,10 @@ class SessionTest(unittest.TestCase):
                 if mode != "setup":   # consolidate comes again while an entry is still imported
                     self.entry("consolidated" if mode == "consolidate" else "imported")
                 line = self.next_line(mode)
-                if row["next"] == "-":
-                    self.assertTrue(line.startswith("Next: none in this flow."), line)
-                else:
-                    self.assertTrue(line.startswith("Next: `%s`" % row["next"]), line)
+                if row["next"] == "-":   # the flow's last step: the block names no next step
+                    self.assertIsNone(line)
+                    continue
+                self.assertTrue(line.startswith("Next: `%s`" % row["next"]), line)
                 self.assertIn(row["why"].rstrip("."), line)
 
     def test_fit_with_no_posting_names_no_next_step(self):
@@ -1794,7 +1794,7 @@ class SessionTest(unittest.TestCase):
         code, lines = self.done("fit", "--no-posting")
         self.assertEqual(code, 0)
         self.assertNotIn("posting fits", "\n".join(lines))
-        self.assertIn("Next: no fixed step after `fit`; pick what you need from the modes below.", lines)
+        self.assertFalse(any(l.startswith("Next:") for l in lines), lines)
         self.assertEqual(self.done("write", "--no-posting")[0], 2)
 
     def test_setup_skips_steps_already_done(self):
@@ -1810,7 +1810,7 @@ class SessionTest(unittest.TestCase):
     def test_consolidate_again_while_an_entry_is_imported(self):
         self.entry("imported")
         self.assertTrue(self.next_line("consolidate").startswith(
-            'Next: `consolidate` (say "consolidate the <project> entry"). Entries still marked'), self.next_line("consolidate"))
+            'Next: `consolidate` (say "consolidate the <project> entry"). Entries whose status'), self.next_line("consolidate"))
         self.entry("consolidated (two gaps)")
         self.assertTrue(self.next_line("consolidate").startswith("Next: `stories`"))
 
@@ -1869,6 +1869,8 @@ class SessionTest(unittest.TestCase):
         self.assertEqual(out[-2], 'Also available: `rank` (say "rank these career fair employers"), `audit` (say'
                                   ' "audit my career log"), `guide` (say "what next?")')
         self.assertTrue(out[-1].startswith("next: end your last message with the block above"))
+        self.assertIn("as SKILL.md › Next up says", out[-1])
+        self.assertNotIn("line for line", out[-1])
 
     def test_also_available_with_no_entries_is_the_guide(self):
         _, out = self.done("setup")
@@ -1877,7 +1879,7 @@ class SessionTest(unittest.TestCase):
     def test_mode_in_no_flow(self):
         self.entry("consolidated")
         _, out = self.done("audit")
-        self.assertIn("Next: no fixed step after `audit`; pick what you need from the modes below.", out)
+        self.assertFalse(any(l.startswith("Next:") for l in out), out)   # no fixed step: no line for it
         self.assertNotIn("`audit` (say", out[-2])
         self.assertIn(check.FRESH, out)
 
@@ -1887,7 +1889,7 @@ class SessionTest(unittest.TestCase):
         self.assertIn("Next: go back to `write` in this session: setup ran for that request.", out)
         self.assertNotIn(check.FRESH, out)
         self.assertFalse(any(l.startswith("Also available") for l in out))
-        self.assertTrue(out[-1].startswith("next: show the user the block above, from `Next up` on, then go on with"
+        self.assertTrue(out[-1].startswith("next: show the user the block above, then go on with"
                                            " write, starting with its Trigger check"), out[-1])
 
     def test_log_and_unattended_print_nothing(self):
@@ -1994,8 +1996,13 @@ class SessionTest(unittest.TestCase):
         self.git("add", "-A")
         self.git("commit", "-qm", "fit(åcme-dév): 2 gaps")
         _, out = self.done("fit", "--since", "%s@%d" % (start, 1000000000))
-        self.assertEqual(out[1], "Saved: 1 commit(s) in the Log:")
-        self.assertTrue(out[2].endswith(" fit(åcme-dév): 2 gaps"), out[2])
+        self.assertEqual(out[1:3], ["Saved: 1 commit; its subject:", "  fit(åcme-dév): 2 gaps"])   # no hash
+        self.write("direction.md", "c\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "direction: remote only")
+        _, out = self.done("fit", "--since", "%s@%d" % (start, 1000000000))
+        self.assertEqual(out[1:4], ["Saved: 2 commits; their subjects:", "  direction: remote only",
+                                    "  fit(åcme-dév): 2 gaps"])
         _, out = self.done("fit", "--since", "%s@99999999999" % start)
         self.assertEqual(out[1], "Saved: no commit (this mode changed nothing in the Log)")
         _, out = self.done("fit", "--since", "nosuchsha@1")

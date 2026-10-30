@@ -460,6 +460,46 @@ class Source(unittest.TestCase):
         write(root, {"tools/config.py": "raise SystemExit(3)\n"})   # no lines at all is no all-clear
         self.assertEqual([k for k, _ in guide.check_direction(root, False)], ["migrate"])
 
+    def test_030_guide_moves_the_status_and_writes_the_table(self):
+        # #574: an entry's status moves from its README row to its front matter, then the table is generated
+        path = os.path.join(REPO, "docs", "upgrades", "upgrade-0.3.0.py")
+        spec = importlib.util.spec_from_file_location("upgrade_030", path)
+        guide = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guide)
+        if not hasattr(guide, "check_status"):
+            self.skipTest("the 0.3.0 guide no longer holds #574's checks")
+        root = tempfile.mkdtemp()
+        self.addCleanup(rmtree, root)
+        os.makedirs(os.path.join(root, "tools"))
+        for name in ("entries.py", "logfiles.py"):
+            shutil.copy(os.path.join(TOOLS, name), os.path.join(root, "tools", name))
+        fm = "---\r\ntitle: %s\r\ntype: project\r\nperiod: %s\r\nlast_updated: 2026-10-01\r\n---\r\n\r\n# %s\r\n"
+        write(root, {"entries/2025-01-widget.md": fm % ("Widget", "2025-01 – 2025-06", "Widget"),
+                     "entries/2024-01-lamp.md": fm % ("Lamp", "2024-01 – 2024-02", "Lamp"),
+                     "README.md": "# Log\n\n## Entries\n\n| Period | Entry | Type | Tags | Status |\n|---|---|---|---|---|\n"
+                                  "| 2025-01 – 2025-06 | [Widget](entries/2025-01-widget.md) | project | go |"
+                                  " consolidated (two gaps) |\n| 2024-01 – 2024-02 | [Lamp](entries/2024-01-lamp.md) |"
+                                  " project | | done |\n| - | a note | | | |\n"})
+        self.assertEqual(guide.check_status(root, False), [
+            ("ask", "entries/2024-01-lamp.md: no status: its README row's 'done' is not a status"),
+            ("apply", "entries/2025-01-widget.md: status: consolidated (two gaps), from its README row")])
+        self.assertEqual(guide.check_readme(root, False),
+                         [("ask", "README.md:9: - | a note |  |  | : links no entry, and the generated table leaves it out")])
+        self.assertEqual(guide.check_status(root, True)[1][0], "done")
+        with open(os.path.join(root, "entries", "2025-01-widget.md"), encoding="utf-8", newline="") as f:
+            self.assertIn("last_updated: 2026-10-01\r\nstatus: consolidated (two gaps)\r\n---\r\n", f.read())
+        write(root, {"entries/2024-01-lamp.md": (fm % ("Lamp", "2024-01 – 2024-02", "Lamp")).replace(
+            "---\r\n\r\n", "status: stub\r\n---\r\n\r\n")})
+        self.assertEqual(guide.check_status(root, False), [])
+        self.assertEqual(guide.check_readme(root, False)[0][0], "ask")   # the table waits for the answer
+        write(root, {"README.md": "# Log\n\n## Entries\n\n| Period | Entry | Type | Tags | Status |\n|---|---|---|---|---|\n"})
+        self.assertEqual(guide.check_readme(root, False), [
+            ("apply", "README.md: Entries table in the old layout, or not generated from the entries yet")])
+        self.assertEqual(guide.check_readme(root, True), [("done", "README.md: readme written: README.md:5-8: 2 rows")])
+        self.assertEqual(guide.check_readme(root, False), [])
+        write(root, {"README.md": "# Log\n"})
+        self.assertEqual([k for k, _ in guide.check_readme(root, False)], ["migrate"])
+
     def test_020_guide_reviews_a_sponsorship_need_in_other_words(self):
         # #284: a need for visa sponsorship with no Visa sponsorship needed line is a review: line
         spec = importlib.util.spec_from_file_location("upgrade_020", os.path.join(REPO, "docs", "upgrades", "upgrade-0.2.0.py"))

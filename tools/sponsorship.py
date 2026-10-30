@@ -57,8 +57,15 @@ A record is reused while it is less than REUSE_DAYS days old, then looked up aga
   name (the name searched goes in `sources`' `name`), and `add` replaces the record. An --again
   employer whose record has records under its own name, is unanswered, or does not exist prints as
   it would without --again.
-- `add`: reads a result file, one JSON object per line: `employer`, `kind`, `records` and the fields
-  of OPTIONAL, as above.
+- `add`: reads a result file, one JSON object per line, per employer and kind, with these fields
+  (each as the records above give it) and no `date`, which `add` sets (--date):
+    `employer`   always: the name its `lookup:` line gives
+    `kind`       always: `lca` or `perm`
+    `records`    always: the records found, [] for none found or unanswered
+    `sources`    on an answered line, at least one
+    `data_date`  on an answered line
+    `parent`     only when the records are a parent company's
+    `unanswered` only when no read answered the line (records [], no data_date or parent)
   It checks every line (one `bad: line <n>: <why>` line each, exit 1, writing nothing), then writes
   each into the records dated --date, in place of the one its employer and kind had; an unanswered line
   leaves an answered one in place (`kept: <employer> | <kind> | <its date>, unanswered now`). It prints one
@@ -367,7 +374,7 @@ def cmd_add(root, date, src):
             continue
         why = problem(item) or missing(item)
         if not why and "date" in item:
-            why = "date is --date's, not the result's"
+            why = 'remove "date": add sets it (--date, default today)'
         if not why and (employer_key(item["employer"]), item["kind"]) in seen:
             why = "%s | %s is on an earlier line" % (item["employer"], item["kind"])
         if why:

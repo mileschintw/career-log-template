@@ -16,11 +16,11 @@ TODAY = "2031-06-15"
 
 
 def entry(title="Widget Sorter", period="2031-01 – 2031-03", tags="[go, kafka]", series=None,
-          one_line="Sorted widgets.", last_updated="2031-03-01", links="[]", type_="project", body=""):
-    return ("---\ntitle: %s\ntype: %s\nperiod: %s\norg: personal\n%stags: %s\nlinks: %s\nlast_updated: %s\n---\n\n"
+          one_line="Sorted widgets.", last_updated="2031-03-01", links="[]", type_="project", body="", status=None):
+    return ("---\ntitle: %s\ntype: %s\nperiod: %s\norg: personal\n%stags: %s\nlinks: %s\nlast_updated: %s\n%s---\n\n"
             "# %s\n\n## One line\n<!-- a comment -->\n%s\n\n## Context\n%s\n"
             % (title, type_, period, "series: %s\n" % series if series else "", tags, links, last_updated,
-               title, one_line, body))
+               "status: %s\n" % status if status is not None else "", title, one_line, body))
 
 
 def row(path, title="Widget Sorter", period="2031-01 – 2031-03", tags="go, kafka", status="consolidated",
@@ -28,7 +28,7 @@ def row(path, title="Widget Sorter", period="2031-01 – 2031-03", tags="go, kaf
     return "| %s | [%s](%s) | %s | %s | %s |\n" % (period, title, path, type_, tags, status)
 
 
-README_HEAD = "# Log\n\n## Entries\n\n| Period | Entry | Type | Tags | Status |\n|---|---|---|---|---|\n"
+README_HEAD = "# Log\n\n## Entries\n\n| Period | Entry | Type | Status |\n|---|---|---|---|\n"
 
 
 class Log(unittest.TestCase):
@@ -56,6 +56,16 @@ class Log(unittest.TestCase):
 
     def check(self):
         return self.run_tool("check", "--root", self.root, "--today", TODAY)
+
+    def read_file(self, path):
+        with open(os.path.join(self.root, path), encoding="utf-8", newline="") as f:
+            return f.read()
+
+    def readme(self):
+        """README.md with the Entries table `readme` writes from the entries as they are now."""
+        self.write("README.md", README_HEAD)
+        with redirect_stdout(io.StringIO()):
+            entries.write_readme(self.root)
 
     def git(self, *args):
         subprocess.run(["git", "-C", self.root, "-c", "user.name=t", "-c", "user.email=t@example.com",
@@ -123,11 +133,11 @@ class ReadingTest(Log):
 class ListTest(Log):
     def setUp(self):
         super().setUp()
-        self.write("entries/2031-01-widget.md", entry(series="widget", period="2031-01 – 2031-03"))
+        self.write("entries/2031-01-widget.md", entry(series="widget", period="2031-01 – 2031-03", status="imported (gaps)"))
         self.write("entries/2031-04-widget-2.md", entry(series="widget", period="2031-04 – ongoing",
                                                         one_line="Sorted more widgets."))
         self.write("entries/2030-05-lamp.md", entry(title="Lamp Fixer", period="2030-05 – 2030-06"))
-        self.write("README.md", README_HEAD + row("entries/2031-01-widget.md", status="imported (gaps)"))
+        self.readme()
 
     def test_list_lines(self):
         code, lines = self.run_tool("list", "--root", self.root)
@@ -140,8 +150,20 @@ class ListTest(Log):
                      "one line: Sorted widgets."):
             self.assertIn(part, widget)
         self.assertIn("period 2031-04 – ongoing (ongoing);", lines[2])
-        self.assertIn("status - (no README row);", lines[2])
+        self.assertIn("status -;", lines[2])
         self.assertNotIn("over threshold", widget)
+
+    def test_list_reads_the_status_from_the_front_matter_only(self):
+        # #574: README.md is a generated view, never read for a status
+        self.write("README.md", README_HEAD + "| 2030-05 – 2030-06 | [Lamp Fixer](entries/2030-05-lamp.md) | project"
+                                              " | consolidated |\n")
+        self.write("entries/2031-04-widget-2.md", entry(series="widget", period="2031-04 – ongoing", status="stub"))
+        _, lines = self.run_tool("list", "--root", self.root)
+        self.assertIn("status -;", lines[0])
+        self.assertIn("status imported (gaps);", lines[1])
+        self.assertIn("status stub;", lines[2])
+        self.write("entries/2031-01-widget.md", entry(series="widget", status=""))
+        self.assertIn("status -;", self.run_tool("list", "--root", self.root)[1][1])
 
     def test_list_series(self):
         code, lines = self.run_tool("list", "--root", self.root, "--series", "widget")
@@ -159,8 +181,7 @@ class CheckTest(Log):
         self.write("entries/2031-01-widget.md", entry(series="widget"))
         self.write("entries/2031-04-widget-2.md", entry(series="widget", period="2031-03 – ongoing",
                                                         last_updated="2031-05-01"))
-        self.write("README.md", README_HEAD + row("entries/2031-01-widget.md")
-                   + row("entries/2031-04-widget-2.md", period="2031-03 – ongoing"))
+        self.readme()
 
     def test_clean_log(self):
         self.clean()   # the parts share 2031-03: a split in that month, not an overlap
@@ -182,10 +203,7 @@ class CheckTest(Log):
         self.write("entries/2031-04-widget-2.md", entry(series="widget", period="2031-02 – ongoing", one_line=""))
         self.write("entries/2031-05-widget-3.md", entry(series="widget", period="2031-05 – ongoing"))
         self.write("entries/2031-06-gadget-2.md", entry(series="gadget", period="sometime"))
-        self.write("README.md", README_HEAD + row("entries/2031-01-widget.md")
-                   + row("entries/2031-04-widget-2.md", period="2031-02 – ongoing")
-                   + row("entries/2031-05-widget-3.md", period="2031-05 – ongoing")
-                   + row("entries/2031-06-gadget-2.md", period="sometime"))
+        self.readme()
         code, lines = self.check()
         self.assertEqual(code, 1)
         self.assertIn("series part with an unreadable period: entries/2031-06-gadget-2.md 'sometime'"
@@ -205,10 +223,7 @@ class CheckTest(Log):
         self.write("entries/2031-01-widget-b.md", entry(series="widget", period="2031-01-16 – 2031-01-19"))
         self.write("entries/2031-01-widget-c.md", entry(series="widget", period="2031-01-19 – ongoing",
                                                         last_updated="2031-01-20"))
-        self.write("README.md", README_HEAD
-                   + row("entries/2031-01-widget.md", period="2031-01-12 – 2031-01-15")
-                   + row("entries/2031-01-widget-b.md", period="2031-01-16 – 2031-01-19")
-                   + row("entries/2031-01-widget-c.md", period="2031-01-19 – ongoing"))
+        self.readme()
         self.assertEqual(self.run_tool("check", "--root", self.root, "--today", "2031-01-20"), (0, ["OK: 3 entries, no findings"]))
         self.write("entries/2031-01-widget-b.md", entry(series="widget", period="2031-01-14 – 2031-01-19"))
         _, lines = self.run_tool("check", "--root", self.root, "--today", "2031-01-20")
@@ -223,23 +238,33 @@ class CheckTest(Log):
     def test_readme_findings(self):
         self.write("entries/2031-01-widget.md", entry())
         self.write("entries/2031-02-lamp.md", entry(title="Lamp Fixer"))
-        self.write("entries/2031-03-gear.md", entry(title="Gear Cutter | v2"))
-        self.write("README.md", README_HEAD
-                   + row("entries/2031-01-widget.md", title="Widget Sorter (old)", period="2031-01 - 2031-04",
-                         tags="go, redis", status="done", type_="work")
-                   + row("entries/2031-09-gone.md")
-                   + row("./entries/2031-03-gear.md#context", title="Gear Cutter \\| v2", tags="go"))
+        self.write("entries/2031-03-gear.md", entry(title="Gear Cutter | v2", period="2031-03 – 2031-04"))
+        self.readme()
+        self.assertEqual(self.check(), (0, ["OK: 3 entries, no findings"]))
+        fix = "run python3 -I <root>/tools/entries.py readme --root <root>"
+        # #574: check regenerates the table and compares; a hand edit is a finding naming the command
+        self.write("README.md", self.read_file("README.md").replace("[Widget Sorter](", "[Widget Sorter (old)]("))
         code, lines = self.check()
         self.assertEqual(code, 1)
-        self.assertEqual(sorted(lines), sorted([
-            "README row names a missing file: entries/2031-09-gone.md",
-            "no README row: entries/2031-02-lamp.md",
-            "README row differs: entries/2031-01-widget.md: title 'Widget Sorter (old)', front matter 'Widget Sorter'",
-            "README row differs: entries/2031-01-widget.md: period '2031-01 - 2031-04', front matter '2031-01 – 2031-03'",
-            "README row differs: entries/2031-01-widget.md: type 'work', front matter 'project'",
-            "README row differs: entries/2031-01-widget.md: tags not in front matter: redis",
-            "README row status unknown: entries/2031-01-widget.md 'done' (starts with stub, imported, consolidated)",
-        ]))
+        # rows newest first: gear, then widget and lamp (the same period) by path
+        self.assertEqual(lines, ["README table not generated: README.md:8: 1 of its lines differ from what the entries'"
+                                 " front matter gives; " + fix])
+        self.write("entries/2031-02-lamp.md", entry(title="Lamp Fixer", status="consolidated"))
+        self.assertEqual(self.check()[1][0][:58], "README table not generated: README.md:8: 2 of its lines di")
+        # --consolidated keeps it for an entry whose row differs, and only for those
+        def consolidated(path):
+            return self.run_tool("check", "--root", self.root, "--today", TODAY, "--consolidated", path)
+        self.assertEqual(consolidated("entries/2031-02-lamp.md")[0], 1)
+        self.assertFalse([l for l in consolidated("entries/2031-03-gear.md")[1] if l.startswith("README")])
+        # an old table, with its Tags column, differs from its header on
+        self.write("README.md", "# Log\n\n## Entries\n\n| Period | Entry | Type | Tags | Status |\n|---|---|---|---|---|\n")
+        self.assertEqual(self.check()[1], ["README table not generated: README.md:5: 5 of its lines differ from what"
+                                           " the entries' front matter gives; " + fix])
+        self.write("README.md", "# Log\n")
+        self.assertEqual(self.check()[1], ["README table not generated: README.md has no Entries table and no"
+                                           " `## Entries` heading: add the heading where the table goes; then " + fix])
+        os.remove(os.path.join(self.root, "README.md"))
+        self.assertEqual(self.check()[1][0], "README table not generated: no README.md in %s; then %s" % (self.root, fix))
 
     def test_stale_ongoing(self):
         self.write("entries/2031-01-widget.md", entry(period="2030-01 – ongoing", last_updated="2031-04-14"))
@@ -248,12 +273,7 @@ class CheckTest(Log):
         self.write("entries/2031-03-gear.md", entry(title="Gear Cutter", period="2030-01 – ongoing",
                                                     last_updated="YYYY-MM-DD"))
         self.write("entries/2031-04-old.md", entry(title="Old", period="2020-01 – 2020-02", last_updated="2020-02-01"))
-        self.write("README.md", README_HEAD + "".join(
-            row(p, title=t, period=pd) for p, t, pd in [
-                ("entries/2031-01-widget.md", "Widget Sorter", "2030-01 – ongoing"),
-                ("entries/2031-02-lamp.md", "Lamp Fixer", "2030-01 – ongoing"),
-                ("entries/2031-03-gear.md", "Gear Cutter", "2030-01 – ongoing"),
-                ("entries/2031-04-old.md", "Old", "2020-01 – 2020-02")]))
+        self.readme()
         code, lines = self.check()
         self.assertEqual(lines, [
             "ongoing entry not updated in over two months: entries/2031-01-widget.md last_updated 2031-04-14",
@@ -266,7 +286,7 @@ class CheckTest(Log):
     def test_gap_ongoing_is_stale_too(self):
         """A stub log wrote with an unknown start month is ongoing for the staleness check."""
         self.write("entries/2031-01-widget.md", entry(period="GAP – ongoing", last_updated="2031-01-02"))
-        self.write("README.md", README_HEAD + row("entries/2031-01-widget.md", period="GAP – ongoing"))
+        self.readme()
         self.assertEqual(self.check()[1], [
             "ongoing entry not updated in over two months: entries/2031-01-widget.md last_updated 2031-01-02"])
         _, lines = self.run_tool("list", "--root", self.root)
@@ -277,11 +297,11 @@ W_PATH = "entries/2031-01-widget.md"
 
 
 class ShapeTest(Log):
-    """The checks of an entry's shape: one entry with a README row, so every line is about its shape."""
+    """The checks of an entry's shape: one entry and its README table, so every line is about its shape."""
 
     def shape(self, body="", **fields):
         self.write(W_PATH, entry(body=body, **fields))
-        self.write("README.md", README_HEAD + row(W_PATH, period=fields.get("period", "2031-01 – 2031-03")))
+        self.readme()
         return self.check()
 
     def test_a_clean_entry(self):
@@ -295,6 +315,16 @@ class ShapeTest(Log):
                 "\n## Pending\n- 2031-06-01: a fact. https://example.org/pr/1\n")
         self.write("sources/x.md", "x")
         self.assertEqual(self.shape(body, last_updated="GAP: when"), (0, ["OK: 1 entries, no findings"]))
+
+    def test_front_matter_status(self):
+        # #573: a status, with a note in parentheses or not; never a GAP (`stub` is the unknown one)
+        for ok in ("stub", "imported", "consolidated (two gaps)"):
+            self.assertEqual(self.shape(status=ok), (0, ["OK: 1 entries, no findings"]), ok)
+        for bad, shown in (("done", "'done'"), ("consolidated, partly", "'consolidated, partly'"),
+                           ("[stub]", "['stub']"), ("GAP", "'GAP'"), ("GAP: which", "'GAP: which'")):
+            code, lines = self.shape(status=bad)
+            self.assertEqual((code, lines), (1, ["front matter: %s status %s not allowed (stub | imported | consolidated,"
+                                                 " a note in parentheses after it if any)" % (W_PATH, shown)]), bad)
 
     def test_front_matter(self):
         code, lines = self.shape(type_="work | internship", period="2031-01 – 2031-03 (a note)",
@@ -429,7 +459,7 @@ class ShapeTest(Log):
                 "\n## Pending\n- 2031-06-01: a fact.\n")
         self.write(W_PATH, entry(body=body))
         self.write("entries/2031-02-lamp.md", entry(title="Lamp Fixer", links="[https://github.com/o/r/pull/1]"))
-        self.write("README.md", README_HEAD + row(W_PATH))
+        self.readme()
         code, lines = self.run_tool("check", "--root", self.root, "--today", TODAY, "--consolidated", W_PATH)
         self.assertEqual((code, lines), (1, [
             "pending not empty: %s" % W_PATH,
@@ -437,7 +467,8 @@ class ShapeTest(Log):
             "contribution category missing: %s Others did; I can explain it:" % W_PATH]))
         # the other entry's findings show without --consolidated
         _, lines = self.check()
-        self.assertIn("no README row: entries/2031-02-lamp.md", lines)
+        self.assertIn("link not a repo root: entries/2031-02-lamp.md https://github.com/o/r/pull/1; root"
+                      " https://github.com/o/r, missing from links", lines)
         self.assertEqual(self.run_tool("check", "--root", self.root, "--consolidated")[0], 2)
         self.assertEqual(self.run_tool("list", "--root", self.root, "--consolidated", W_PATH)[0], 2)
 
@@ -449,8 +480,7 @@ class ShapeEdgeTest(Log):
     def test_consolidated_series_part(self):
         self.write("entries/2031-01-widget.md", entry(series="widget", period="2031-01 – 2031-06"))
         self.write("entries/2031-05-widget-2.md", entry(series="widget", period="2031-05 – 2031-09"))
-        self.write("README.md", README_HEAD + row("entries/2031-01-widget.md", period="2031-01 – 2031-06")
-                   + row("entries/2031-05-widget-2.md", period="2031-05 – 2031-09"))
+        self.readme()
         _, lines = self.run_tool("check", "--root", self.root, "--today", TODAY, "--consolidated",
                                  "entries/2031-05-widget-2.md")
         self.assertFalse([l for l in lines if "series names no entry" in l], lines)
@@ -461,7 +491,7 @@ class ShapeEdgeTest(Log):
         body = ("\n## My contribution\n- **I did:**\n  - the sorter\n  - its tests\n- **I led, with help from AI agents:** x\n"
                 "- **Others did; I can explain it:**\n- a line that is not under it\n")
         self.write(W_PATH, entry(body=body))
-        self.write("README.md", README_HEAD + row(W_PATH))
+        self.readme()
         self.assertEqual(self.run_tool("check", "--root", self.root, "--today", TODAY, "--consolidated", W_PATH)[1],
                          ["contribution category missing: %s Others did; I can explain it:" % W_PATH])
 
@@ -510,7 +540,7 @@ class ShapeEdgeTest(Log):
 
     def test_root_forms(self):
         self.write(W_PATH, entry())
-        self.write("README.md", README_HEAD + row(W_PATH))
+        self.readme()
         for args in (["--root", self.root, "check"], ["check", "--root=%s" % self.root]):
             self.assertEqual(self.run_tool(*args, "--today", TODAY), (0, ["OK: 1 entries, no findings"]), args)
         for args in (["check", "--root"], ["check", "--root", self.root, "--root", self.root]):
@@ -1823,8 +1853,7 @@ class WriteLog(Log):
     def setUp(self):
         super().setUp()
         shutil.copy(TEMPLATE, os.path.join(self.root, "entries", "_template.md"))
-        self.write("README.md", "# Log\n\n## Entries\n\n| Period | Entry | Type | Tags | Status |\n|---|---|---|---|---|\n"
-                   "\n## Upstream\n")
+        self.write("README.md", README_HEAD + "\n## Upstream\n")
 
     def read(self, path):
         with open(os.path.join(self.root, path), encoding="utf-8", newline="") as f:
@@ -1842,12 +1871,12 @@ class WriteLog(Log):
 
 
 class NewTest(WriteLog):
-    def test_writes_the_template_with_gaps_and_a_readme_row(self):
+    def test_writes_the_template_with_gaps_and_the_readme_table(self):
         code, lines = self.new("widget", "2031-04", "GAP – ongoing", "--field", "tags=go, kafka",
                                "--field", "org=personal")
         self.assertEqual(code, 0, lines)
-        self.assertEqual(lines, ["created: %s" % NEW_W, "readme row added: README.md:7: | GAP – ongoing | [Widget Sorter]"
-                                 "(%s) | GAP: type | go, kafka | stub |" % NEW_W])
+        self.assertEqual(lines, ["created: %s" % NEW_W, "readme written: README.md:5-7: 1 rows"])
+        self.assertEqual(self.rows(), ["| GAP – ongoing | [Widget Sorter](%s) | GAP: type | stub |" % NEW_W])
         text = self.read(NEW_W)
         e = entries.Entry(self.root, NEW_W)
         self.assertEqual((e.fields["title"], e.fields["org"], e.fields["my_role"], e.fields["visibility"],
@@ -1938,131 +1967,205 @@ class NewTest(WriteLog):
 
 
 class ReadmeTest(WriteLog):
+    """#574: README.md's Entries table is generated whole from the entries' front matter."""
+
     PERIODS = [("2031-04-a", "2031-04 – 2031-05"), ("2030-01-b", "2030-01 – ongoing"), ("2029-01-c", "GAP – 2029-06"),
                ("2031-01-d", "2031-01 – 2031-05"), ("2032-01-e", "2032-01 – ongoing"), ("2028-01-f", "2028-01 – 2028-02"),
                ("2031-05-g", "2031-05-14 – 2031-05-20")]
     ORDER = ["2029-01-c", "2032-01-e", "2030-01-b", "2031-05-g", "2031-04-a", "2031-01-d", "2028-01-f"]
 
-    def test_row_order(self):
-        periods = [p for _, p in self.PERIODS] + ["GAP – ongoing", "soon"]
-        ordered = [p for _, p in entries.sort_rows([(p, p) for p in periods])]
-        self.assertEqual(ordered, ["GAP – 2029-06", "GAP – ongoing", "soon", "2032-01 – ongoing", "2030-01 – ongoing",
-                                   "2031-05-14 – 2031-05-20", "2031-04 – 2031-05", "2031-01 – 2031-05", "2028-01 – 2028-02"])
+    def names(self):
+        return [re.findall(r"entries/(.*?)\.md", r) for r in self.rows()]
+
+    def test_plain_rows_go_newest_first(self):
+        for name, period in self.PERIODS:
+            self.new(name[8:], name[:7], period)
+        self.assertEqual([n for n, in self.names()], self.ORDER)
+        self.assertEqual(entries.row_order("2023-05 – 2023-01")[0], 0)   # an unreadable period sorts with GAP
+
+    def series_log(self):
+        """The acceptance case: plain entries, and a series of six parts with mixed statuses and types."""
+        title = "career-log — Claude Code skill, shared as a Template"
+        parts = [("2026-09", "career-log", "2026-09-01 – 2026-09-30", "imported", "project"),
+                 ("2026-10", "career-log-tools", "2026-10-01 – 2026-10-05", "consolidated", "project"),
+                 ("2026-10", "career-log-setup", "2026-10-06 – 2026-10-12", "consolidated (one gap)", "project"),
+                 ("2026-10", "career-log-capture", "2026-10-13 – 2026-10-15", "consolidated", "project"),
+                 ("2026-10", "career-log-models", "2026-10-16 – 2026-10-19", "consolidated", "work"),
+                 ("2026-10", "career-log-sonnet", "2026-10-20 – ongoing", "consolidated (adoption GAP)", "project")]
+        for month, slug, period, status, type_ in parts:
+            self.write("entries/%s-%s.md" % (month, slug),
+                       entry(title="%s: %s" % (title, slug), period=period, series="career-log", status=status,
+                             type_=type_, last_updated="2031-06-01"))
+        self.write("entries/2025-01-widget.md", entry(title="Widget Sorter — a sorter for widgets", period="2025-01 – 2025-06",
+                                                      status="consolidated (two gaps)"))   # a plain entry keeps its full title
+        self.write("entries/2024-02-lamp.md", entry(title="Lamp Fixer | v2", period="2024-02 – 2024-03", status="stub",
+                                                    type_="work"))
+
+    def test_a_series_is_one_row(self):
+        self.series_log()
+        self.assertEqual(self.tool("readme"), (0, ["readme written: README.md:5-9: 3 rows"]))
+        self.assertEqual(self.read("README.md"), "# Log\n\n## Entries\n\n| Period | Entry | Type | Status |\n|---|---|---|---|\n"
+            "| 2026-09-01 – ongoing | **career-log** [sonnet](entries/2026-10-career-log-sonnet.md)"
+            " · [models](entries/2026-10-career-log-models.md) · [capture](entries/2026-10-career-log-capture.md)"
+            " · [setup](entries/2026-10-career-log-setup.md) · [tools](entries/2026-10-career-log-tools.md)"
+            " · [2026-09](entries/2026-09-career-log.md) | project, work | consolidated ×5, imported ×1 |\n"
+            "| 2025-01 – 2025-06 | [Widget Sorter — a sorter for widgets](entries/2025-01-widget.md) | project |"
+            " consolidated (two gaps) |\n"
+            "| 2024-02 – 2024-03 | [Lamp Fixer \\| v2](entries/2024-02-lamp.md) | work | stub |\n"
+            "\n## Upstream\n")
+        self.assertEqual(self.tool("readme"), (0, ["readme unchanged: README.md:5-9: 3 rows"]))
+        self.assertEqual(self.check(), (0, ["OK: 8 entries, no findings"]))
+
+    def test_a_series_with_one_status_keeps_its_note(self):
+        self.series_log()
+        for p in entries.entry_paths(self.root):
+            if "career-log" in p:
+                entries.set_status(self.root, p, "consolidated (adoption GAP)")
+        self.tool("readme")
+        self.assertTrue(self.rows()[0].endswith(" | consolidated (adoption GAP) |"), self.rows()[0])
+
+    def test_short_name_and_part_labels(self):
+        # no ` — `: the series title whole; a GAP start: the file's month; a slug the series does not prefix: itself
+        self.write("entries/2030-01-big.md", entry(title="Big Rewrite: start", period="GAP – 2030-06", series="big",
+                                                   status="stub"))
+        self.write("entries/2031-01-other.md", entry(title="Big Rewrite: later", period="2031-01 – 2031-02",
+                                                     series="big", status="stub"))
+        self.tool("readme")
+        self.assertEqual(self.rows(), ["| GAP – 2031-02 | **Big Rewrite** [other](entries/2031-01-other.md) ·"
+                                       " [2030-01](entries/2030-01-big.md) | project | stub |"])
+        # no part's slug is the series slug (a dropped first part): the name comes from the part that starts first
+        os.remove(os.path.join(self.root, "entries/2030-01-big.md"))
+        self.write("entries/2031-03-big-more.md", entry(title="Big Rewrite 2 — x: more", period="2031-03 – 2031-04",
+                                                        series="big", status="stub"))
+        self.tool("readme")
+        self.assertEqual(self.rows()[0], "| 2031-01 – 2031-04 | **Big Rewrite** [more](entries/2031-03-big-more.md) · [other](entries/2031-01-other.md) | project | stub |")
 
     SERIES = [("2029-01-y", "2029-01 – 2029-06", None), ("2028-01-big", "2028-01 – 2029-03", "big"),
               ("2031-01-x", "2031-01 – 2031-03", None), ("2026-01-run", "2026-01 – 2027-01", "run"),
               ("2027-05-gap-two", "2027-05 – 2027-09", "gap"), ("2029-03-big-two", "2029-03 – 2030-12", "big"),
               ("2028-01-z", "GAP – 2028-01", None), ("2027-01-run-two", "2027-01 – ongoing", "run"),
               ("2030-01-w", "2030-01 – ongoing", None), ("2027-05-gap", "GAP – 2027-05", "gap")]
-    # each series in one block, newest part first: a GAP part puts it in the GAP group (by the newest
-    # date a part sorts by), an ongoing part with the ongoing rows (by its earliest start), else by its latest end
-    SERIES_ORDER = ["2028-01-z", "2027-05-gap-two", "2027-05-gap", "2030-01-w", "2027-01-run-two", "2026-01-run",
-                    "2031-01-x", "2029-03-big-two", "2028-01-big", "2029-01-y"]
+    # a series' row sorts by its whole period: a GAP part puts it in the GAP group (by the newest date a
+    # part sorts by), an ongoing part with the ongoing rows (by its earliest start), else by its latest end
+    SERIES_ORDER = [["2028-01-z"], ["2027-05-gap-two", "2027-05-gap"], ["2030-01-w"], ["2027-01-run-two", "2026-01-run"],
+                    ["2031-01-x"], ["2029-03-big-two", "2028-01-big"], ["2029-01-y"]]
 
-    def new_series(self):
+    def test_series_rows_sort_by_the_whole_series(self):
         for name, period, series in self.SERIES:
             more = ("--field", "series=%s" % series) if series else ()
             self.assertEqual(self.new(name[8:], name[:7], period, *more)[0], 0)
-
-    def test_sort_rows_keeps_a_series_together(self):
-        rows = [(n, p, s) for n, p, s in self.SERIES]
-        self.assertEqual([r[0] for r in entries.sort_rows(rows)], self.SERIES_ORDER)
-        self.assertEqual([r[0] for r in entries.sort_rows(rows[::-1])], self.SERIES_ORDER)
+        self.assertEqual(self.names(), self.SERIES_ORDER)
         self.assertEqual(entries.block_order(["2028-01 – 2029-03", "2029-03 – 2030-12"]), (2, ("2030-12", "2028-01")))
-        last_open = [("a", "2026-01 – 2027-05", "s"), ("b", "2027-05 – GAP", "s"), ("c", "2025-01 – 2025-06", None)]
-        self.assertEqual([r[0] for r in entries.sort_rows(last_open)], ["b", "a", "c"])
+        self.assertTrue(self.rows()[1].startswith("| GAP – 2027-09 | **Widget Sorter** [two]("), self.rows())   # either end GAP when a part's is
 
-    def test_a_series_with_one_row_or_a_missing_file_sorts_as_a_row(self):
-        self.new("solo", "2029-01", "2029-01 – 2029-06", "--field", "series=solo")
-        self.new("late", "2030-01", "2030-01 – 2030-02")
-        self.new("old", "2028-01", "2028-01 – 2028-02", "--field", "series=late")
-        os.remove(os.path.join(self.root, "entries/2030-01-late.md"))   # its row reads as no series
-        self.assertIsNone(entries.row_series(self.root, "entries/2030-01-late.md"))
-        self.assertEqual([re.search(r"entries/(.*)\.md", r).group(1) for r in self.rows()],
-                         ["2030-01-late", "2029-01-solo", "2028-01-old"])
-        self.assertEqual(self.tool("readme-sort"), (0, ["OK: 3 entry rows in order"]))
-
-    def test_readme_row_moves_no_block_in_a_table_out_of_order(self):
-        self.new("x", "2031-01", "2031-01 – 2031-03")
-        self.new("big", "2028-01", "2028-01 – 2029-03", "--field", "series=big")
-        self.new("y", "2029-01", "2029-01 – 2029-06")
-        rows = self.rows()
-        self.write("README.md", self.read("README.md").replace("\n".join(rows), "\n".join([rows[1], rows[0], rows[2]])))
-        self.new("big-two", "2029-03", "2029-03 – 2030-12", "--field", "series=big")   # inserted only
-        self.assertEqual([re.search(r"entries/(.*)\.md", r).group(1) for r in self.rows()],
-                         ["2029-03-big-two", "2029-01-y", "2031-01-x", "2028-01-big"])
-
-    def test_readme_row_moves_the_block_down_when_a_part_shrinks(self):
-        self.new_series()
-        path = "entries/2029-03-big-two.md"
-        self.write(path, self.read(path).replace("2029-03 – 2030-12", "2029-03 – 2029-04"))
-        self.assertEqual(self.tool("readme-row", path)[0], 0)
-        names = [re.search(r"entries/(.*)\.md", r).group(1) for r in self.rows()]
-        self.assertEqual(names[-3:], ["2029-01-y", "2029-03-big-two", "2028-01-big"])
-        self.assertEqual(self.tool("readme-sort", "--check")[0], 0)
-
-    def test_new_rows_keep_a_series_together(self):
-        self.new_series()   # big-two's row moves big up with it
-        self.assertEqual([re.search(r"entries/(.*)\.md", r).group(1) for r in self.rows()], self.SERIES_ORDER)
-        self.assertEqual(self.tool("readme-sort", "--check"), (0, ["OK: 10 entry rows in order"]))
-
-    def test_sort_keeps_a_series_together_and_is_idempotent(self):
-        self.new_series()
-        text = self.read("README.md")
-        rows = self.rows()
-        self.write("README.md", text.replace("\n".join(rows), "\n".join(rows[::-1])))
-        self.assertEqual(self.tool("readme-sort", "--check")[0], 1)
-        self.assertEqual(self.tool("readme-sort"), (0, ["sorted: 10 entry rows, 10 moved"]))
-        after = self.read("README.md")
-        self.assertEqual([re.search(r"entries/(.*)\.md", r).group(1) for r in self.rows()], self.SERIES_ORDER)
-        self.assertEqual(self.tool("readme-sort"), (0, ["OK: 10 entry rows in order"]))
-        self.assertEqual(self.read("README.md"), after)
-
-    def test_new_rows_go_in_order(self):
-        for name, period in self.PERIODS:
-            self.new(name[8:], name[:7], period)
-        self.assertEqual([re.search(r"entries/(.*)\.md", r).group(1) for r in self.rows()], self.ORDER)
-        self.assertEqual(self.tool("readme-sort", "--check"), (0, ["OK: 7 entry rows in order"]))
-
-    def test_sort_moves_entry_rows_only_and_is_idempotent(self):
-        for name, period in self.PERIODS:
-            self.new(name[8:], name[:7], period)
-        text = self.read("README.md").replace("\n", "\r\n")
-        head, rest = text.split("|---|---|---|---|---|\r\n")
-        rows = rest.split("\r\n")[:7]
-        shuffled = head + "|---|---|---|---|---|\r\n" + "\r\n".join(rows[::-1][:3] + ["| - | a note, no entry | | | |"]
-                                                                 + rows[::-1][3:]) + "\r\n\r\n## Upstream\r\n"
-        self.write("README.md", "﻿" + shuffled)
-        code, lines = self.tool("readme-sort", "--check")
-        self.assertEqual(code, 1)
-        self.assertTrue(all(l.startswith("out of order: README.md:") for l in lines), lines)
-        self.assertEqual(self.tool("readme-sort")[0], 0)
-        after = self.read("README.md")
-        self.assertTrue(after.startswith("﻿# Log\r\n"))
-        self.assertEqual([re.search(r"entries/(.*)\.md", r).group(1) for r in self.rows()], self.ORDER)
-        self.assertEqual(after.split("\r\n").index("| - | a note, no entry | | | |"), 9)   # the 4th row, as before
-        self.assertEqual(self.tool("readme-sort"), (0, ["OK: 7 entry rows in order"]))
-        self.assertEqual(self.read("README.md"), after)
-
-    def test_readme_row_replaces_and_keeps_the_status(self):
+    def test_readme_replaces_the_old_table_and_keeps_every_other_line(self):
         self.new()
-        self.write(NEW_W, self.read(NEW_W).replace("tags: []", "tags: [go]").replace("title: Widget Sorter", "title: A | B"))
-        self.write("README.md", self.read("README.md").replace("| stub |", "| stub (two gaps) |"))
-        self.assertEqual(self.tool("readme-row", NEW_W), (0, ["readme row replaced: README.md:7: | 2031-04 – ongoing |"
-                                                          " [A \\| B](%s) | GAP: type | go | stub (two gaps) |" % NEW_W]))
-        self.assertEqual(self.tool("readme-row", NEW_W)[1][0][:22], "readme row unchanged: ")
-        self.tool("readme-row", NEW_W, "--status", "consolidated (with gaps)")
-        self.assertIn("| consolidated (with gaps) |", self.rows()[0])
-        self.assertEqual(self.check(), (0, ["OK: 1 entries, no findings"]))
-        self.assertEqual(self.tool("readme-row", NEW_W, "--status", "done")[0], 2)
+        self.write("README.md", "﻿# Log\r\n\r\n| Name | Note |\r\n|---|---|\r\n| a | b |\r\n\r\n## Entries\r\n\r\n"
+                   "| Period | Entry | Type | Tags | Status |\r\n|---|---|---|---|---|\r\n| x | [old](entries/gone.md) | |"
+                   " | |\r\n| - | a note, no entry | | | |\r\n\r\n## Upstream")
+        self.assertEqual(self.tool("readme"), (0, ["readme written: README.md:9-11: 1 rows"]))
+        self.assertEqual(self.read("README.md"), "﻿# Log\r\n\r\n| Name | Note |\r\n|---|---|\r\n| a | b |\r\n\r\n"
+                         "## Entries\r\n\r\n| Period | Entry | Type | Status |\r\n|---|---|---|---|\r\n| 2031-04 – ongoing"
+                         " | [Widget Sorter](entries/2031-04-widget.md) | GAP: type | stub |\r\n\r\n## Upstream")
 
-    def test_readme_row_needs_a_status_and_a_table(self):
+    def test_readme_drops_the_placeholder_line_once_the_table_has_a_row(self):
+        # #592: the Template's `Entries appear here as you log them.` reads wrong above a table with rows
+        placeholder = "Entries appear here as you log them.\n"
+        empty = "| Period | Entry | Type | Status |\n|---|---|---|---|\n"
+        template = "# Log\n\n## Entries\n\n" + placeholder + "\n" + empty + "\n## Upstream\n\n" + placeholder
+        self.write("README.md", template)
+        self.assertEqual(self.tool("readme"), (0, ["readme unchanged: README.md:7-8: 0 rows"]))   # an empty Log keeps it
+        self.assertEqual(self.read("README.md"), template)
         self.new()
+        table = empty + self.rows()[0] + "\n"
+        self.assertEqual(self.read("README.md"), "# Log\n\n## Entries\n\n" + table + "\n## Upstream\n\n" + placeholder)
+        self.assertEqual(self.tool("readme"), (0, ["readme unchanged: README.md:5-7: 1 rows"]))
+        for before, after in [("## Entries\n\n%s\n## Upstream\n" % placeholder, "## Entries\n\n%s\n## Upstream\n"),
+                              ("## Entries\r\n\r\n%s" % placeholder.replace("\n", ""), "## Entries\r\n\r\n%s"),
+                              ("## Entries\n%s\n%s" % (placeholder, empty), "## Entries\n\n%s"),
+                              ("## Entries\n\n%s%s" % (placeholder, empty), "## Entries\n\n%s")]:
+            self.write("README.md", before)
+            self.assertEqual(self.tool("readme"), (0, ["readme written: README.md:3-5: 1 rows"]), before)
+            eol = "\r\n" if "\r" in before else "\n"
+            self.assertEqual(self.read("README.md"), after % table.replace("\n", eol), before)
+            self.assertEqual(self.tool("readme"), (0, ["readme unchanged: README.md:3-5: 1 rows"]), before)
+
+    def test_readme_adds_the_table_under_its_heading(self):
+        self.new()
+        for before, after in [("# Log\n\n## Entries\n\nSome words.\n\n## Upstream\n",
+                               "# Log\n\n## Entries\n\nSome words.\n\n%s\n## Upstream\n"),
+                              ("# Log\n\n## Entries\n## Upstream\n", "# Log\n\n## Entries\n\n%s\n## Upstream\n"),
+                              ("# Log\n\n## Entries", "# Log\n\n## Entries\n\n%s")]:
+            self.write("README.md", before)
+            self.assertEqual(self.tool("readme")[0], 0)
+            table = "| Period | Entry | Type | Status |\n|---|---|---|---|\n%s\n" % self.rows()[0]
+            self.assertEqual(self.read("README.md"), after % table)
+            self.assertEqual(self.tool("readme")[1][0][:17], "readme unchanged:")
         self.write("README.md", "# Log\n")
-        self.assertEqual(self.tool("readme-row", NEW_W, "--status", "stub")[0], 2)
-        self.write("README.md", "| Period | Entry | Type | Tags | Status |\n|---|---|---|---|---|\n")
-        self.assertEqual(self.tool("readme-row", NEW_W)[0], 2)
-        self.assertEqual(self.tool("readme-row", NEW_W, "--status", "stub")[0], 0)
+        self.assertEqual(self.tool("readme"), (2, ["FAIL: README.md has no Entries table and no `## Entries` heading:"
+                                                   " add the heading where the table goes"]))
+        self.assertEqual(self.read("README.md"), "# Log\n")
+
+    def test_set_status_writes_the_front_matter_then_the_table(self):
+        self.new()
+        code, lines = self.tool("set-status", NEW_W, "consolidated (two gaps)")
+        self.assertEqual((code, lines), (0, ["status: %s: consolidated (two gaps)" % NEW_W,
+                                             "readme written: README.md:5-7: 1 rows"]))
+        self.assertEqual(entries.Entry(self.root, NEW_W).status, "consolidated (two gaps)")
+        self.assertIn("\nstatus: consolidated (two gaps) ", self.read(NEW_W))   # the template's comment kept
+        self.assertTrue(self.rows()[0].endswith(" | consolidated (two gaps) |"))
+        for bad in ("done", "consolidated, partly", "stub (", "imported ()"):
+            self.assertEqual(self.tool("set-status", NEW_W, bad)[0], 2, bad)
+        self.assertEqual(entries.Entry(self.root, NEW_W).status, "consolidated (two gaps)")
+        before = self.read(NEW_W)
+        self.write("README.md", "# Log\n")
+        self.assertEqual(self.tool("set-status", NEW_W, "stub")[0], 2)   # no place for the table: nothing written
+        self.assertEqual(self.read(NEW_W), before)
+
+    def test_old_commands_are_gone(self):
+        self.new()
+        for args in (("readme-row", NEW_W), ("readme-row", NEW_W, "--status", "stub"), ("readme-sort",)):
+            self.assertEqual(self.tool(*args)[0], 2, args)
+
+
+class StatusTest(WriteLog):
+    """#573, #574: an entry's status is kept in its front matter as `status:`, and read from there only."""
+
+    def test_new_writes_the_status_in_the_front_matter(self):
+        self.assertEqual(self.new(status="imported")[0], 0)
+        self.assertEqual(entries.Entry(self.root, NEW_W).status, "imported")
+        self.assertIn("\nstatus: imported ", self.read(NEW_W))   # the template's comment kept
+        self.assertTrue(self.rows()[0].endswith(" | imported |"))
+        self.assertEqual(self.check(), (0, ["OK: 1 entries, no findings"]))
+
+    def test_new_adds_the_field_to_a_template_without_it(self):
+        self.write("entries/_template.md", entry(title="", period="YYYY-MM – YYYY-MM"))   # a Log not yet upgraded
+        self.assertEqual(self.new()[0], 0)
+        self.assertIn("last_updated: 2031-04-20\nstatus: stub\n---\n", self.read(NEW_W))
+
+    def test_an_entry_without_a_status_shows_a_dash(self):
+        self.write(NEW_W, entry(period="2031-04 – ongoing", last_updated="2031-04-20"))
+        self.write("README.md", README_HEAD + "| 2031-04 – ongoing | [Widget Sorter](%s) | project | imported |\n" % NEW_W)
+        self.assertEqual(self.tool("readme")[0], 0)   # the row's status is not read
+        self.assertTrue(self.rows()[0].endswith(" | - |"), self.rows())
+
+    def test_split_gives_each_part_the_entry_s_status(self):
+        self.new("big", "2028-01", "2028-01 – 2030-06", status="imported")
+        code, lines = self.tool("split", "entries/2028-01-big.md", "--phase", "Prototype",
+                                "--cut", "2029-03:scale:Scale-up", "--today", "2031-04-20")
+        self.assertEqual(code, 0, lines)
+        self.assertEqual(entries.Entry(self.root, "entries/2029-03-big-scale.md").status, "imported")
+        self.assertEqual(self.rows(), ["| 2028-01 – 2030-06 | **Widget Sorter** [scale](entries/2029-03-big-scale.md)"
+                                       " · [2028-01](entries/2028-01-big.md) | GAP: type | imported |"])
+
+    def test_split_needs_a_status_in_the_front_matter(self):
+        self.write(BIG, entry(period="2028-01 – 2030-06", last_updated="2030-06-01"))   # no status: line
+        self.write("README.md", README_HEAD + "| 2028-01 – 2030-06 | [Widget Sorter](%s) | project | imported |\n" % BIG)
+        before = self.read(BIG)
+        self.assertEqual(self.tool("split", BIG, "--phase", "A", "--cut", "2028-06:early:Early"),
+                         (2, ["FAIL: %s has no status: give it one with set-status first" % BIG]))
+        self.assertEqual(self.read(BIG), before)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "entries/2028-06-big-early.md")))
 
 
 class StateTest(WriteLog):
@@ -2138,16 +2241,13 @@ class ReviewFixesTest(WriteLog):
         self.new()
         self.write("README.md", self.read("README.md").replace("\n\n## Upstream\n", "").replace("\n", "\r\n").rstrip())
         before = self.read("README.md")
-        self.assertEqual(self.tool("readme-row", NEW_W)[1][0][:22], "readme row unchanged: ")
+        self.assertEqual(self.tool("readme")[1][0][:17], "readme unchanged:")
         self.assertEqual(self.read("README.md"), before)
         self.new("lamp", "2030-01", "2030-01 – 2030-05")
         text = self.read("README.md")
         self.assertNotIn("\n", text.replace("\r\n", ""))   # no bare LF
         self.assertFalse(text.endswith("\n"))
-        self.write("README.md", text.replace(self.rows()[0] + "\r\n", "") + "\r\n" + self.rows()[0])
-        self.assertEqual(self.tool("readme-sort")[0], 0)
-        self.assertFalse(self.read("README.md").endswith("\n"))
-        self.assertNotIn("\n", self.read("README.md").replace("\r\n", ""))
+        self.assertEqual(len(self.rows()), 2)
 
     def test_new_and_period_write_nothing_without_a_table(self):
         os.remove(os.path.join(self.root, "README.md"))
@@ -2156,9 +2256,14 @@ class ReviewFixesTest(WriteLog):
         self.write(NEW_W, entry(period="2031-01 – 2031-03"))
         before = self.read(NEW_W)
         self.assertEqual(self.tool("period", NEW_W, "--cover", "2031-06-01")[0], 1)
-        self.write("README.md", "| Period | Entry | Type | Tags | Status |\n|---|---|---|---|---|\n")
-        self.assertEqual(self.tool("period", NEW_W, "--cover", "2031-06-01")[0], 1)   # no row yet
+        self.write("README.md", "# Log\n")
+        code, lines = self.tool("period", NEW_W, "--cover", "2031-06-01")
+        self.assertEqual(code, 1)
+        self.assertTrue(lines[0].startswith("readme not writable: README.md has no Entries table"), lines)
         self.assertEqual(self.read(NEW_W), before)
+        self.write("README.md", "| Period | Entry | Type | Tags | Status |\n|---|---|---|---|---|\n")
+        self.assertEqual(self.tool("period", NEW_W, "--cover", "2031-06-01")[0], 0)   # #574: no row needed first
+        self.assertEqual(self.rows(), ["| 2031-01 – 2031-06 | [Widget Sorter](%s) | project | - |" % NEW_W])
 
     def test_new_refuses_a_reversed_period_and_a_title_it_cannot_hold(self):
         self.assertEqual(self.new("a", "2023-05", "2023-05 – 2023-01")[0], 2)
@@ -2166,12 +2271,12 @@ class ReviewFixesTest(WriteLog):
                                    "title=It's \"Big\" #1", "--field", "period=2023-05")[0], 2)
         self.assertEqual(entries.row_order("2023-05 – 2023-01")[0], 0)   # an unreadable period sorts with GAP
 
-    def test_the_entries_table_is_the_one_that_links_entries(self):
+    def test_the_entries_table_is_the_one_under_its_heading(self):
         self.write("README.md", "| Name | Entry |\n|---|---|\n| a | b |\n\n" + self.read("README.md"))
         self.new()
+        self.assertTrue(self.read("README.md").startswith("| Name | Entry |\n|---|---|\n| a | b |\n\n"))
         self.assertIn("](%s)" % NEW_W, self.read("README.md").split("## Entries")[1])
-        self.assertEqual(self.tool("readme-row", NEW_W)[0], 0)
-        self.assertEqual(self.tool("readme-sort"), (0, ["OK: 1 entry rows in order"]))
+        self.assertEqual(self.check(), (0, ["OK: 1 entries, no findings"]))
 
     def test_date_picks_a_part_still_open(self):
         for last in ("2031-04 – GAP", "GAP – GAP"):
@@ -2412,6 +2517,7 @@ class ListFlagsTest(Log):
                                      " entries/2025-04-widget-2.md"])
 
 BIG = "entries/2028-01-big.md"
+SOLO = "entries/2029-06-solo.md"
 
 
 class ConsolidateHelpersTest(WriteLog):
@@ -2424,6 +2530,7 @@ class ConsolidateHelpersTest(WriteLog):
                  "--field", "visibility=public", "--visibility-source", "https://github.com/u/big",
                  "--field", "links=https://github.com/u/big", status="imported")
         self.new("solo", "2029-06", "2029-06 – 2029-08")
+        self.write(".gitignore", ".build/\n")   # as the Template's: diff writes its file there
         self.commit("import")
 
     def commit(self, subject):
@@ -2431,7 +2538,8 @@ class ConsolidateHelpersTest(WriteLog):
         self.git("commit", "-q", "-m", subject)
 
     def names(self):
-        return [re.search(r"entries/(.*)\.md", r).group(1) for r in self.rows()]
+        """The entries each row links, a row's names joined by ` `."""
+        return [" ".join(re.findall(r"entries/(.*?)\.md", r)) for r in self.rows()]
 
     def split(self, *more):
         return self.tool("split", BIG, "--phase", "Prototype", "--cut", "2029-03:scale:Scale-up", "--today",
@@ -2455,10 +2563,12 @@ class ConsolidateHelpersTest(WriteLog):
         self.assertIn("visibility: public          # (https://github.com/u/big)\n", part.text)
         self.assertIn("\n# Widget Sorter: Scale-up\n", part.text)
         self.assertIn("- **I did:** GAP:\n", part.text)
-        # a row for each part, the status copied, the series in one block, newest part first
-        self.assertEqual(self.names(), ["2030-01-big-launch", "2029-03-big-scale", "2028-01-big", "2029-06-solo"])
-        self.assertTrue(all(r.endswith(" | imported |") for r in self.rows()[:3]), self.rows())
-        self.assertEqual(self.tool("readme-sort", "--check")[0], 0)
+        # one row for the series, the status copied, newest part first
+        self.assertEqual(lines[3:], ["readme written: README.md:5-8: 2 rows"])
+        self.assertEqual(self.names(), ["2030-01-big-launch 2029-03-big-scale 2028-01-big", "2029-06-solo"])
+        self.assertEqual(self.rows()[0], "| 2028-01 – 2030-06 | **Widget Sorter** [launch](entries/2030-01-big-launch.md)"
+                         " · [scale](entries/2029-03-big-scale.md) · [2028-01](entries/2028-01-big.md) | GAP: type |"
+                         " imported |")
         self.assertEqual([l for l in self.check()[1] if "series" in l or "README" in l], [])
 
     def test_split_with_a_pause(self):
@@ -2483,7 +2593,7 @@ class ConsolidateHelpersTest(WriteLog):
 
     def test_split_an_ongoing_part_again(self):
         self.write(BIG, self.read(BIG).replace("2028-01 – 2030-06", "2028-01 – ongoing"))
-        self.tool("readme-row", BIG)
+        self.tool("readme")
         self.split()
         part = "entries/2029-03-big-scale.md"
         self.assertEqual(entries.Entry(self.root, part).period, "2029-03 – ongoing")
@@ -2511,12 +2621,14 @@ class ConsolidateHelpersTest(WriteLog):
     def test_diff_prints_a_fenced_block(self):
         self.assertEqual(self.tool("diff", BIG), (0, ["no change: %s" % BIG]))
         self.write(BIG, self.read(BIG).replace("GAP:\n", "Sorted widgets with ```` fences.\n", 1))
-        code, lines = self.tool("diff", BIG)
-        self.assertEqual((code, lines[0], lines[-1]), (0, "`````diff", "`````"))
+        code, lines = self.tool("diff", BIG)   # small, one entry: the block follows the list
+        lines = lines[lines.index("`````diff"):]
+        self.assertEqual((code, lines[-1]), (0, "`````"))
         self.assertIn("+Sorted widgets with ```` fences.", lines)
         self.split()
-        code, lines = self.tool("diff", BIG, "entries/2029-03-big-scale.md")
-        self.assertEqual((lines[0], lines[-1]), ("`````diff", "`````"))
+        code, lines = self.tool("diff", BIG, "entries/2029-03-big-scale.md", "--paste")
+        lines = lines[lines.index("`````diff"):]
+        self.assertEqual(lines[-1], "`````")
         heads = [l for l in lines if l.startswith("diff --git")]
         self.assertEqual(heads, ["diff --git a/%s b/%s" % (p, p) for p in ("README.md", BIG, "entries/2029-03-big-scale.md")])
         self.assertIn("+title: Widget Sorter: Scale-up", lines)
@@ -2529,11 +2641,14 @@ class ConsolidateHelpersTest(WriteLog):
         self.write(BIG, self.read(BIG).replace(para, edited.replace("word0 ", "word0  "))
                    .replace("Old line to delete.\n", "A new line, added whole.\n"))
         code, lines = self.tool("diff", BIG)
+        self.assertFalse(any(l.endswith("```diff") for l in lines), lines)   # ~1,000 changed words: over PASTE_WORDS
+        code, lines = self.tool("diff", BIG, "--paste")
         self.assertEqual(code, 0, lines)
-        self.assertLess(sum(map(len, lines)), 1500)
+        lines = lines[lines.index("```diff"):]
+        self.assertLess(sum(map(len, lines)), 1500, lines)
         self.assertEqual(lines[1], "# [… N words unchanged …]: N unchanged words this diff leaves out;"
                                    " it shows every added and deleted word")
-        self.assertEqual([l for l in lines if l.startswith("@@")], ["@@ -17,9 +17,9 @@ ## One line"])   # the change's section
+        self.assertEqual([l for l in lines if l.startswith("@@")], ["@@ -18,9 +18,9 @@ ## One line"])   # the change's section
         old, new = [l for l in lines if l.startswith("-word0")], [l for l in lines if l.startswith("+word0")]
         self.assertEqual(len(old), 1, lines)
         self.assertEqual(len(new), 1, lines)
@@ -2549,6 +2664,8 @@ class ConsolidateHelpersTest(WriteLog):
         # a line added whole is printed in full, however long
         self.write(BIG, self.read(BIG) + "\n%s\n" % para.replace("word", "fresh"))
         code, lines = self.tool("diff", BIG)
+        self.assertFalse(any(l.endswith("```diff") for l in lines), lines)   # over PASTE_WORDS: the list and the file only
+        code, lines = self.tool("diff", BIG, "--paste")
         self.assertIn("+" + para.replace("word", "fresh"), lines)
 
     def test_diff_names_the_section_and_pairs_a_last_line(self):
@@ -2557,7 +2674,8 @@ class ConsolidateHelpersTest(WriteLog):
         self.write(BIG, text)
         self.commit("fence")
         self.write(BIG, text.replace("word150 ", "word150 CHANGED "))
-        code, lines = self.tool("diff", BIG)
+        code, lines = self.tool("diff", BIG, "--paste")
+        lines = lines[next(k for k, l in enumerate(lines) if l.endswith("diff") and l.startswith("```")):]
         self.assertEqual(code, 0, lines)
         self.assertEqual([l for l in lines if l.startswith("@@")][-1][-len(" @@ ## Notes"):], " @@ ## Notes")
         changed = [l for l in lines if l[:1] in "-+" and "word150" in l]
@@ -2566,10 +2684,133 @@ class ConsolidateHelpersTest(WriteLog):
         self.assertEqual([lines[k - 1][:1] for k, l in enumerate(lines) if l == "\\ No newline at end of file"],
                          ["-", "+"])   # each mark after the line it is about
 
+    def deletions(self, diff_file):
+        """(path, old line number) of each deleted line in a full git diff file: (non-blank, blank)."""
+        out, blank, path, at = set(), set(), None, 0
+        for line in self.read(diff_file).split("\n"):
+            m = re.match(r"@@ -(\d+)", line)
+            if line.startswith("--- "):
+                path = line[6:] if line.startswith("--- a/") else None
+            elif line.startswith("+++ "):
+                pass
+            elif m:
+                at = int(m.group(1))
+            elif line[:1] == "-":
+                (out if line[1:].strip() else blank).add((path, at))
+                at += 1
+            elif line[:1] == " ":
+                at += 1
+        return out, blank
+
+    def assertListsEveryDeletion(self, lines, diff_file):
+        """The change list, a run of moves included, covers every non-blank deleted line of the diff
+        file, and each line it covers is a deleted one."""
+        self.assertIn("```changes", lines)
+        self.assertTrue(lines[lines.index("```changes") - 1].startswith("paste: paste the lines below, from `"
+                                                                         "```changes` to the closing ````"), lines)
+        listed = set()
+        for m in (re.match(r"(deleted|changed|moved): ([^:]+):(\d+)(?:-(\d+))?", l) for l in lines):
+            if m:
+                listed |= {(m.group(2), k) for k in range(int(m.group(3)), int(m.group(4) or m.group(3)) + 1)}
+        lines_deleted, blank = self.deletions(diff_file)
+        self.assertEqual(lines_deleted - listed, set())
+        self.assertEqual(listed - lines_deleted - blank, set())
+
+    def test_diff_lists_every_deleted_and_changed_line(self):
+        body = "".join("- Fact %d about the widget sorter, measured in week %d.\n" % (k, k) for k in range(12))
+        self.write(BIG, self.read(BIG).replace("GAP:\n", body + "\nOld paragraph to drop.\n", 1))
+        self.commit("facts")
+        edited = (body.replace("Fact 3 about", "Fact 3, merged with fact 4, about")
+                  .replace("- Fact 4 about the widget sorter, measured in week 4.\n", "")
+                  .replace("- Fact 9 about the widget sorter, measured in week 9.\n", ""))
+        self.write(BIG, self.read(BIG).replace(body + "\nOld paragraph to drop.\n", edited + "\n"))
+        code, lines = self.tool("diff", BIG)
+        self.assertEqual(code, 0, lines)
+        self.assertIn("diff file: .build/diff/2028-01-big.diff", lines)
+        self.assertListsEveryDeletion(lines, ".build/diff/2028-01-big.diff")
+        changed = [l for l in lines if l.startswith("changed:")]
+        self.assertEqual(len(changed), 1, lines)
+        self.assertIn("- Fact 3 about the widget sorter", changed[0])
+        self.assertIn("=> - Fact 3, merged with fact 4, about the widget sorter", changed[0])
+        self.assertTrue(any(l.startswith("deleted: %s:" % BIG) and l.endswith(": Old paragraph to drop.") for l in lines), lines)
+        self.assertTrue(any(l.startswith("size: %s: " % BIG) and " tokens, " in l for l in lines), lines)
+        self.assertTrue(any(l.startswith("open: ") and "2028-01-big.diff" in l for l in lines), lines)
+
+    def test_diff_lists_every_log_file_it_changed(self):
+        self.write("direction.md", "# Direction\n\n- Wants infra roles.\n- Moving to Berlin.\n")
+        self.write("outputs/reports/2031-01-01-x.md", "# Report\n\nFrozen line.\n")
+        self.write("NOTES.md", "not a Log file\n")
+        pdf = os.path.join(self.root, "outputs", "resumes", "cv.pdf")
+        os.makedirs(os.path.dirname(pdf))
+        with open(pdf, "wb") as fh:
+            fh.write(b"%PDF\x00\x01")
+        self.commit("more files")
+        with open(pdf, "wb") as fh:
+            fh.write(b"%PDF\x00\x02")
+        self.write(BIG, self.read(BIG).replace("GAP:\n", "", 1))
+        self.write(SOLO, self.read(SOLO).replace("GAP:\n", "", 1))
+        self.write("direction.md", "# Direction\n\n- Wants infra roles.\n- Moving to Berlin in May.\n- Learning German.\n")
+        self.write("outputs/reports/2031-01-01-x.md", "# Report\n\nThawed line.\n")
+        self.write("sources/notes/2031-04-20-chat.md", "An excerpt.\n")
+        self.write("stories/debugging.md", "# Debugging\n")
+        self.write("NOTES.md", "still not a Log file\n")
+        code, lines = self.tool("diff", BIG)
+        self.assertEqual(code, 0, lines)
+        block = lines[lines.index("```changes") + 1:]
+        block = block[:block.index("```")]
+        self.assertTrue(block[0].startswith("deleted: %s:" % BIG), block)
+        self.assertIn("new file: sources/notes/2031-04-20-chat.md", block)
+        at = block.index("other Log file: direction.md")
+        self.assertEqual(block[at + 1:at + 3], ["changed: direction.md:4 (# Direction): - Moving to Berlin. => - Moving to Berlin in May.",
+                                                "added: direction.md:5 (# Direction): - Learning German."])
+        at = block.index("not consolidate's to change: outputs/reports/2031-01-01-x.md: an output, frozen")
+        self.assertEqual(block[at + 1], "changed: outputs/reports/2031-01-01-x.md:3 (# Report): Frozen line. => Thawed line.")
+        at = block.index("not consolidate's to change: stories/debugging.md: a Talking points file, the user's to confirm")
+        self.assertEqual(block[at + 1], "new file: stories/debugging.md")
+        at = block.index("other Log file: %s" % SOLO)   # another entry, in the diff's order: after direction.md
+        self.assertTrue(block[at + 1].startswith("deleted: %s:" % SOLO), block)
+        self.assertGreater(at, block.index("other Log file: direction.md"))
+        self.assertIn("changed: outputs/resumes/cv.pdf: no line to list (a binary file, or its mode)", block)
+        self.assertFalse(any("NOTES.md" in l for l in lines), lines)
+        self.assertListsEveryDeletion(lines, ".build/diff/2028-01-big.diff")
+        self.assertIn("+- Learning German.", self.read(".build/diff/2028-01-big.diff").split("\n"))
+
+    def test_diff_after_a_split_lists_the_moves_not_the_parts(self):
+        body = "".join("- Scale-up fact %d: the sorter handled %d widgets a day after the rewrite.\n" % (k, k * 100)
+                       for k in range(40))
+        self.write(BIG, self.read(BIG).replace("GAP:\n", "Prototype fact.\n\n" + body, 1))
+        self.commit("facts")
+        self.split()
+        part = "entries/2029-03-big-scale.md"
+        self.write(BIG, self.read(BIG).replace(body, ""))
+        self.write(part, self.read(part).replace("GAP:\n", body + "- Scale-up fact 99, reworded.\n", 1))
+        code, lines = self.tool("diff", BIG, part)
+        self.assertEqual(code, 0, lines)
+        self.assertFalse(any(l.endswith("```diff") for l in lines), lines)   # a split: no block unless --paste
+        self.assertFalse(any(l.startswith("+") for l in lines), lines)
+        moved = [l for l in lines if l.startswith("moved: ")]   # the 40 lines in a row, as one run
+        self.assertEqual(len(moved), 1, lines)
+        self.assertRegex(moved[0], r"^moved: %s:(\d+)-\d+ \(## [^)]*\) -> %s:\d+-\d+: 40 lines, the first: - Scale-up fact 0: "
+                         % (BIG, part))
+        self.assertListsEveryDeletion(lines, ".build/diff/2028-01-big.diff")
+        self.assertEqual([l.split(":")[1].strip() for l in lines if l.startswith("size: ")], [BIG, part])
+        self.assertIn("+- Scale-up fact 99, reworded.", self.read(".build/diff/2028-01-big.diff").split("\n"))
+        code, pasted = self.tool("diff", BIG, part, "--paste")
+        self.assertIn("```diff", pasted)
+        # a fact that stayed breaks the run: the range never spans a line that is still there
+        fact20 = "- Scale-up fact 20: the sorter handled 2000 widgets a day after the rewrite.\n"
+        self.write(BIG, self.read(BIG).replace("Prototype fact.\n\n", "Prototype fact.\n\n" + fact20))
+        code, lines = self.tool("diff", BIG, part)
+        moved = [l for l in lines if l.startswith("moved: ")]
+        self.assertEqual([re.search(r": (\d+) lines, ", l).group(1) for l in moved], ["20", "19"], lines)
+        self.assertListsEveryDeletion(lines, ".build/diff/2028-01-big.diff")
+        status = subprocess.run(["git", "-C", self.root, "status", "--porcelain", "--ignored"], capture_output=True, text=True).stdout
+        self.assertIn("!! .build/", status.splitlines())
+
     def test_undo_a_split(self):
         # the draft extended the period before the split: undo keeps the draft's, from the parts' span
         self.write(BIG, self.read(BIG).replace("2028-01 – 2030-06", "2028-01 – 2030-09").replace("GAP:\n", "Draft.\n", 1))
-        self.tool("readme-row", BIG)
+        self.tool("readme")
         self.write("stories.md", index(("Debugging", story("entries/2029-03-big-scale.md", "context"))))
         self.split("--cut", "2030-01:launch:Launch")
         self.tool("diff", BIG, "entries/2029-03-big-scale.md", "entries/2030-01-big-launch.md")   # adds them -N
@@ -2579,7 +2820,7 @@ class ConsolidateHelpersTest(WriteLog):
         code, lines = self.tool("split", "--undo", BIG, *parts)
         self.assertEqual(code, 0, lines)
         self.assertEqual(lines[0], "restored: %s: Widget Sorter; period 2028-01 – 2030-09; series -" % BIG)
-        self.assertEqual(lines[1:3], ["deleted: %s; README row" % p for p in parts])
+        self.assertEqual(lines[1:4], ["deleted: %s" % p for p in parts] + ["readme written: README.md:5-8: 2 rows"])
         self.assertEqual(lines[-1], "still names entries/2029-03-big-scale.md: stories.md:7: | Debugging | "
                                     "[Widget](entries/2029-03-big-scale.md#context) |")
         self.assertEqual(sorted(os.listdir(os.path.join(self.root, "entries"))),
@@ -2587,7 +2828,7 @@ class ConsolidateHelpersTest(WriteLog):
         self.assertIn("Draft.\n", self.read(BIG))
         self.assertIn("\nseries:                     # a part", self.read(BIG))
         self.assertEqual(self.names(), ["2028-01-big", "2029-06-solo"])
-        self.assertEqual(self.rows()[0], "| 2028-01 – 2030-09 | [Widget Sorter](%s) | GAP: type | go, kafka | imported |" % BIG)
+        self.assertEqual(self.rows()[0], "| 2028-01 – 2030-09 | [Widget Sorter](%s) | GAP: type | imported |" % BIG)
         status = subprocess.run(["git", "-C", self.root, "status", "--porcelain"], capture_output=True, text=True).stdout
         self.assertEqual(sorted(l[3:] for l in status.splitlines()), ["README.md", BIG, "stories.md"])
 
@@ -2605,7 +2846,7 @@ class ConsolidateHelpersTest(WriteLog):
         self.assertEqual(code, 0, lines)
         self.assertFalse(os.path.exists(os.path.join(self.root, BIG)))
         self.assertEqual(self.names(), ["2029-03-big-scale", "2029-06-solo"])
-        self.assertEqual(lines[1:4], ["story removed: Debugging: *(core)* [Widget](%s#context)" % BIG,
+        self.assertEqual(lines[0:3], ["story removed: Debugging: *(core)* [Widget](%s#context)" % BIG,
                                       "story removed: Proudest project: [Widget](%s) — all of it; more" % BIG,
                                       "deleted: %s" % BIG])
         self.assertIn("| Debugging | [Widget](entries/2029-06-solo.md) |\n", self.read("stories.md"))
@@ -2659,7 +2900,8 @@ class ConsolidateHelpersTest(WriteLog):
         self.write("direction.md", "- like [X](entries/2030-01-x.md)\n")
         code, lines = self.tool("drop", "entries/2030-01-x.md", "--reason", "never happened", "--today", "2031-06-02")
         self.assertEqual(code, 0, lines)
-        self.assertEqual(lines[0], "README row: none")
+        self.assertEqual(lines[0], "deleted: entries/2030-01-x.md")
+        self.assertIn("readme not written: no README.md in %s" % self.root, lines)
         self.assertEqual(lines[-2:], ["next: take the entry out of each line below, or delete a line that says nothing"
                                       " else", "still names: direction.md:1: - like [X](entries/2030-01-x.md)"])
         self.assertEqual(self.read("sources/import-log.md"), "# Import log\n\n## 2031-06-02 — Dropped: X\n\n"
@@ -2728,16 +2970,15 @@ class ConsolidateHelpersTest(WriteLog):
         self.assertEqual(entries.Entry(self.root, scale).fields["title"], "Scale-up work")
 
     def test_undo_of_an_entry_not_in_head_and_one_whose_title_changed(self):
-        self.write("entries/2030-01-new.md", entry(title="New Thing", period="2030-01 – 2030-12"))
-        self.tool("readme-row", "entries/2030-01-new.md", "--status", "stub")
+        self.write("entries/2030-01-new.md", entry(title="New Thing", period="2030-01 – 2030-12", status="stub"))
         self.tool("split", "entries/2030-01-new.md", "--phase", "A", "--cut", "2030-06:b:B")
         code, lines = self.tool("split", "--undo", "entries/2030-01-new.md", "entries/2030-06-new-b.md")
         # #421: a new entry the split made a first part is a plain entry again
         self.assertEqual(lines[0], "restored: entries/2030-01-new.md: New Thing; period 2030-01 – 2030-12; series -")
         self.assertIn("\n# New Thing\n", self.read("entries/2030-01-new.md"))
         # a new entry that was a later part already keeps its title and series, and says so
-        self.write("entries/2030-01-new.md", entry(title="Big: Later", period="2030-01 – 2030-12", series="big"))
-        self.tool("readme-row", "entries/2030-01-new.md", "--status", "stub")
+        self.write("entries/2030-01-new.md", entry(title="Big: Later", period="2030-01 – 2030-12", series="big",
+                                                   status="stub"))
         self.tool("split", "entries/2030-01-new.md", "--phase", "A", "--cut", "2030-06:b:B")
         code, lines = self.tool("split", "--undo", "entries/2030-01-new.md", "entries/2030-06-big-b.md")
         self.assertEqual(lines[:2], ["not in HEAD: entries/2030-01-new.md: title and series left as they are (its series"
@@ -2761,13 +3002,14 @@ class ConsolidateHelpersTest(WriteLog):
         self.assertEqual(self.read(BIG), text)   # the split's series: line goes again
 
     def test_a_period_change_re_places_the_row(self):
-        """consolidate step 6: readme-row moves an entry whose period changed past its neighbours."""
+        """consolidate step 6: set-status writes the table whole, so a period the draft changed is placed too."""
         self.assertEqual(self.names(), ["2028-01-big", "2029-06-solo"])
         self.write(BIG, self.read(BIG).replace("2028-01 – 2030-06", "2028-01 – 2029-07"))
-        code, lines = self.tool("readme-row", BIG, "--status", "consolidated")
+        self.assertEqual(self.check()[0], 1)   # the table is not generated from the new period yet
+        code, lines = self.tool("set-status", BIG, "consolidated")
         self.assertEqual(code, 0)
         self.assertEqual(self.names(), ["2029-06-solo", "2028-01-big"])
-        self.assertEqual(self.tool("readme-sort", "--check")[0], 0)
+        self.assertEqual(self.check()[0], 0)
 
 if __name__ == "__main__":
     unittest.main()

@@ -394,6 +394,17 @@ class Transcript(unittest.TestCase):
         grade, ev = self.map_count([*fit_map(), SHOWN])
         self.assertEqual(grade, "PASS", ev)
 
+    def test_map_count_unfenced_show_pass(self):
+        """#550: map --show's block pasted as printed, with no code fence, under write step 9's heading."""
+        block = "\n".join([COURSE, MAP, "", "| Requirement | Kind | Written by | Category | Entry |", "|---|---|---|---|---|",
+                           r"| Go | required | user | covered | `2025-01-widget.md` (a \| b) |"])
+        cmd = "py -3 -I tools/fit.py --root C:/t/log map .build/fit/2026-10-24-a-b.jsonl --show"
+        out = "show: paste the lines below, from `Course work:` to the table's last row, into your reply whole, as printed"
+        shown = text("**Requirement map**\n\n" + block + "\n\nThe resume is below.")
+        grade, ev = self.map_count([bash(cmd), result(out + "\n" + block + "\nmap: ok"), shown])
+        self.assertEqual(grade, "PASS", ev)
+        self.assertIn("shown as fit.py printed it", ev)
+
     def test_map_count_rerun_until_none_pass(self):
         first = fit_map("Map: 10 requirements and duties, 9 rows; no row: mentoring junior engineers")
         self.assertEqual(self.map_count([*first, *fit_map(), SHOWN])[0], "PASS")

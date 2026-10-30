@@ -39,6 +39,10 @@ This section is the whole task of the subagent the second layer starts.
 
 Done when the reply holds only the edited text.
 
+## Posting terms
+
+Every employer-facing output written for a posting uses the posting's term wherever the log words the same claim another way: its word for a technique, tool category, domain or role, and its spelling of a name, in reused text too (a copied bullet, a reused answer). A skimming reader and an ATS look for those words. Use the posting's term only where the entries support it: it names the same thing at the same scope ([Principles](#principles)). Where no supported wording meets a requirement, it stays a gap. (practice)
+
 ## Resumes
 
 ### Principles

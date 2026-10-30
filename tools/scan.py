@@ -3,6 +3,7 @@
 
   python3 -I tools/scan.py name [--screen-budget <s> --fit-budget <f>]   (Windows: py -3 -I tools/scan.py ...)
   python3 -I tools/scan.py sources
+  python3 -I tools/scan.py explore <query>
   python3 -I tools/scan.py prune [--dry-run]
   python3 -I tools/scan.py pending
   python3 -I tools/scan.py dedup <postings.jsonl> --out <kept.jsonl> [--window <days>]
@@ -10,7 +11,8 @@
   python3 -I tools/scan.py screen <dir> --screen-budget <s> --fit-budget <f> [--sort [--give-up]]
   python3 -I tools/scan.py screen --check <results.jsonl> [--batch <batch.todo>]
   python3 -I tools/scan.py fetch <capture path> <url>
-  python3 -I tools/scan.py capture <capture path> <url> <page.json | text file> [--stand-in <API url>]
+  python3 -I tools/scan.py capture <capture path> <url> <page.json | text file> [--stand-in <API url> | --pasted]
+  python3 -I tools/scan.py state <capture path>
   python3 -I tools/scan.py fitmap <url> [--out <fit result>]
   python3 -I tools/scan.py rank <dir> --n <n> [--m <m>] [--give-up]
   python3 -I tools/scan.py report <rows.jsonl> [--name <name>] [--top <line>] [--drafting] [--screen <dir>] [--body <file>]
@@ -53,13 +55,14 @@ Files it reads and writes (skills/career-log/modes/scan.md › Files):
   draft as `scan/<name>:scan-drafts/<folder>`, `.build/scan/<name>/drafts/<folder>` (no remote), or the
   application folder it was saved as;
 - `scan-sources.md`: one `## <source>` section per job source, with `- URL:`, `- Kind:`
-  (KINDS), `- Read:` and `- Fields:` lines;
+  (KINDS), `- Read:` and `- Fields:` lines, and an optional `- Query:` line (the source's search URL,
+  or how to search it in words, with `{query}` where the search words go: `explore` reads it);
 - a run's folder `.build/scan/<name>/` (`<dir>` below), never committed: `collected.jsonl`,
   `titles.jsonl` and `read.jsonl` (the agent's; `read.jsonl` holds one `{"source", "read"}` object
   per source read: its section name and how its postings were read, one of READS), `kept.jsonl`,
   `dedup-dropped.jsonl`, `prefiltered.jsonl`, `prefilter-dropped.jsonl`, `screen-list.jsonl`,
-  `not-screened.jsonl`, `postings/<folder>.md` (the captures: the URL on the first line, a blank
-  line, then the page's text), `fetched.jsonl` (fetch's), `screen/batch-<i>.todo` (capture paths, one per line), `screen/*.jsonl` (the Screen results), `fit.jsonl`,
+  `not-screened.jsonl`, `postings/<folder>.md` (the captures: the URL on the first line, the read
+  line, a blank line, then the page's text; see `state`), `fetched.jsonl` (fetch's), `screen/batch-<i>.todo` (capture paths, one per line), `screen/*.jsonl` (the Screen results), `fit.jsonl`,
   `screened.jsonl`, `dropped.jsonl`, `fit/<folder>.jsonl` (the fit results, in tools/fit.py's
   format), `unreadable.jsonl`, `ranked.jsonl` and `rows.jsonl`.
 
@@ -68,7 +71,8 @@ constraint and the posting's words), `tier` (the role's rank in direction.md's T
 line's place, 1 the first, `GAP:` lines counted, never a `GAP:` line or past the last role; or
 null for no tier, and null while the Target roles are empty), `rows` (one object per
 requirement or duty: `requirement`, `kind` (`required`, `preferred` or `duty`), `entries` (the file
-names that touch it, or [])), and an optional `check` (things to check, a list of strings). A
+names that touch it, or []) and `skill`, a non-empty string: the skill's name, as a map row's
+`skill` in tools/fit.py --help, which `fit.py heatmap` reads), and an optional `check` (things to check, a list of strings). A
 result reused from a report has `touched` and `required` in place of `rows`. Rough coverage is `<touched>/<required>`: the required and duty rows,
 and of them the ones with an entry; when a posting marks no row required or duty, every row counts. The
 Screen key is `<list>-<direction>`: the first 8 hex digits of the SHA-256 of `tools/entries.py list`'s
@@ -89,6 +93,19 @@ key is the current one.
   the name's lowercase ASCII letters and digits joined by `-`, or with its hash when it has none or
   shares its slug with another source. Then `sources: <n>`; or `sources: none (<why>)` when the
   file is missing or has no section.
+- `explore <query>`: starts an exploratory query run, the collection run with the query (a domain,
+  a kind of employer, a role family), with no effect on scan's records. Its folder is
+  `.build/scan/explore-<slug>-<hash>`, one per query (case and spacing aside), marked by its
+  `explore.json` (`{"query"}`), so a repeat run of the query uses the same folder. It prints
+  `query:`, `name:` and `dir:` lines, then per source, in order, `read: <source> | <its Query: line,
+  the query in place of {query}>` (URL-encoded in a URL) or `skip: <source> (<why>)` (no `Query:`
+  line, or one with no `{query}`: never read unfiltered), a `sources:` count line, a `reuse:` line
+  (the captures and Screen results an earlier run of the query left there, or none) and a
+  `records: none` line. It refuses, writing nothing, when no source can take the query. The
+  commands given the run's folder act as in a scan run, except where `dedup`, `screen`, `report`,
+  `summary` and `drafts` below say "exploratory". `status`, `prune`, `cleanup` and `draft` act on
+  scan's records, not on a run: the exploratory run never calls them, and `cleanup` leaves its
+  folder.
 - `prune`: deletes the declined lines and the `scan/*` branches (their worktrees, the local branch
   and the one on `origin`) dated more than PRUNE_DAYS days before --date. One `pruned:` line each.
 - `pending`: `report: <path>` for the newest scan report (or `report: none`), then one
@@ -108,7 +125,9 @@ key is the current one.
   `dropped by reason:` names it) and `why`; prints one `dropped: <url> (<why>)` line each, then a
   `kept:` line with the counts and a `dropped by reason:` line. With --window <days>, it first drops each posting whose `posted`
   starts with a date (YYYY-MM-DD) before --date less that many days; a `posted` with no such date
-  (`2d ago`) is kept, with an `undated:` line.
+  (`2d ago`) is kept, with an `undated:` line. In an exploratory run (the postings file or --out in
+  its folder) it keeps applied and declined postings, gives no `seen`, prints its `kept:` line
+  without the new and listed counts, and ends with an `explore:` line.
 - `prefilter`: reads `<dir>/kept.jsonl` and `<dir>/titles.jsonl`, the agent's judgement on each
   kept posting's list fields: one `{"url", "tier", "by", "drop"}` object per kept posting, `tier`
   the title's rank in direction.md's Target roles (its line's place, 1 the first, `GAP:` lines
@@ -134,7 +153,11 @@ key is the current one.
   left in `.build/scan/*/postings/` for the same URL; writes each result reused from a report to
   `screen/reused.jsonl`; and splits the others into `screen/batch-<i>.todo` files of up to BATCH
   capture paths. It prints a `key:` line, one `posting: <url> | capture <path> (have|copied|need) |
-  screen (reused <report>|batch-<i>)` line each, and a `screen:` count line. With --sort, every
+  screen (reused <report>|batch-<i>)` line each, and a `screen:` count line. In an exploratory run,
+  a folder is `<company>-<role>`, with no date, so a repeat run finds its captures where they are
+  (one there that holds another posting is moved aside as `<capture>.stale`), and a result the
+  folder's earlier `screen` left, while its key is the current one, is reused (`screen reused an
+  earlier run`). With --sort, every
   posting of the list with a capture must have a result in `screen/*.jsonl` (else it refuses, naming
   the missing ones, or, with --give-up, moves each one's capture to `<capture>.unreadable`, where
   no later run copies it from, with a `gave up:` line); one with neither goes to `unreadable.jsonl`.
@@ -152,19 +175,34 @@ key is the current one.
   captures): a GET of <url>, its HTML read as the text a reader sees (no script, style or template).
   It refuses a posting API or JSON endpoint (an `api.` host, an `/api/` path, Workday's `/wday/cxs/`,
   a `.json` file): the page's own URL is the read; and a record of one never counts for `capture`.
-  It appends `{"url", "status", "chars", "capture"}` to the run folder's `fetched.jsonl` (`<dir>` for
-  a capture path `<dir>/postings/<x>.md`, else the capture's own folder), then, given status 200 and
-  at least 500 characters of text, writes the capture as `capture` does and prints `capture: <path>
-  (<url>, fetch, <n> characters)` and a `next:` line (read the capture: one with no posting is read
-  again with playwright-cli). Otherwise it writes no capture and refuses with `fetch: no capture
-  from <url> (<why>)` and a `next:` line: a page built by script, a wall or an error status is read
-  next with playwright-cli (a 404 or 410 may be a posting that is gone).
-- `capture`: writes a posting's capture: the URL, a blank line, then the text of the page file
-  (a `.json` file holding one JSON string, as `eval ... --filename` writes it, or a text file),
-  with LF line ends. It refuses a URL with no `fetch` on record in `fetched.jsonl` (the page's own
-  URL is read first, before playwright-cli or a posting API), and a page with no text, writing
-  nothing. --stand-in names the API or JSON endpoint the page file came from (its text saved as a
-  text file), and its line ends `, stand-in <API url>)`.
+  It appends `{"url", "status", "chars", "capture", "path"}` to the run folder's `fetched.jsonl`
+  (`<dir>` for a capture path `<dir>/postings/<x>.md`, else the capture's own folder; `path` the
+  capture path from that folder), then, given status 200 and at least 500 characters of text,
+  writes the capture as `capture` does, its read line `read: fetch, ...`, and prints `capture: <path>
+  (<url>, fetch, <n> characters)` (`, closed (<why>))` at its end for a closed posting) and a `next:`
+  line (read the capture: one with no posting is read again with playwright-cli). Otherwise it
+  writes no capture and refuses with `fetch: no capture from <url> (<why>)` and a `next:` line: a
+  page built by script, a wall or an error status is read next with playwright-cli (a 404 or 410
+  may be a posting that is gone: `state` gives it as closed, and so does a capture of it written
+  before or after).
+- `capture`: writes a posting's capture: the URL, the read line, a blank line, then the text of the
+  page file (a `.json` file holding one JSON string, as `eval ... --filename` writes it, or a text
+  file), with LF line ends. It refuses a URL with no `fetch` on record in `fetched.jsonl` (the
+  page's own URL is read first, before playwright-cli or a posting API), and a page with no text,
+  writing nothing. Its text is a Browser capture's (`read: browser, ...`), unless --stand-in names
+  the API or JSON endpoint the page file came from (its text saved as a text file; `read: stand-in
+  <API url>, ...`), or --pasted says the user pasted it (`read: pasted, ...`; no fetch needed, the
+  URL the posting's own, from the user). Its line ends `, stand-in <API url>)` or `, pasted)`, and
+  `, closed (<why>))` for a closed posting.
+- `state`: a capture's state, read from the capture path alone (any capture, an application's
+  `posting.md` included): `state: <path> | <url> | read <how> | <open | closed (<why>) | unknown>`.
+  The read line, a capture's second line, is `read: <how>, open` or `read: <how>, closed (<why>)`:
+  <how> is `fetch` (scan's fetch), `browser` (a Browser capture), `stand-in <API url>` or `pasted`;
+  closed is a fetch of the URL on record with status 404 or 410 (`status 404`), or text that says the
+  posting takes no applications (`the page says "<words>"`, CLOSED_WORDING). With no file at the path,
+  a fetch on record that found the posting gone gives `no capture | closed (status <n>)`; a capture
+  with no read line (written before these) gives `read unknown | unknown (...)`; neither, exit 1.
+  Another tool reads the same through capture_state(path).
 - `fitmap`: the newest `## Fit maps` subsection for the URL: `fit map: <report> (entries commit
   <sha>)`, then `fit map: reuse`, or `fit map: stale (<each entry changed since>)`; or `fit map: none`.
   The entries a map cites are the dated file names in its Entry cells, in any letters (tools/fit.py's
@@ -200,7 +238,7 @@ key is the current one.
   Then it regenerates the dashboard (tools/dashboard.py: its `wrote:` or `unchanged:` line and its
   `artifact:` line; when that fails, it deletes the report it wrote, so the same command runs again
   once the error is fixed) and prints `commit: scan(<name>): <x> postings`, `<x>` the number of rows
-  given.
+  given. It refuses rows or a --screen folder of an exploratory run, writing nothing.
 - `summary`: the run's counts, one line each (collected, then each file a collected posting can end
   in: dedup-dropped, prefilter-dropped, not-screened, dropped, screened, unreadable, ranked), and a
   `top:` line per row of `rows.jsonl`. It then checks that each posting of `collected.jsonl` is in
@@ -210,7 +248,8 @@ key is the current one.
   old (else `no sponsorship record:`) and answered (else `sponsorship unanswered: <employer> |
   <kind> | <why>`): `summary: ok, ...`, or exit 1 with one `missing:`, `repeated:`, `extra:`, `no
   report:`, `no Screen line:`, `no sponsorship record:`, `sponsorship unanswered:` or `sponsorship
-  unreadable:` line each, then `summary: <n> finding(s)`.
+  unreadable:` line each, then `summary: <n> finding(s)`. An exploratory run has no report to
+  check: a `report: none` line instead.
 - `status`: sets the status (one of STATUSES) of the URL's row in the newest report that lists it,
   and its Draft cell with --draft. `declined` also adds the URL to scan-declined.jsonl, with --reason,
   and for a URL in no Pending table (a posting screened, not fully fitted) does only that. Then it
@@ -233,7 +272,8 @@ key is the current one.
   report's `## Fit maps` as `fit.md`. It prints `branch:` and `worktree:` (with a remote), one
   `draft: <url> | folder <folder path> | capture <capture path>` line each, and a `drafts:` count
   line. It refuses, writing nothing, when the branch exists (here or on origin), the worktree or a
-  folder exists, a capture or a fit map is missing, or the report is not written yet.
+  folder exists, a capture or a fit map is missing, or the report is not written yet; it, and
+  `--save`, refuse an exploratory run.
 - `drafts --check <folder>`: checks a draft folder's mechanical part: its files are exactly
   DRAFT_FILES, plus DRAFT_OPTIONAL (`answers.md`) when there were form questions, no PDF; decisions.md's
   first table has the header `| Decision | Chosen | Alternatives | Why |`, four cells a row, and a
@@ -268,7 +308,7 @@ not parse, no git), 2 on a bad argument. Standard library only, Python 3.11+.
 """
 import argparse, datetime, glob, hashlib, html.parser, json, os, re, shutil, subprocess, sys
 import http.client, urllib.error, urllib.request
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, quote, urlsplit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)   # -I leaves this folder off sys.path
@@ -550,7 +590,7 @@ def cmd_name(root, date, screen_budget=None, fit_budget=None):
 
 
 SOURCES = "scan-sources.md"
-SOURCE_FIELDS = ("URL", "Kind", "Read", "Fields")
+SOURCE_FIELDS = ("URL", "Kind", "Read", "Fields", "Query")
 KINDS = ("signed-in job board", "public job board", "GitHub list")
 CLONES = ".build/scan-sources"   # where a GitHub list source is cloned (cmd_sources)
 
@@ -605,6 +645,92 @@ def cmd_sources(root):
         out.append("source: %s | kind %s | url %s | read %s | fields %s%s"
                    % (name, kind, f.get("URL") or "GAP", state(f.get("Read")), state(f.get("Fields")), tail))
     out.append("sources: %d" % len(found))
+    return out
+
+
+# ---- Exploratory query run ----
+
+EXPLORE = "explore.json"   # an exploratory run's mark, in its folder: {"query"}
+QUERY_SLOT = "{query}"
+
+
+def explore_name(query):
+    """`explore-<slug>-<hash>`: one folder per query, its letters' case and spacing aside."""
+    q = " ".join(query.split()).lower()
+    s = logfiles.ascii_slug(q)[:40].strip("-")
+    return "explore-%s%s" % (s + "-" if s else "", short_hash(q))
+
+
+def explore_query(d):
+    """The query of an exploratory run's folder, or None for a scan run's."""
+    p = os.path.join(d, EXPLORE)
+    if not os.path.exists(p):
+        return None
+    try:
+        return str(json.loads(read(p))["query"])
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        raise ScanError("%s does not parse: %s" % (p, e))
+
+
+def refuse_explore(d, what):
+    """A ScanError when `d` is an exploratory run's folder: `what` writes scan's records."""
+    q = explore_query(d)
+    if q is not None:
+        raise ScanError("%s: refused: %s is an exploratory run (query %s): it writes no scan report, declined line,"
+                        " seen date, draft or branch" % (what, os.path.basename(os.path.normpath(d)),
+                                                         json.dumps(q, ensure_ascii=False)))
+
+
+def cmd_explore(root, query):
+    if not query.strip():
+        raise ScanError("explore: give the query, the words to search each source with")
+    found = read_sources(root)
+    if not found:
+        raise ScanError("explore: no source to read (%s)" % ("no %s" % SOURCES if not os.path.exists(os.path.join(root, SOURCES))
+                                                              else "no ## section"))
+    words = " ".join(query.split())
+    lines, read_n = [], 0
+    for name, f in found:
+        form = f.get("Query") or ""
+        if not form or form.startswith("GAP"):
+            lines.append("skip: %s (no Query: line)" % name)
+        elif QUERY_SLOT not in form:
+            lines.append("skip: %s (its Query: line has no %s)" % (name, QUERY_SLOT))
+        else:   # a URL takes the words encoded; a call in words (a file's rows), as they are
+            lines.append("read: %s | %s" % (name, form.replace(QUERY_SLOT, quote(words, safe="")
+                                                              if re.match(r"https?://", form) else words)))
+            read_n += 1
+    if not read_n:
+        raise ScanError("explore: no source has a Query: line with %s; nothing written\n%s" % (QUERY_SLOT, "\n".join(lines)))
+    name = explore_name(query)
+    d = os.path.join(root, ".build", "scan", name)
+    captures = len(glob.glob(os.path.join(d, "postings", "*.md")))
+    found_results = explore_results(d, screen_key(root)) if os.path.exists(os.path.join(d, "screen", "key")) else {}
+    results = len({id(r) for r in found_results.values()})   # a result is found by each of its URL's keys
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, EXPLORE), "w", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps({"query": query}, ensure_ascii=False) + "\n")
+    return ["query: " + query, "name: " + name, "dir: .build/scan/" + name] + lines + [
+        "sources: %d read with the query, %d skipped" % (read_n, len(found) - read_n),
+        "reuse: %d capture(s) and %d Screen result(s) from an earlier run of this query" % (captures, results)
+        if captures or results else "reuse: none (the first run of this query)",
+        "records: none (an exploratory run writes no scan report, declined line, seen date, draft or branch)"]
+
+
+def explore_results(d, key):
+    """{key: result} of the Screen results an earlier `screen` left in an exploratory run's folder, while
+    its key is the current one."""
+    kfile = os.path.join(d, "screen", "key")
+    if not os.path.exists(kfile) or read(kfile).strip() != key:
+        return {}
+    out = {}
+    for path in sorted(glob.glob(os.path.join(d, "screen", "*.jsonl"))):
+        for _, r, _ in jsonl_lines(path):
+            if r and urls(str(r.get("url") or "")):
+                r = dict(r, url=urls(str(r["url"]))[0])
+                r.pop("reused", None)
+                for k in keys(r["url"]):
+                    out[k] = r
     return out
 
 
@@ -704,12 +830,14 @@ def cmd_dedup(root, src, dst, date=None, window=None):
                 postings.append(json.loads(line))
             except json.JSONDecodeError as e:
                 raise ScanError("%s line %d does not parse: %s" % (src, i, e))
-    applied = applied_records(root)
+    # applied and declined postings still describe the domain
+    explore = any(explore_query(os.path.dirname(p)) is not None for p in (src, dst))
+    applied = [] if explore else applied_records(root)
     declined = {}
-    for item in read_declined(root):
+    for item in [] if explore else read_declined(root):
         for k in keys(str(item.get("url", ""))):
             declined.setdefault(k, item.get("date"))
-    seen = seen_dates(root)
+    seen = {} if explore else seen_dates(root)
     kept, dropped, out, batch, undated = [], [], [], set(), []
     reasons = {"before the window": 0, "applied": 0, "declined": 0, "repeated": 0}
     for p in postings:
@@ -751,15 +879,19 @@ def cmd_dedup(root, src, dst, date=None, window=None):
         batch |= k
         if undated_line:
             undated.append(undated_line)
-        p["seen"] = seen.get(canonical(url))
+        if not explore:
+            p["seen"] = seen.get(canonical(url))
         kept.append(p)
     write_jsonl(dst, kept)
     write_jsonl(os.path.join(os.path.dirname(dst), DEDUP_DROPPED), dropped)
-    listed = sum(1 for p in kept if p["seen"])
+    listed = sum(1 for p in kept if p.get("seen"))
     out += undated
-    out.append("kept: %d (%d new, %d listed before); dropped: %d; written to %s"
-               % (len(kept), len(kept) - listed, listed, len(postings) - len(kept), dst))
+    out.append("kept: %d%s; dropped: %d; written to %s"
+               % (len(kept), "" if explore else " (%d new, %d listed before)" % (len(kept) - listed, listed),
+                  len(postings) - len(kept), dst))
     out.append("dropped by reason: " + ", ".join("%s %d" % kv for kv in reasons.items()))
+    if explore:
+        out.append("explore: applied and declined postings kept, no seen dates (an exploratory run)")
     return out
 
 
@@ -1045,6 +1177,8 @@ def check_result(r, where, tiers):
                 or not isinstance(row.get("entries"), list):
             raise ScanError("%s: %s: each row needs a kind (required, preferred or duty) and an entries list"
                             % (where, r["url"]))
+        if not isinstance(row.get("skill"), str) or not row["skill"].strip():
+            raise ScanError("%s: %s: each row needs a skill, named as a map row's (tools/fit.py --help)" % (where, r["url"]))
     if r.get("gate") not in ("yes", "no"):
         raise ScanError("%s: %s: gate must be yes or no" % (where, r.get("url")))
     if r["gate"] == "no" and not str(r.get("reason") or "").strip():
@@ -1110,13 +1244,15 @@ def cmd_screen_check(root, results, batch=None):
 def screen_prepare(root, date, d, budget):
     postings = read_jsonl(os.path.join(d, "prefiltered.jsonl"))
     key = screen_key(root)
+    explore = explore_query(d) is not None   # a repeat run of the query reuses its own folder's captures and results
     earlier = earlier_captures(root, d)
+    explore_earlier = explore_results(d, key) if explore else {}
     stored = report_screens(root)
     folders, listed = set(), []
     for i, p in enumerate(postings[:budget]):
         if not p.get("url"):
             raise ScanError("prefiltered.jsonl: a posting without a url: %s" % json.dumps(p, ensure_ascii=False))
-        base = "%s-%s-%s" % (date, slug(p.get("company")), slug(p.get("role")))
+        base = "%s%s-%s" % ("" if explore else date + "-", slug(p.get("company")), slug(p.get("role")))
         folder, n = base, 2
         while folder in folders:
             folder, n = "%s-%d" % (base, n), n + 1
@@ -1136,8 +1272,10 @@ def screen_prepare(root, date, d, budget):
         cap = os.path.join(root, p["capture"]) if not os.path.isabs(p["capture"]) else p["capture"]
         state = "have"
         held = keys(capture_url(cap) or "") if os.path.exists(cap) else set()
-        if held and not held & keys(p["url"]) and any(held & keys(o["url"]) for o in listed if o is not p):
-            os.replace(cap, cap + ".stale")   # another posting's capture, from before the list's order changed
+        if held and not held & keys(p["url"]) and (explore or any(held & keys(o["url"]) for o in listed if o is not p)):
+            # another posting's capture, from before the list's order changed (an exploratory run's
+            # folder names have no date: an earlier run's posting of the same company and role, too)
+            os.replace(cap, cap + ".stale")
         if not os.path.exists(cap):
             hit = next((earlier[k] for k in keys(p["url"]) if k in earlier), None)
             if hit:
@@ -1147,7 +1285,11 @@ def screen_prepare(root, date, d, budget):
             else:
                 state = "need"
         s = next((stored[k] for k in [canonical(p["url"])] if k in stored), None)
-        if s and s[1]["key"] == key:
+        again = next((explore_earlier[k] for k in keys(p["url"]) if k in explore_earlier), None)
+        if again:
+            reused.append(dict(again, url=p["url"]))
+            how = "reused an earlier run"
+        elif s and s[1]["key"] == key:
             reused.append(dict(s[1], url=p["url"], reused=s[0]))
             how = "reused " + s[0]
         else:
@@ -1331,26 +1473,31 @@ def cmd_fetch(root, path, url):
     log = fetch_log(root, path)
     os.makedirs(os.path.dirname(log), exist_ok=True)
     with open(log, "a", encoding="utf-8", newline="\n") as f:
-        f.write(json.dumps({"url": url, "status": status, "chars": len(text), "capture": why is None}) + "\n")
+        f.write(json.dumps({"url": url, "status": status, "chars": len(text), "capture": why is None,
+                            "path": in_run(log, at_root(root, path))}) + "\n")
+    if gone({"status": status}) and os.path.isfile(at_root(root, path)):   # a capture from before it went
+        mark_closed(at_root(root, path), gone({"status": status}))
     if why:
         raise ScanError("fetch: no capture from %s (%s)\nnext: %sread the page with playwright-cli (browser.md ›"
                         " Fallback order item 2) and run capture with the file it wrote; when that read"
                         " gives no posting too, or on a machine without playwright-cli, a posting API may stand in"
                         " (capture --stand-in), else leave it unwritten"
                         % (url, why, "status %d: the posting may be gone; " % status if status in (404, 410) else ""))
-    dst = at_root(root, path)
-    os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
-    logfiles.write_text(dst, url + "\n\n" + text + "\n")
-    return ["capture: %s (%s, fetch, %d characters)" % (path, url, len(text)),
+    shut = closed_wording(text)
+    write_capture(at_root(root, path), url, "fetch", shut, text)
+    return ["capture: %s (%s, fetch, %d characters%s)" % (path, url, len(text), ", " + state_text(shut) if shut else ""),
             "next: read the capture's first 30 lines; when they hold no posting (only navigation, a sign-in page),"
             " read the page with playwright-cli and run capture with the file it wrote"]
 
 
-def cmd_capture(root, path, url, source, stand_in=None):
+def cmd_capture(root, path, url, source, stand_in=None, pasted=False):
     found = urls(url)
     if not found:
         raise ScanError("%s is not a URL" % url)
-    if fetched(root, path, found[0]) is None:
+    if pasted and stand_in is not None:
+        raise ScanError("capture: --pasted and --stand-in: the text came from one of them, not both")
+    rec = fetched(root, path, found[0])
+    if rec is None and not pasted:
         raise ScanError("capture: refused: no fetch of %s on record, so its own page was never read\nnext: run"
                         " fetch %s %s first; when it gives no capture, read the page with playwright-cli; a"
                         " posting API stands in only when that read gives no posting too, or on a machine"
@@ -1370,11 +1517,100 @@ def cmd_capture(root, path, url, source, stand_in=None):
     text = text.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
     if not text.strip():
         raise ScanError("%s holds no text: leave the capture unwritten" % source)
-    dst = at_root(root, path)
+    shut = gone(rec) or closed_wording(text)
+    if pasted:
+        how = "pasted"
+    elif stand_in:
+        how = "stand-in %s" % urls(stand_in)[0]
+    else:
+        how = "browser"
+    write_capture(at_root(root, path), found[0], how, shut, text)
+    return ["capture: %s (%s, %d characters%s%s)" % (path, found[0], len(text), "" if how == "browser" else ", " + how,
+                                                     ", " + state_text(shut) if shut else "")]
+
+
+CLOSED_WORDING = re.compile(   # words, not parts of one ("composition is filled"), across line breaks
+    r"\bno\s+longer\s+(?:accepting|accepts|taking|open\s+for|open\s+to)\s+applications\b"
+    r"|\b(?:job|position|posting|role|vacancy|opening|requisition)(?:\s+you(?:'re|\s+are)\s+looking\s+for)?\s+"
+    r"(?:is\s+|has\s+)?(?:no\s+longer\s+(?:available|open|active)|(?:been\s+)?(?:closed|filled|expired))\b(?!-)"
+    r"|\bapplications?\s+(?:(?:are|is|have)\s+)?(?:now\s+)?closed\b(?!-)", re.I)
+READ_LINE = re.compile(r"read: (fetch|browser|pasted|stand-in (\S+)), (open|closed)(?: \((.*)\))?")
+
+
+def state_text(shut):
+    """A capture's state as its read line gives it: `open`, or `closed (<why>)`."""
+    return "closed (%s)" % shut if shut else "open"
+
+
+def closed_wording(text):
+    """Why a posting's text says it takes no more applications (`the page says "<words>"`), or None."""
+    m = CLOSED_WORDING.search(text)
+    return 'the page says "%s"' % re.sub(r"\s+", " ", m.group(0)).lower() if m else None
+
+
+def gone(rec):
+    """Why a fetch record shows the posting is gone (`status 404` or `status 410`), or None."""
+    return "status %d" % rec["status"] if rec and rec.get("status") in (404, 410) else None
+
+
+def in_run(log, path):
+    """A capture's path as a fetch record names it: from the run folder that holds the fetch log."""
+    return os.path.relpath(os.path.abspath(path), os.path.dirname(log)).replace(os.sep, "/")
+
+
+def write_capture(dst, url, how, shut, text):
+    """A capture: its URL, its read line, a blank line, then the page's text."""
     os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
-    logfiles.write_text(dst, found[0] + "\n\n" + text + "\n")
-    via = ", stand-in %s" % urls(stand_in)[0] if stand_in else ""
-    return ["capture: %s (%s, %d characters%s)" % (path, found[0], len(text), via)]
+    logfiles.write_text(dst, "%s\nread: %s, %s\n\n%s\n" % (url, how, state_text(shut), text))
+
+
+def mark_closed(dst, why):
+    """Sets a capture's read line to closed, for a posting a later fetch found gone."""
+    lines = read(dst).split("\n")
+    m = READ_LINE.fullmatch(lines[1].strip()) if len(lines) > 1 else None
+    if m:
+        lines[1] = "read: %s, %s" % (m.group(1), state_text(why))
+        logfiles.write_text(dst, "\n".join(lines))
+
+
+def capture_state(path):
+    """A capture's state, from its path alone: {"url", "read", "stand_in", "open", "why"}. `read` is fetch,
+    browser, stand-in or pasted (`stand_in` the API URL), None for a capture with no read line; `open` is
+    True, False (`why` says why) or None (unknown). With no file at path, a fetch of it on record that
+    found the posting gone is closed, with `read` None; with no fetch of it either, the answer is None."""
+    if not os.path.isfile(path):
+        log = fetch_log("", path)
+        hit = None
+        if os.path.exists(log):
+            for _, item, _ in jsonl_lines(log):
+                if item and item.get("path") == in_run(log, path):
+                    hit = item
+        if hit is None:
+            return None
+        return {"url": hit.get("url"), "read": None, "stand_in": None, "open": False if gone(hit) else None,
+                "why": gone(hit)}
+    head = read(path).split("\n")[:2]
+    m = READ_LINE.fullmatch(head[1].strip()) if len(head) > 1 else None
+    if not m:
+        return {"url": capture_url(path), "read": None, "stand_in": None, "open": None, "why": None}
+    return {"url": capture_url(path), "read": m.group(1).split()[0], "stand_in": m.group(2),
+            "open": m.group(3) == "open", "why": m.group(4)}
+
+
+def cmd_state(root, path):
+    dst = at_root(root, path)
+    st = capture_state(dst)
+    if st is None:
+        raise ScanError("state: no capture at %s, and no fetch of it on record" % path)
+    if not os.path.isfile(dst):
+        how = "no capture"
+    else:
+        how = "read %s%s" % (st["read"] or "unknown", " " + st["stand_in"] if st["stand_in"] else "")
+    if st["open"] is not None:
+        state = "open" if st["open"] else "closed (%s)" % st["why"]
+    else:
+        state = "unknown (a capture from before read lines)" if os.path.isfile(dst) else "unknown"
+    return ["state: %s | %s | %s | %s" % (path, st["url"], how, state)]
 
 
 def md_table(columns, rows):
@@ -1632,7 +1868,9 @@ def cmd_summary(root, d, date):
                  for p, o in zip(collected, owner) if o is None]
     report = os.path.join(root, REPORTS, "%s-scan%s.md" % (os.path.basename(d)[:10], os.path.basename(d)[10:]))
     ranked = run_file(d, "ranked.jsonl")
-    if not os.path.exists(report):
+    if explore_query(d) is not None:
+        out.append("report: none (an exploratory run writes no scan report)")
+    elif not os.path.exists(report):
         findings.append("no report: %s" % os.path.relpath(report, root).replace(os.sep, "/"))
     else:
         maps = {canonical(u): body for u, _, body in fit_maps(read(report))}
@@ -1658,6 +1896,8 @@ def cmd_summary(root, d, date):
 
 
 def cmd_report(root, date, src, top, name=None, body=None, screen=None, drafting=False):
+    for d in [os.path.dirname(at_root(root, src))] + ([at_root(root, screen)] if screen else []):
+        refuse_explore(d, "report")
     warn = fetch(root)
     rows = []
     for i, r in enumerate(read_jsonl(at_root(root, src)), 1):
@@ -1888,6 +2128,7 @@ def cmd_drafts(root, d, m):
     if m < 0:
         raise ScanError("--m must be 0 or more")
     d = os.path.normpath(at_root(root, d))
+    refuse_explore(d, "drafts")
     paths = run_paths(run_name(d))
     if not os.path.exists(os.path.join(d, "rows.jsonl")):
         raise ScanError("no rows.jsonl in %s: run rank first" % rel_path(root, d))
@@ -2000,6 +2241,7 @@ def cmd_drafts_check(root, folder):
 
 def cmd_drafts_save(root, date, d):
     d = os.path.normpath(at_root(root, d))
+    refuse_explore(d, "drafts")
     paths = run_paths(run_name(d))
     ranked = {p.get("folder"): p for p in run_file(d, "ranked.jsonl")}
     out, remote = [], has_remote(root)
@@ -2134,6 +2376,8 @@ def main(argv):
     sp.add_argument("--screen-budget", type=int)
     sp.add_argument("--fit-budget", type=int)
     sub.add_parser("sources")
+    sp = sub.add_parser("explore")
+    sp.add_argument("query")
     sp = sub.add_parser("prune")
     sp.add_argument("--dry-run", action="store_true")
     sub.add_parser("pending")
@@ -2159,6 +2403,9 @@ def main(argv):
     sp.add_argument("url")
     sp.add_argument("source")
     sp.add_argument("--stand-in")
+    sp.add_argument("--pasted", action="store_true")
+    sp = sub.add_parser("state")
+    sp.add_argument("path")
     sp = sub.add_parser("fitmap")
     sp.add_argument("url")
     sp.add_argument("--out")
@@ -2237,6 +2484,8 @@ def main(argv):
             lines = cmd_name(root, a.date, a.screen_budget, a.fit_budget)
         elif a.cmd == "sources":
             lines = cmd_sources(root)
+        elif a.cmd == "explore":
+            lines = cmd_explore(root, a.query)
         elif a.cmd == "prune":
             lines = cmd_prune(root, a.date, a.dry_run)
         elif a.cmd == "pending":
@@ -2252,7 +2501,9 @@ def main(argv):
         elif a.cmd == "fetch":
             lines = cmd_fetch(root, a.path, a.url)
         elif a.cmd == "capture":
-            lines = cmd_capture(root, a.path, a.url, a.source, a.stand_in)
+            lines = cmd_capture(root, a.path, a.url, a.source, a.stand_in, a.pasted)
+        elif a.cmd == "state":
+            lines = cmd_state(root, a.path)
         elif a.cmd == "fitmap":
             lines = cmd_fitmap(root, a.url, a.out)
         elif a.cmd == "rank":

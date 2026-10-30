@@ -97,7 +97,7 @@ to do. In order:
 outputs/applications/ with no provenance.md or a provenance.md with no provenance table (one an
 `interview` recorded has a sent-version.md instead) or no resume.pdf (a finding only when the folder was sent: ask the user when nothing in the
 log says), a report in outputs/reports/ with no provenance table (scan reports aside), anything at the
-top of outputs/ besides applications/, resumes/, reports/ and dashboard/,
+top of outputs/ besides applications/, resumes/, reports/, projects/ and dashboard/,
 and each provenance row listed as above, in every application's, target's and report's provenance
 file (scan reports aside). The last line is `check_save: ok` (exit 0, no finding), or `check_save:
 <n> findings: report each` (exit 1).
@@ -157,7 +157,7 @@ ARCHIVED = re.compile(r"Archived \(user, (\d{4}-\d{2}-\d{2})\)")
 KINDS = ("resume bullets", "cover letter", "bio", "elevator pitch", "application answer", "interview answer", "other")
 EMPLOYER_KINDS = ("resume bullets", "cover letter", "application answer")
 APPLICATION_FILES = ("posting.md", "resume.tex", "resume.pdf")   # provenance.md: its Provenance check line
-OUTPUTS_TOP = ("applications", "resumes", "reports", "dashboard")
+OUTPUTS_TOP = ("applications", "resumes", "reports", "projects", "dashboard")
 RISKS = "## Risks to handle in conversation"
 HUMANIZER_CALL = re.compile(r"[*_`]*Humanizer call[*_`]*:[*_`]*\s*model:?\s+\S|humanizer not available", re.I)
 HUMANIZER_LINE = re.compile(r"(.*\S)\s*(?:→|->)\s*((?:%s).*)$" % HUMANIZER_CALL.pattern, re.I)

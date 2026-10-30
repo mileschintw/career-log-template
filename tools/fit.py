@@ -5,7 +5,7 @@ scan report keeps (skills/career-log/modes/fit.md › Requirement map; scan.md s
   python3 -I tools/fit.py name <company> <role> [--today YYYY-MM-DD]
   python3 -I tools/fit.py map <map file>... [--several] [--category <category>]... [--save-name] [--today YYYY-MM-DD]
   python3 -I tools/fit.py map <map file> --show
-  python3 -I tools/fit.py heatmap <map file>...
+  python3 -I tools/fit.py heatmap <map file or Screen results file>...
   python3 -I tools/fit.py check <result.jsonl> [--capture <capture path>]
   (Windows: py -3 -I tools/fit.py ...)
 
@@ -36,6 +36,8 @@ for scan (fit.md › Handed over by scan); it also has the posting fields. Its f
     one section ("2026-01-x.md (phase 3)"); "" on a `gap` or `claimed, unbacked` row;
   - `skill` (`heatmap` needs it; optional elsewhere): the skill's name in the heatmap, the same
     words on every row, in every map file, that asks for the same skill ("Go" on a "Golang" row).
+- `capture` (`map` and `heatmap` need it): the path of the posting's capture (`scan.py capture`,
+  `fetch` or an application's `posting.md`), relative to the Log's root or absolute.
 A map file `heatmap` reads also has `tier`: the posting's role's place in direction.md's Target
 roles (1 the first line, its `GAP:` lines counted), or null for a role on no tier; null on every map
 file while they are empty.
@@ -70,13 +72,19 @@ row has one of those kinds (a map from before kinds were kept), every row counts
   then, with --save-name and no problem, for one map file with its company and role:
   `save: outputs/reports/<YYYY-MM-DD>-fit-posting-<company>-<role>.md` and
   `commit: fit(<company>-<role>): <n> gaps`, <n> the rows whose category is `gap`, named as `name`
-  names them; then `map: ok`, or one `bad:` line per problem and exit 1.
+  names them; then one `flag:` line per map file whose capture is closed, a stand-in's or of an
+  unknown read, as scan.py's capture_state reads it (`scan.py state <capture path>` prints it):
+  `flag: <map file> | capture <capture path> | <why>`, <why> `closed (<its why>)`,
+  `read stand-in <API url>` or `read unknown (the capture has no read line)`, joined by "; "; a flag
+  is no problem; then `map: ok`, or one `bad:` line per problem and exit 1.
   With --show (one map file; no --several, --category or --save-name), a `show:` line and one block
-  to paste whole into a reply (write step 9) take the place of the two lines and the table: in a
-  `text` code fence longer than any run of backticks in it, the same `Course work:` and `Map:`
-  lines, a blank line, and the map as a table with the headers of SHOW (COLUMNS less Own work), an
-  `AI agent` row's Written by naming its own work's label (`AI agent (design)`, `AI agent (none)`).
-  The checks, and the `map: ok` or `bad:` lines, are the same.
+  to paste whole into a reply (write step 9) take the place of the two lines and the table: with
+  no code fence, so the reply renders the table, the same `Course work:` and `Map:` lines, a blank
+  line, and the map as a table with the headers of SHOW (COLUMNS less Own work), an `AI agent`
+  row's Written by naming its own work's label (`AI agent (design)`, `AI agent (none)`). A cell's
+  `|` is escaped, so a `|` or backticks in a cell stay in that cell.
+  The checks, and the `flag:` (after an empty line below the table), `map: ok` or `bad:` lines,
+  are the same.
   The problems:
   - a field above missing or not in its form, an `of` that is no `requirements` item's number;
     `company` or `role` that is not a string; with --several, two map files whose company and role
@@ -97,29 +105,52 @@ row has one of those kinds (a map from before kinds were kept), every row counts
   - a `covered` row over its cap: `unknown`; `AI agent` with own work `none` or another label;
     `coursework` that is not `understanding`; `language or tool` with a `design` label; `debugging`
     with a label other than `debugging`;
-  - a `requirements` item no row maps (the `Map:` line names it too).
+  - a `requirements` item no row maps (the `Map:` line names it too);
+  - no `capture`, or one that names no file.
 - `heatmap`: runs `map --several`'s checks on the map files, and also that every row has a `skill`
   (a non-empty string) and every map file a `tier` (null, or the place of a line of Target roles
-  that is no `GAP:` line); on a problem it prints only the `bad:` lines and exits 1. Else it prints
-  `Heatmap: <k> skills, <n> gaps; weights: <which>` (<which> `tiers`, or `every posting the same`
-  when no map file has a tier), then a table with the headers of HEATMAP, one row per
-  skill (rows whose `skill` matches, ignoring case and runs of spaces, are one skill, named as the
-  first of them is, each run of spaces one space), then `heatmap: ok`. A skill's cells:
-  - Category: its weakest row's, `gap` first, then `claimed, unbacked`, `shallow`, `covered`;
-  - Postings: `<a> of <b>`, the map files with a row for it of all the map files;
-  - Which: those map files' `<company>, <role>`, joined by "; ";
-  - Priority: `-` when Category is `covered`; else from its share: each map file weighs
+  that is no `GAP:` line). A Screen results file (a file in a scan run folder's `screen/` folder,
+  when the run folder holds `screen-list.jsonl`; tools/scan.py --help gives the format) gets the
+  checks of `scan.py screen --check`, and each of its gate yes results with `rows` is a rough
+  posting, its company and role from the `screen-list.jsonl` line with its URL; a result with no
+  such line, or a line with no company or role, is a problem. A rough posting whose URL a map
+  file's `url` or an earlier rough posting has, or whose company and role a map file has (as `name`
+  makes them one name), is left out: it is counted once, as mapped. No posting at all (only gate no
+  results, say) is a problem too. On a problem it prints only the `bad:` lines and exits 1. Else it prints
+  `Heatmap: <k> skills, <n> gaps; weights: <which>; <p> postings (<m> mapped, <r> rough) from <e>
+  employers; flagged: <f> of <p>` (<which> `tiers`, or `every posting the same` when no posting
+  has a tier; <e> the companies, ignoring case and runs of spaces; <f> the postings with a `flag:`
+  line, mapped or rough), then, when one company holds more than half the
+  postings, `skew: <company> holds <k> of the <p> postings` (named as its first posting names it),
+  then a legend numbering the map files
+  in the order given, then the rough postings, a Markdown list item each, `- #<i> <company>, <role>`,
+  ` (rough)` after a rough one, between empty lines, then a table with the headers of HEATMAP, one
+  row per skill (rows whose `skill` matches, ignoring case and runs of spaces, are one skill, named
+  as the first of them is, each run of spaces one space), an empty line, the `flag:` lines `map`
+  prints for the map files, then one `flag: <Screen results file> line <n> (rough) | capture
+  <capture path> | <why>` line per rough posting whose capture (its `screen-list.jsonl` line's
+  `capture`) is closed, a stand-in's or of an unknown read, <why> as `map` gives it (`read unknown
+  (no file)` when the capture is gone), then `heatmap: ok`. A flagged rough posting stays in the
+  heatmap, as a flagged map file does. A skill's cells:
+  - Category: its weakest mapped row's, `gap` first, then `claimed, unbacked`, `shallow`, `covered`;
+    `rough` when it has no mapped row (a rough row is never `covered`);
+  - Postings: `<a> of <b>`, the postings with a row for it of all the postings;
+  - Rough: `<r> (<t> touched)`, the rough postings of those and the ones whose rows for it name an
+    entry; `-` for none;
+  - Which: those postings' legend numbers, in order, joined by ", " (`#1, #3`);
+  - Priority: `-` when Category is `covered`; else from its share: each posting weighs
     <the last target role's tier> + 1 - <tier> (1 when the tier is null; a `GAP:` line above a role
     keeps its place, as a role not yet named), and the share is the sum,
-    over the map files where its weakest row is not covered, of that weight times 2 when one of
-    its rows there that is not covered is required or a duty (1 when they are all preferred),
-    divided by twice the sum of all the map files' weights. `critical` from 0.6, `high` from 0.3,
+    over the postings where it has a row that is not covered (every rough row), of that weight
+    times 2 when one of those rows is required or a duty (1 when they are all preferred),
+    divided by twice the sum of all the postings' weights. `critical` from 0.6, `high` from 0.3,
     `medium` from 0.1, else `low`. The rows are ordered by priority, then share and the number
     of postings (each highest first), then skill.
   <n> is the rows whose Category is `gap`.
 - `check`: checks a fit result file: one line, the fit result fields in their form, with --capture
   that its `url` is the one on the capture's first line, and, unless it is `reused`, everything
-  `map` checks, with its `notes` the two lines `map` prints for it (the bad line gives them).
+  `map` checks but `capture`, with its `notes` the two lines `map` prints for it (the bad line
+  gives them).
   `check: ok`, else exit 1 with one `bad:` line per problem.
 
 Exit 0 on success, 1 when a check fails or a file cannot be read, 2 on a bad argument. Standard
@@ -140,7 +171,7 @@ ROW_TYPES = ("language or tool", "debugging", "understanding", "other")
 WRITERS = ("coursework", "collaborator", "AI agent", "unknown", "user")
 LABELS = ("design", "debugging", "review")
 NO_ENTRY = ("claimed, unbacked", "gap")
-HEATMAP = ("Priority", "Skill", "Category", "Postings", "Which")
+HEATMAP = ("Priority", "Skill", "Category", "Postings", "Rough", "Which")
 PRIORITIES = ((0.6, "critical"), (0.3, "high"), (0.1, "medium"), (0.0, "low"))
 COLUMNS = [("Requirement", "requirement"), ("Kind", "kind"), ("Written by", "written_by"),
            ("Own work", "own_work"), ("Category", "category"), ("Entry", "entry")]
@@ -221,19 +252,20 @@ def map_lines(result):
 
 
 def show_block(lines, rows):
-    """`map --show`'s lines: a `show:` line, then the `Course work:` and `Map:` lines and the map as a
-    table with the headers of SHOW (an `AI agent` row's Written by naming its own work's label), in a
-    `text` code fence longer than any run of backticks in it."""
+    """`map --show`'s lines: a `show:` line, then the `Course work:` and `Map:` lines, a blank line and
+    the map as a table with the headers of SHOW (an `AI agent` row's Written by naming its own work's
+    label), with no code fence, so a reply renders it. A backslash before a `|` is doubled, so the
+    `|` md_row escapes stays in its cell."""
     body = lines + ["", "| " + " | ".join(h for h, _ in SHOW) + " |", "|" + "---|" * len(SHOW)]
     for r in rows:
         cells = {k: r.get(k) for _, k in SHOW}
         if r.get("written_by") == "AI agent":
             own = split_own_work(r.get("own_work"))
             cells["written_by"] = "AI agent (%s)" % (own[0] if own else "none")
-        body.append(logfiles.md_row("-" if cells[k] in (None, "") else str(cells[k]) for _, k in SHOW))
-    fence = "`" * max([3] + [len(m) + 1 for m in re.findall(r"`+", "\n".join(body))])
-    return ["show: paste the block below into your reply whole, as printed, its fence lines included",
-            fence + "text"] + body + [fence]
+        body.append(logfiles.md_row("-" if cells[k] in (None, "") else re.sub(r"\\(?=\|)", r"\\\\", str(cells[k]))
+                                    for _, k in SHOW))
+    return ["show: paste the lines below, from `Course work:` to the table's last row, into your reply"
+            " whole, as printed"] + body
 
 
 def table(rows):
@@ -542,11 +574,38 @@ def cmd_check(root, path, capture=None):
     return 0, ["check: ok"]
 
 
+def capture_check(root, path, result):
+    """(problem, flag) of the capture map file `path` names: the problem's text when `capture` is
+    missing or names no file, else its `flag:` line when the capture is closed, a stand-in's or of an
+    unknown read (each None when there is none)."""
+    cap = result.get("capture")
+    if not isinstance(cap, str) or not cap.strip():
+        return "capture: missing; it must be the path of the posting's capture (scan.py capture)", None
+    if not os.path.isfile(at_root(root, cap)):
+        return "capture: %s is no file" % cap, None
+    why = capture_why(root, cap)
+    return None, ("flag: %s | capture %s | %s" % (path, cap, why) if why else None)
+
+
+def capture_why(root, cap):
+    """Why the capture at `cap` is flagged (closed, a stand-in's or of an unknown read), or None."""
+    import scan   # scan.py imports this module, so not at the top
+    st = scan.capture_state(at_root(root, cap))
+    why = []
+    if st["open"] is False:
+        why.append("closed (%s)" % st["why"])
+    if st["read"] == "stand-in":
+        why.append("read stand-in %s" % st["stand_in"])
+    elif st["read"] is None:
+        why.append("read unknown (the capture has no read line)")
+    return "; ".join(why) or None
+
+
 def cmd_map(root, paths, several=False, categories=(), save_name=False, today=None, show=False):
     if show and (several or categories or save_name or len(paths) != 1):
         raise FitError("--show takes one map file, with no --several, --category or --save-name")
     listed = listed_entries(root)
-    out, bad, results = [], [], []
+    out, bad, results, flags = [], [], [], []
     for path in paths:
         where = "%s: " % path if len(paths) > 1 else ""
         try:
@@ -559,6 +618,9 @@ def cmd_map(root, paths, several=False, categories=(), save_name=False, today=No
             bad += [where + b for b in shape]
             continue
         rules = map_problems(root, result)
+        problem, flag = capture_check(root, path, result)
+        rules += [problem] if problem else []
+        flags += [flag] if flag else []
         results.append(result)
         label = None
         if several:
@@ -570,7 +632,7 @@ def cmd_map(root, paths, several=False, categories=(), save_name=False, today=No
                 rules.append("company, role: --several needs both in the map file")
         rows = [r for r in result.get("rows") if isinstance(r, dict)] if isinstance(result.get("rows"), list) else []
         if show:
-            out += show_block(count_lines(result, listed), rows)
+            out += show_block(count_lines(result, listed), rows) + ([""] if flag else [])
         else:
             out += count_lines(result, listed, label) + [""]
             out += table([r for r in rows if not categories or r.get("category") in categories]) + [""]
@@ -585,8 +647,8 @@ def cmd_map(root, paths, several=False, categories=(), save_name=False, today=No
             out += ["save: outputs/reports/%s-fit-posting-%s.md" % (day, name),
                     "commit: fit(%s): %d gaps" % (name, gaps)]
     if bad:
-        return 1, out + ["bad: %s" % b for b in bad]
-    return 0, out + ["map: ok"]
+        return 1, out + flags + ["bad: %s" % b for b in bad]
+    return 0, out + flags + ["map: ok"]
 
 
 WEAKEST = ("gap", "claimed, unbacked", "shallow", "covered")
@@ -597,10 +659,11 @@ def skill_key(name):
 
 
 def heatmap_rows(results, last):
-    """The heatmap's rows (the HEATMAP cells, in their order) of checked map files, as the docstring
-    says, `last` the tier of the last target role (ranks())."""
+    """The heatmap's rows (the HEATMAP cells, in their order) of checked map files and screened
+    postings (a `rough` one's rows have `entries`, no `category`), as the docstring says, `last` the
+    tier of the last target role (ranks())."""
     weights = [last + 1 - r["tier"] if r.get("tier") is not None else 1 for r in results]
-    skills = {}   # key -> {"name", "per": {map file index: [rows]}}
+    skills = {}   # key -> {"name", "per": {posting index: [rows]}}
     for i, result in enumerate(results):
         for row in result["rows"]:
             s = skills.setdefault(skill_key(row["skill"]), {"name": " ".join(row["skill"].split()), "per": {}})
@@ -608,18 +671,22 @@ def heatmap_rows(results, last):
     total = 2 * sum(weights)
     out = []
     for s in skills.values():
-        weakest = min((r["category"] for rows in s["per"].values() for r in rows), key=WEAKEST.index)
+        mapped = [r["category"] for i, rows in s["per"].items() if not results[i].get("rough") for r in rows]
+        weakest = min(mapped, key=WEAKEST.index) if mapped else "rough"
+        rough = [rows for i, rows in s["per"].items() if results[i].get("rough")]
         share = 0.0
         for i, rows in s["per"].items():
-            short = [r for r in rows if r["category"] != "covered"]
+            short = [r for r in rows if r.get("category") != "covered"]   # a rough row is never covered
             if short:
                 share += weights[i] * (2 if any(r["kind"] != "preferred" for r in short) else 1)
         share /= total
         priority = "-" if weakest == "covered" else next(p for at, p in PRIORITIES if share >= at)
-        which = "; ".join("%s, %s" % (results[i]["company"].strip(), results[i]["role"].strip()) for i in sorted(s["per"]))
+        which = ", ".join("#%d" % (i + 1) for i in sorted(s["per"]))
+        touched = sum(1 for rows in rough if any(e.strip() for r in rows for e in r["entries"] if isinstance(e, str)))
         out.append(((["critical", "high", "medium", "low", "-"].index(priority), -share, -len(s["per"]),
                      skill_key(s["name"])),
-                    [priority, s["name"], weakest, "%d of %d" % (len(s["per"]), len(results)), which]))
+                    [priority, s["name"], weakest, "%d of %d" % (len(s["per"]), len(results)),
+                     "%d (%d touched)" % (len(rough), touched) if rough else "-", which]))
     return [cells for _, cells in sorted(out)]
 
 
@@ -657,8 +724,85 @@ def tier_problem(t, tiers):
     return None
 
 
+def legend_line(n, result):
+    """The heatmap legend's line for the posting numbered `n` (from 1: the map files in the order
+    given, then the screened postings)."""
+    return "- #%d %s, %s%s" % (n, result["company"].strip(), result["role"].strip(), " (rough)" if result.get("rough") else "")
+
+
+def screen_list(path):
+    """The run's screen-list.jsonl of a Screen results file (in the run folder's `screen/`), or None
+    when the file is not one."""
+    folder = os.path.dirname(os.path.abspath(path))
+    listed = os.path.join(os.path.dirname(folder), "screen-list.jsonl")
+    return listed if os.path.basename(folder) == "screen" and os.path.isfile(listed) else None
+
+
+def screened_postings(root, paths, tiers, mapped):
+    """(postings, bad lines, flag lines) of the Screen results files: each gate yes with rows, as
+    `scan.py screen --check` checks it, with its company and role from the run's screen-list.jsonl
+    and `rough` set; none whose URL a posting before it (`mapped`, or another result) has, nor whose
+    company and role a map file has. A posting whose screen-list.jsonl line names a capture that is
+    closed, a stand-in's, of an unknown read or no file gets a flag line."""
+    import scan   # scan.py imports this module, so not at the top
+    seen = {scan.canonical(r["url"]) for r in mapped if isinstance(r.get("url"), str) and r["url"].strip()}
+    names = {posting_name(r) for r in mapped}
+    out, bad, flags = [], [], []
+    for path in paths:
+        full = at_root(root, path)
+        try:
+            listed = {scan.canonical(p["url"]): p for p in scan.read_jsonl(screen_list(full)) if isinstance(p.get("url"), str)}
+        except scan.ScanError as e:
+            bad.append("bad: %s" % e)
+            continue
+        for n, r, why in scan.jsonl_lines(full):
+            if why:
+                bad.append("bad: %s: line %d %s" % (path, n, why))
+                continue
+            try:
+                scan.check_result(r, "line %d" % n, tiers)
+            except scan.ScanError as e:
+                bad.append("bad: %s: %s" % (path, e))
+                continue
+            if r["gate"] != "yes" or not isinstance(r.get("rows"), list):
+                continue   # dropped at screen, or reused from a report with no rows
+            p = listed.get(scan.canonical(r["url"]))
+            if not p:
+                bad.append("bad: %s: line %d: %s is on no line of the run's screen-list.jsonl, which gives its "
+                           "company and role" % (path, n, r["url"]))
+                continue
+            posting = {"company": p.get("company"), "role": p.get("role"), "tier": r.get("tier"), "rows": r["rows"], "rough": True}
+            if not posting_name(posting):
+                bad.append("bad: %s: line %d: %s has no company or role on its screen-list.jsonl line" % (path, n, r["url"]))
+                continue
+            if scan.canonical(r["url"]) in seen or posting_name(posting) in names:
+                continue
+            seen.add(scan.canonical(r["url"]))
+            out.append(posting)
+            cap = p.get("capture")
+            if isinstance(cap, str) and cap.strip():
+                why = capture_why(root, cap) if os.path.isfile(at_root(root, cap)) else "read unknown (no file)"
+                if why:
+                    flags.append("flag: %s line %d (rough) | capture %s | %s" % (path, n, cap, why))
+    return out, bad, flags
+
+
+def sample_lines(results):
+    """The `Heatmap:` line's sample and the `skew:` line (or none) of the postings."""
+    employers = {}
+    for r in results:
+        employers.setdefault(skill_key(r["company"]), [r["company"].strip(), 0])[1] += 1
+    rough = sum(1 for r in results if r.get("rough"))
+    sample = "%d postings (%d mapped, %d rough) from %d employers" % (len(results), len(results) - rough, rough, len(employers))
+    top = max(employers.values(), key=lambda e: e[1], default=None)
+    skew = ["skew: %s holds %d of the %d postings" % (top[0], top[1], len(results))] if top and 2 * top[1] > len(results) else []
+    return sample, skew
+
+
 def cmd_heatmap(root, paths):
-    code, lines = cmd_map(root, paths, several=True)
+    screens = [p for p in paths if screen_list(at_root(root, p))]
+    paths = [p for p in paths if p not in screens]
+    code, lines = cmd_map(root, paths, several=True) if paths else (0, [])
     bad = [l for l in lines if l.startswith("bad: ")]
     tiers = ranks(root)
     last = last_rank(tiers)
@@ -670,6 +814,7 @@ def cmd_heatmap(root, paths):
             continue   # cmd_map's bad: line names it
         if not isinstance(result, dict):
             continue
+        result = {k: v for k, v in result.items() if k != "rough"}   # a fit result may copy fit.jsonl's rough share
         results.append(result)
         where = "%s: " % path if len(paths) > 1 else ""
         rows = result.get("rows") if isinstance(result.get("rows"), list) else []
@@ -684,13 +829,20 @@ def cmd_heatmap(root, paths):
         why = tier_problem(result["tier"], tiers)
         if why:
             bad.append("bad: %stier: %s" % (where, why))
+    rough, why, rough_flags = screened_postings(root, screens, tiers, results)
+    bad += why
     if bad:
         return 1, bad
+    results += rough
+    if not results:
+        return 1, ["bad: no posting: give a map file, or a Screen result with a gate yes and its rows"]
     rows = heatmap_rows(results, last)
     gaps = sum(1 for r in rows if r[2] == "gap")
-    out = ["Heatmap: %d skills, %d gaps; weights: %s" % (len(rows), gaps, "tiers" if any(r.get("tier") is not None for r in results) else "every posting the same"), "",
-           "| " + " | ".join(HEATMAP) + " |", "|" + "---|" * len(HEATMAP)]
-    return 0, out + [logfiles.md_row(r) for r in rows] + ["", "heatmap: ok"]
+    sample, skew = sample_lines(results)
+    flags = [l for l in lines if l.startswith("flag: ")] + rough_flags
+    out = ["Heatmap: %d skills, %d gaps; weights: %s; %s; flagged: %d of %d" % (len(rows), gaps, "tiers" if any(r.get("tier") is not None for r in results) else "every posting the same", sample, len(flags), len(results))]
+    out += skew + [""] + [legend_line(n, r) for n, r in enumerate(results, 1)] + ["", "| " + " | ".join(HEATMAP) + " |", "|" + "---|" * len(HEATMAP)]
+    return 0, out + [logfiles.md_row(r) for r in rows] + [""] + flags + ["heatmap: ok"]
 
 
 def cmd_name(company, role, today=None):
