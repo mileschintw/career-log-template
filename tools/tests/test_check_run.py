@@ -843,6 +843,30 @@ class Copy(CopyBase):
             grade, ev = self.printed([reviewer(), humanizer()] + checked(PROVENANCE_LINE, HUMANIZER_AFTER, hum) + [COMMIT])
             self.assertEqual(grade, "FAIL", hum)
 
+    def test_filtered_check_output_names_the_filter(self):
+        """#627: a run piped the save check through `tail` and `cut`, which cut a line's call line short."""
+        self.save()
+        cut = HUMANIZER_AFTER[:HUMANIZER_AFTER.index("call: m") + 7]
+        cmd = ("py -3 -I tools/check_save.py --root . %s --humanizer .build/humanizer.txt --commit "
+               "\"write(example): Engineer\" --checked 2>&1 | tail -8 | cut -c1-60\npy -3 -I tools/check.py done write" % FOLDER)
+        grade, ev = self.printed([reviewer(), HUMANIZER_LINE, humanizer()] + checked(PROVENANCE_LINE, cut, cmd=cmd))
+        self.assertEqual(grade, "FAIL", ev)
+        self.assertIn("piped through `tail -8`, `cut -c1-60`", ev)
+        # a filter on a run that printed none of these lines (its --help) is not named
+        helped = [bash("py -3 -I tools/check_save.py --help | head -60"), result("usage: check_save.py ...")]
+        grade, ev = self.printed(helped + [reviewer(), HUMANIZER_LINE, humanizer()] + checked(PROVENANCE_LINE, cut, cmd=cmd))
+        self.assertIn("piped through `tail -8`, `cut -c1-60`", ev)
+        self.assertNotIn("head -60", ev)
+        # PowerShell's filter is named too
+        ps = cmd.replace("| tail -8 | cut -c1-60", "| Select-Object -Last 8")
+        grade, ev = self.printed([reviewer(), HUMANIZER_LINE, humanizer()] + checked(PROVENANCE_LINE, cut, cmd=ps))
+        self.assertIn("piped through `Select-Object -Last 8`", ev)
+        # unfiltered, or filtered with nothing failing, it names no filter
+        for c in (cmd.replace("| tail -8 | cut -c1-60", "| cat"), cmd.replace("cut -c1-60", "cut -c1-500")):
+            grade, ev = self.printed([reviewer(), HUMANIZER_LINE, humanizer()] + checked(PROVENANCE_LINE, HUMANIZER_AFTER, cmd=c))
+            self.assertEqual(grade, "PASS", ev)
+            self.assertNotIn("piped through", ev)
+
     def test_commit_named_in_a_prompt_or_rev_parse_is_no_commit(self):
         self.save()
         noise = [agent("Note", "then git commit the save"), bash("git rev-parse HEAD^{commit}")]
@@ -895,6 +919,19 @@ class Copy(CopyBase):
         grade, ev = self.printed([early, result("committed: [master 0f0f0f0] log(example): a fact"), bash(cmd), result(out)])
         self.assertEqual(grade, "PASS", ev)
 
+    def test_wrapped_check_save_commit_is_a_check_run(self):
+        """#635: a run started its check_save.py --commit with `timeout 110`; a wrapper that runs the
+        command it is given (timeout, env, nice, nohup, time) counts, one that reads the script does not."""
+        self.save()
+        out = PROVENANCE_LINE + "\ncheck_save: ok\ncommit: write(example): Engineer\ncommitted: [master 1a2b3c4] write(example): Engineer"
+        for wrap in ("timeout 110 ", "timeout -k 5 110 ", "timeout --signal=KILL 2m ", "env ", "env -u X PYTHONUTF8=1 ",
+                     "nice ", "nice -n 10 ", "nohup ", "time ", "PYTHONUTF8=1 timeout 110 ", "timeout 110 env PYTHONUTF8=1 "):
+            cmd = "cat > h.txt <<'EOF'\nx\nEOF\n%spy -3 -I tools/check_save.py %s --humanizer h.txt --commit 'write(example): Engineer'" % (wrap, FOLDER)
+            grade, ev = self.printed([bash(cmd), result(out)])
+            self.assertEqual(grade, "PASS", (wrap, ev))
+        for cmd in ("timeout 5 cat tools/check_save.py", "env less tools/check_save.py", "nice grep -n python tools/check_save.py"):
+            self.assertIsNone(check_run.CHECK_SAVE.search(cmd), cmd)
+
     def test_result_as_a_list_of_text_blocks_is_read(self):
         self.save()
         out = {"type": "tool_result", "content": [{"type": "text", "text": PROVENANCE_LINE + "\ncheck_save: ok"}]}
@@ -944,6 +981,7 @@ class Copy(CopyBase):
         import time
         start = time.monotonic()
         self.assertIsNone(check_run.CHECK_SAVE.search("python " + "-X " * 5000 + "z"))
+        self.assertIsNone(check_run.CHECK_SAVE.search("timeout " + "-k 1 " * 3000 + "nice -n 1 " * 3000 + "z"))
         self.assertLess(time.monotonic() - start, 1)
         self.assertIsNone(check_run.CHECK_SAVE.search("python -I tools/tests/test_check_save.py"))
         self.assertTrue(check_run.CHECK_SAVE.search("python3 -I check_save.py x"))

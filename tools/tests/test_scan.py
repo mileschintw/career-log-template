@@ -3,7 +3,7 @@
 
   python3 -I tools/tests/test_scan.py
 """
-import importlib.util, io, json, os, shutil, subprocess, sys, tempfile, unittest
+import datetime, importlib.util, io, json, os, shutil, subprocess, sys, tempfile, time, unittest
 from contextlib import redirect_stdout
 
 sys.dont_write_bytecode = True   # the tool loaded below leaves no tools/__pycache__
@@ -1219,6 +1219,99 @@ class ScanTest(unittest.TestCase):
         self.assertEqual(self.run_tool("capture", "c.md", "https://c.example/1", ".playwright-cli/obj-page.json")[0], 1)
         self.assertEqual(self.run_tool("capture", "c.md", "not a url", txt)[0], 1)
 
+    # ---- a posting run's own folder: two runs in one Log never swap postings (#608) ----
+
+    def test_run_gives_each_posting_run_its_own_folder(self):
+        old = scan.clock
+        scan.clock = lambda: "041500"
+        self.addCleanup(setattr, scan, "clock", old)
+        os.makedirs(os.path.join(self.root, ".build/runs/2026-10-22-041500-3"))   # a folder an earlier run left
+        runs = []
+        for _ in range(3):
+            code, lines = self.run_tool("run")
+            self.assertEqual(code, 0, lines)
+            runs.append(lines)
+        self.assertEqual([r[0] for r in runs], ["run: 2026-10-22-041500", "run: 2026-10-22-041500-2",
+                                                "run: 2026-10-22-041500-4"])
+        self.assertEqual(runs[1][1:], ["folder: .build/runs/2026-10-22-041500-2",
+                                       "capture: .build/runs/2026-10-22-041500-2/posting.md",
+                                       "sessions: posting-2026-10-22-041500-2, company-lookup-2026-10-22-041500-2, "
+                                       "lca-2026-10-22-041500-2", "live: .build/runs/2026-10-22-041500-2/live"])
+        a, b = (r[2].split(": ", 1)[1] for r in runs[:2])
+        pages = {"https://a.example/1": "Engineer A, ", "https://b.example/1": "Engineer B, "}
+        old_get = scan.http_get
+        scan.http_get = lambda url: (200, "text/html", "<html><body>%s</body></html>" % (pages[url] * 60))
+        self.addCleanup(setattr, scan, "http_get", old_get)
+        # the second run fetches its posting while the first run's capture waits to be saved
+        self.assertEqual(self.run_tool("fetch", a, "https://a.example/1")[0], 0)
+        self.assertEqual(self.run_tool("fetch", b, "https://b.example/1")[0], 0)
+        page = self.write(".playwright-cli/posting-2026-10-22-041500-2-page.json", json.dumps("Engineer B, read again\n"))
+        self.assertEqual(self.run_tool("capture", b, "https://b.example/1", page)[0], 0)
+        self.assertTrue(self.read(a).startswith("https://a.example/1\nread: fetch, open\n\nEngineer A, "), self.read(a)[:80])
+        self.assertNotIn("Engineer B", self.read(a))
+        self.assertEqual(self.read(b), "https://b.example/1\nread: browser, open\n\nEngineer B, read again\n")
+        for capture, url in ((a, "https://a.example/1"), (b, "https://b.example/1")):
+            recs = [json.loads(x) for x in self.read(os.path.dirname(capture) + "/fetched.jsonl").splitlines()]
+            self.assertEqual([(r["url"], r["path"]) for r in recs], [(url, "posting.md")])
+
+    def test_run_deletes_run_folders_older_than_a_week(self):
+        old = scan.clock
+        scan.clock = lambda: "041500"
+        self.addCleanup(setattr, scan, "clock", old)
+        for name in ("2026-10-14-235959", "2026-10-15-000000-2", "2026-10-21-120000", "notes"):
+            self.write(".build/runs/%s/posting.md" % name, "x")
+        code, lines = self.run_tool("run")   # today is 2026-10-22: a week back is 2026-10-15
+        self.assertEqual(code, 0, lines)
+        self.assertEqual(lines[0], "run: 2026-10-22-041500")
+        self.assertEqual(lines[5:], ["deleted: .build/runs/2026-10-14-235959/ (older than 7 days)"])
+        self.assertEqual(sorted(os.listdir(os.path.join(self.root, ".build/runs"))),
+                         ["2026-10-15-000000-2", "2026-10-21-120000", "2026-10-22-041500", "notes"])
+
+    # ---- a run's live marker: another session's Trigger check leaves its files alone (#609) ----
+
+    def live(self, key):
+        return os.path.join(self.root, ".build/runs", key, "live")
+
+    def test_run_writes_a_live_marker_with_start_and_mode(self):
+        before = time.time()
+        code, lines = self.run_tool("run", "--mode", "write")
+        self.assertEqual(code, 0, lines)
+        key = lines[0].split(": ", 1)[1]
+        self.assertEqual(lines[4], "live: .build/runs/%s/live" % key)
+        marker = json.loads(self.read(".build/runs/%s/live" % key))
+        self.assertEqual(marker["mode"], "write")
+        start = datetime.datetime.fromisoformat(marker["start"])
+        self.assertIsNotNone(start.tzinfo)
+        self.assertLessEqual(abs(start.timestamp() - before), 2)
+        self.assertTrue(lines[-1].startswith("next: now, first: send the user this line"), lines)
+        self.assertIn("another session in this same folder", lines[-1])
+        code, lines = self.run_tool("run")
+        self.assertIsNone(json.loads(self.read(".build/runs/%s/live" % lines[0].split(": ", 1)[1]))["mode"])
+        self.assertFalse([l for l in lines if l.startswith("next:")], lines)   # the hint is write's only
+
+    def test_touch_refreshes_the_marker_and_end_deletes_it(self):
+        code, lines = self.run_tool("run")
+        key = lines[0].split(": ", 1)[1]
+        marker = self.read(".build/runs/%s/live" % key)
+        os.utime(self.live(key), (time.time() - 3 * 3600,) * 2)   # untouched for 3 hours: expired
+        self.assertEqual(self.run_tool("run", "--touch", key), (0, ["live: .build/runs/%s/live (touched)" % key]))
+        self.assertLessEqual(time.time() - os.path.getmtime(self.live(key)), 60)
+        self.assertEqual(self.read(".build/runs/%s/live" % key), marker)   # its start stays
+        self.assertEqual(self.run_tool("end", key), (0, ["live: .build/runs/%s/live (deleted)" % key]))
+        self.assertFalse(os.path.exists(self.live(key)))
+        self.assertTrue(os.path.isdir(os.path.dirname(self.live(key))))   # the folder stays
+        self.assertEqual(self.run_tool("end", key), (0, ["live: none (%s has no live marker)" % key]))
+
+    def test_touch_makes_an_ended_marker_again_from_its_key(self):
+        os.makedirs(os.path.join(self.root, ".build/runs/2026-10-22-041500-2"))
+        self.assertEqual(self.run_tool("run", "--touch", "2026-10-22-041500-2"),
+                         (0, ["live: .build/runs/2026-10-22-041500-2/live (made again)"]))
+        start = datetime.datetime.fromisoformat(json.loads(self.read(".build/runs/2026-10-22-041500-2/live"))["start"])
+        self.assertEqual(start.replace(tzinfo=None), datetime.datetime(2026, 10, 22, 4, 15, 0))
+        self.assertEqual(self.run_tool("run", "--touch", "2026-10-22-999999")[0], 1)   # no such folder
+        self.assertEqual(self.run_tool("end", "../x")[0], 1)
+        self.assertEqual(self.run_tool("run", "--touch", "2026-10-22-041500-2", "--mode", "fit")[0], 2)
+
     # ---- a capture's state: open or closed, and how it was read (#568) ----
 
     POSTING = "<html><body><h1>Backend Engineer</h1>" + "<p>Build the queue and its workers.</p>" * 30 + "%s</body></html>"
@@ -1439,6 +1532,65 @@ class ScanTest(unittest.TestCase):
         self.assertIn("repeated: https://g.com/j/7 (in not-screened.jsonl and not-screened.jsonl)", lines)
         self.assertIn("missing: https://b.com/j/2 (collected, in none of the run's files)", lines)
         self.assertEqual(lines[-1], "summary: 2 finding(s)")
+
+    def test_family_lines_need_half_the_fitted_postings_in_a_family_with_no_target_version(self):
+        """#615: one line per target role at least half the fitted postings hold whose role family has no
+        Target version; none for a smaller share, postings with no tier, or a family that has one."""
+        self.write("direction.md", "# Direction\n\n## Target roles, ranked\n\n1. Backend (user, 2026-10-01)\n2. GAP: ask\n"
+                   "3. Data (sources/resumes/2025-01-01-main.tex)\n")
+        line = ("Target version: 2 of the 4 postings fitted are Backend roles (tier 1), a role family with no Target"
+                " version, so a posting run for one starts from the fallback original resume. A target run (say \"make"
+                " a Backend resume\") makes one; this scan starts none.")
+        for tiers, want in (([1, 1, 3, None], [line]),                        # exactly half
+                            ([1, 3, 3, None, None], []),                       # 2 of 5
+                            ([None, None, None, 1], []),                       # no tier is no family
+                            ([], [])):
+            with self.subTest(tiers=tiers):
+                self.assertEqual(scan.family_lines(self.root, [{"tier": t} for t in tiers], {}), want)
+        self.assertEqual(len(scan.family_lines(self.root, [{"tier": t} for t in (1, 1, 3, 3)], {})), 2)
+        self.write("outputs/resumes/backend.tex", "x")   # a Target version now exists: the agent names each family
+        with self.assertRaises(scan.ScanError) as e:
+            scan.family_lines(self.root, [{"tier": t} for t in (1, 1, 3)], {})
+        self.assertIn("needed for tier 1 (Backend), 3 (Data)", str(e.exception))
+        with self.assertRaises(scan.ScanError):   # every tier fitted, since two may share a family
+            scan.family_lines(self.root, [{"tier": t} for t in (1, 1, 3)], {1: "backend"})
+        self.assertEqual(scan.family_lines(self.root, [{"tier": t} for t in (1, 1, 3)], {1: "backend", 3: "data"}), [])
+        self.assertEqual(scan.family_lines(self.root, [{"tier": t} for t in (1, 1, 3)], {1: "server", 3: "data"}),
+                         [line.replace("2 of the 4", "2 of the 3")])
+        # tiers 1 and 3 in one family: 2 of 4 together, though each alone is 1 of 4
+        self.assertEqual(scan.family_lines(self.root, [{"tier": t} for t in (1, 3, None, None)], {1: "eng", 3: "eng"}),
+                         ["Target version: 2 of the 4 postings fitted are Backend or Data roles (tiers 1, 3), a role"
+                          " family with no Target version, so a posting run for one starts from the fallback original"
+                          " resume. A target run (say \"make a Backend resume\") makes one; this scan starts none."])
+        self.write("direction.md", "# Direction\n\n## Constraints\n\n- US only\n")   # no target roles: no tiers
+        self.assertEqual(scan.family_lines(self.root, [{"tier": None}] * 3, {}), [])
+
+    def test_report_says_a_family_has_no_target_version(self):
+        """#615: report --screen puts the line under the top line, reads --family, and refuses a bad one."""
+        d, listed = self.run_to_fit()
+        c = listed["https://c.com/j/3"]
+        self.fit_result(d, c["folder"], c["url"])
+        self.assertEqual(self.run_tool("rank", d, "--n", "3")[0], 0)
+        path = os.path.join(self.root, "outputs/reports/2026-10-22-scan.md")
+        self.write("outputs/resumes/platform.tex", "x")
+        for bad, why in (("1", "--family takes <tier>=<target name>"), ("2=backend", "tier 2 is no target role"),
+                         ("1=Back End", "a target name is lowercase")):
+            code, lines = self.run_tool("report", d + "/rows.jsonl", "--name", TODAY, "--screen", d, "--family", bad)
+            self.assertEqual(code, 1, lines)
+            self.assertIn(why, "\n".join(lines))
+            self.assertFalse(os.path.exists(path))
+        code, lines = self.run_tool("report", d + "/rows.jsonl", "--name", TODAY, "--screen", d)   # needed, missing
+        self.assertEqual(code, 1, lines)
+        self.assertFalse(os.path.exists(path))
+        code, lines = self.run_tool("report", d + "/rows.jsonl", "--name", TODAY, "--screen", d, "--family", "1=backend")
+        self.assertEqual(code, 0, lines)
+        self.assertIn("All sources read.\n\nTarget version: 1 of the 1 postings fitted are Backend roles (tier 1), a role"
+                      " family with no Target version", self.read("outputs/reports/2026-10-22-scan.md"))
+        os.remove(path)
+        self.write("outputs/resumes/backend.tex", "x")
+        code, lines = self.run_tool("report", d + "/rows.jsonl", "--name", TODAY, "--screen", d, "--family", "1=backend")
+        self.assertEqual(code, 0, lines)
+        self.assertNotIn("Target version:", self.read("outputs/reports/2026-10-22-scan.md"))
 
     def test_report_says_how_each_source_was_read(self):
         """#485: read.jsonl gives the report a `## Sources` line per source, before `## Not fitted`; a bad
@@ -1732,12 +1884,16 @@ class ScanTest(unittest.TestCase):
             git(self.root, "push", "-q", "origin", "main")
         return d, c, [l for l in lines if l.startswith("draft: ")]
 
-    def fill(self, folder, answers=False):
-        """The files a draft subagent writes into the folder."""
+    START = "from: outputs/resumes/backend.tex\nfamily: backend\ntier: 1\n"
+
+    def fill(self, folder, answers=False, start=True):
+        """The files a draft subagent writes into the folder, start.txt the record of its `start` call."""
         files = {"resume.tex": "\\documentclass{article}\n% GAP: the repo's link\n", "company.md": "- C: https://c.com\n",
                  "decisions.md": self.DECISIONS, "handoff.md": "https://c.com/j/3\n"}
         if answers:
             files["answers.md"] = "## Why us?\n\nBecause.\n"
+        if start:
+            files["start.txt"] = self.START
         for name, text in files.items():
             with open(os.path.join(self.root, folder, name), "w", encoding="utf-8", newline="\n") as f:
                 f.write(text)
@@ -1802,8 +1958,15 @@ class ScanTest(unittest.TestCase):
         folder = ".build/drafts-check/x"
         self.write(folder + "/posting.md", "https://c.com/j/3\n\ntext\n")
         self.write(folder + "/fit.md", "### C — SWE\n")
+        self.fill(folder, start=False)
+        self.assertEqual(self.run_tool("drafts", "--check", folder), (1, ["missing: start.txt", "check: 1 problem(s)"]))
         self.fill(folder)
         self.assertEqual(self.run_tool("drafts", "--check", folder), (0, ["check: ok"]))   # no answers.md: still ok
+        self.write(folder + "/start.txt", "from: outputs/resumes/backend.tex\n")
+        self.assertEqual(self.run_tool("drafts", "--check", folder),
+                         (1, ["bad: start.txt: it lacks family:, tier: (application.py start --family --tier writes it)",
+                              "check: 1 problem(s)"]))
+        self.write(folder + "/start.txt", self.START)
         self.fill(folder, answers=True)
         self.assertEqual(self.run_tool("drafts", "--check", folder), (0, ["check: ok"]))
         self.write(folder + "/resume.pdf", "%PDF")
@@ -1966,10 +2129,13 @@ class ScanTest(unittest.TestCase):
         here = ".build/drafts/" + c["folder"]
         self.assertEqual(lines, ["draft: https://c.com/j/3 | scan/2026-10-22:scan-drafts/" + c["folder"],
                                  "folder: %s/" % here,
-                                 "files: company.md, decisions.md, fit.md, handoff.md, posting.md, resume.tex",
+                                 "files: company.md, decisions.md, fit.md, handoff.md, posting.md, resume.tex, start.txt",
                                  "needs you: the repo's link | resume.tex, the Widget bullet"])
         with open(os.path.join(other, here, "decisions.md"), encoding="utf-8") as f:
             self.assertEqual(f.read(), self.DECISIONS)
+        # start's record comes along, where check.py done write reads it after a Reference save (#626)
+        with open(os.path.join(other, here, "start.txt"), encoding="utf-8") as f:
+            self.assertEqual(f.read(), self.START)
         # the same files again (Look, then Accept), a build's own files beside them: fine
         with open(os.path.join(other, here, "resume.pdf"), "w") as f:
             f.write("%PDF")

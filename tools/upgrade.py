@@ -335,6 +335,24 @@ def clean(root):
     return 0, ["done: removed %s and %s" % (REFS, BUILD.replace(os.sep, "/"))]
 
 
+def flag_errors(cmd, root, opts):
+    """One `error:` line per plan flag given to engine, reapply or clean: plan alone fetches and sets
+    the target; the rest read its state.json, whose url and target the line names when there is one."""
+    try:
+        state = load(git(root, "rev-parse", "--show-toplevel").strip())
+    except UpgradeError:
+        state = {}
+    uses = ("deletes them", "deletes the plan") if cmd == "clean" else ("reads them from there", "reads it from the plan")
+    lines = []
+    if "--to" in opts:
+        lines.append("error: %s takes no --to: plan %s, and %s %s" % (
+            cmd, "set the target (%s)" % state["to"] if "to" in state else "sets the target", cmd, uses[1]))
+    if "--url" in opts:
+        lines.append("error: %s takes no --url: plan %s, and %s %s" % (
+            cmd, "fetched the releases (from %s)" % state["url"] if "url" in state else "fetches the releases", cmd, uses[0]))
+    return lines
+
+
 def main(argv):
     if hasattr(sys.stdout, "reconfigure"):   # a front page's heading (`## 條目`), whatever the code page
         sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
@@ -353,7 +371,10 @@ def main(argv):
         print(usage)
         return 2
     cmd, root, rest = args[0], args[1], args[2:]
-    if (opts and cmd != "plan") or (cmd == "engine" and len(rest) != 1) or (cmd in ("plan", "clean") and rest) \
+    if opts and cmd != "plan":
+        print("\n".join(flag_errors(cmd, root, opts)))
+        return 2
+    if (cmd == "engine" and len(rest) != 1) or (cmd in ("plan", "clean") and rest) \
             or (cmd == "reapply" and (not rest or ("--all" in rest and len(rest) > 1))):
         print(usage)
         return 2

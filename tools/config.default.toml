@@ -33,3 +33,8 @@ update_check = "on"
 # write (skills/career-log/modes/write.md): the most pages a resume may have (1 to 3); tools/resume.py
 # fails a longer one. 2 suits 10+ years of experience.
 resume_max_pages = 1
+
+# fit (skills/career-log/modes/fit-plan-preview.md): after a learning plan, a Plan preview of the resume
+# bullets and heatmap once the planned projects land, kept out of git. "ask" offers it with the plan;
+# "always" makes it; "never" does not.
+plan_preview = "ask"

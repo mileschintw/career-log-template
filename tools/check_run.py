@@ -133,8 +133,8 @@ Save checks, on the changes between <sha> and the copy's HEAD:
   such call with `write(` in its command whose result is not a failure (an error starting `Exit
   code` with no `] write(` commit line in it), or else the last commit call; with none,
   the whole transcript. A check run is a shell call whose command runs check_save.py with python3, python
-  or py, before that commit, or in the commit's own command ahead of the commit call
-  (`check_save.py ... && git commit ...`); only its tool result is read, so a line the run wrote
+  or py (after a timeout, env, nice, nohup or time wrapper too), before that commit, or in the
+  commit's own command ahead of the commit call (`check_save.py ... && git commit ...`); only its tool result is read, so a line the run wrote
   itself, echoed or read from a file does not count. The last check run must have exited 0 (its
   `check_save: ok` line). Each provenance file (as above) that a write commit touched needs a
   `Provenance check (<file>): <n> rows; citing another output: <...>` line, <file> its path or
@@ -148,7 +148,9 @@ Save checks, on the changes between <sha> and the copy's HEAD:
   <line> of each line that names a Humanizer call line must be in the prompt or the reply (its tool
   result) of a humanizer call made after the run's first reviewer call, with marks, outer quotes and
   extra spaces set aside. Found only once case, quotes and a trailing `...` are set aside too: NOTE.
-  Found in neither: FAIL.
+  Found in neither: FAIL. Any printed-lines FAIL also names each filter (`cut`, `tail`, `grep`,
+  `Select-Object`, ...) that a check run printing these lines pipes the tool's output through,
+  since a filter can drop a line or cut it short.
 - past-phrasings, only when a commit in <sha>..HEAD is a write save (its subject starts with
   `write(`; SKIP otherwise, since other modes trim the section by their own steps): in each entry
   the save changed, the `## Past phrasings` lines are kept as they stand: no line removed and a
@@ -579,11 +581,16 @@ HUM_RE = re.compile(r"Humanizer after review:\s*(?:(\S[^\n]*?)\s*(?:→|->)\s*(\
 PROV_LABEL = re.compile(r"^[\s>|-]*Provenance check(?:\s*\(.*?\))?:", re.M)
 PROV_RE = re.compile(r"Provenance check(?:\s*\((.*?)\))?:\s*(\d+)\s+rows?\s*;\s*citing another output:?\s*([^\n]*)")
 # running it, not reading it: a command (`&` calls one in PowerShell) that starts with an
-# interpreter, then its flags, then the script
-CHECK_SAVE = re.compile(r"(?:^|[;&|(\n])\s*(?:\w+=\S+\s+)*(?:&\s*)?[\"']?(?:\"[^\"]*[\\/]|'[^']*[\\/]|[^\s\"';&|]*[\\/])?"
+# interpreter, then its flags, then the script; `VAR=value` and wrappers that run the command they
+# are given (timeout, env, nice, nohup, time) may come first
+WRAPPER = (r"(?:\w+=\S+|timeout(?:\s+-[ks]\s+\S+|\s+-\S+)*\s+\d\S*|env(?:\s+-u\s+\S+|\s+-\S+)*"
+           r"|nice(?:\s+-n\s+\S+|\s+-\S+)*|nohup|time(?:\s+-p)?)\s+")
+CHECK_SAVE = re.compile(r"(?:^|[;&|(\n])\s*(?:" + WRAPPER + r")*(?:&\s*)?[\"']?(?:\"[^\"]*[\\/]|'[^']*[\\/]|[^\s\"';&|]*[\\/])?"
                         r"(?:python3?|py)(?:\.exe)?[\"']?(?:\s+-[XW]\s+[^\s-]\S*|\s+-\S+)*\s+"
                         r"[\"']?(?:\"[^\"]*[\\/]|'[^']*[\\/]|[^\s\"']*[\\/])?check_save\.py\b",
                         re.I)
+# a filter piped after it, which can cut or drop the lines it prints
+FILTER = re.compile(r"\|\s*((?:cut|head|tail|grep|sed|awk|findstr|Select-Object|Select-String)\b[^|;&\n]*)", re.I)
 EDITS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 # `git ... commit`, tools/sync.py's commit or settle commit, which the modes run in its place, or
 # tools/check_save.py --commit, which runs sync.py commit on its own exit 0
@@ -621,6 +628,13 @@ def table_lines(tables, lines, ambiguous):
 
 def command(e):
     return str(e[2].get("command") or "") if e[0] == "tool" and e[1] in SHELLS else ""
+
+
+def filters(cmd):
+    """The filters a shell command pipes tools/check_save.py's output through, as written."""
+    m = CHECK_SAVE.search(cmd)
+    rest = re.split(r"\n|;|&&|\|\|", cmd[m.end():])[0] if m else ""
+    return [f.strip() for f in FILTER.findall(rest)]
 
 
 def check_printed_lines(evs, calls, copy, base, saved):
@@ -712,6 +726,11 @@ def check_printed_lines(evs, calls, copy, base, saved):
                 else:
                     bad.append("the text of %r is in neither the prompt nor the reply of a humanizer call after the review"
                                % line)
+    printing = [i for i in runs if PROV_LABEL.search(out_of(evs[i])[1]) or HUM_LABEL.search(out_of(evs[i])[1])]
+    piped = list(dict.fromkeys(f for i in printing for f in filters(command(evs[i]))))
+    if piped:
+        why.append("its output was piped through %s, which can cut or drop the lines it prints: run it unfiltered"
+                   % ", ".join("`%s`" % f for f in piped))
     if bad:
         return "FAIL", "; ".join(bad + why + ["tool line not in the form step 10 gives: %r" % u[:120] for u in unparsed[-2:]] + notes + ok)
     if notes:

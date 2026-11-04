@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The application folders and the other saved outputs of write (skills/career-log/modes/write.md):
 their names, earlier contact with a company, the starting copy, the save, the level, sent versions,
-risks and the Past phrasings a save feeds.
+a target's staleness, risks and the Past phrasings a save feeds.
 
   python3 -I tools/application.py [--root <root>] <command> ...     (Windows: py -3 -I ...)
 
@@ -27,7 +27,7 @@ target's outputs/resumes/<target>.md, or a report outputs/reports/<YYYY-MM-DD>-<
   answers.md path 1), `untyped: ...` in the same form for each heading of a Reference folder saved
   before Type: lines (match its heading to the row yourself), and `sent before: ...` for an Archived
   folder's answer of that type or, saved before Type: lines, each of its headings; then, for each
-  date of an `answer:` or `untyped:` line, `since <date>: <n> commits` and the `git log --since
+  date of an `answer:` or `untyped:` line, `since <date>: <n> commit(s)` and the `git log --since
   --oneline` lines for entries/, direction.md, stories.md and profile.md.
 - `start [--name <name> --from <target or file>] [--replace]`: without --from, one `target: <name>
   | outputs/resumes/<name>.tex` per target (or `targets: none`), then `fallback:` the newest
@@ -35,7 +35,11 @@ target's outputs/resumes/<target>.md, or a report outputs/reports/<YYYY-MM-DD>-<
   with), `fallback: tie: <a>, <b>` when several share that date, or the blank layout
   skills/career-log/assets/resume-blank.tex. With --from, copies that target's .tex, or that file,
   to .build/drafts/<name>/resume.tex; it refuses the example resume, and a draft there with other
-  text unless --replace.
+  text unless --replace. A posting run adds `--family <target name> --tier <n>|none`: the target
+  name of the posting's role family (`general` exactly when direction.md's Target roles are empty)
+  and the role's place in those Target roles (`none` when it is not among them); after copying, it
+  writes them with --from's path to .build/drafts/<name>/start.txt (`from:`, `family:`, `tier:`
+  lines, for tools/check.py done write) and prints `recorded: <that path>`.
 - `save --application <name>` or `save --target <target>`: copies .build/drafts/<name>/resume.tex
   and resume.pdf to outputs/applications/<name>/ (with the draft's posting.md when the folder has
   none) or to outputs/resumes/<target>.tex and .pdf, printing a `copied:` line each. It refuses a
@@ -66,6 +70,17 @@ target's outputs/resumes/<target>.md, or a report outputs/reports/<YYYY-MM-DD>-<
   hash, alone or in the row's words (with --target). Prints `version: <hash>:<path>` (the path's .pdf read as .tex) and the file
   at that commit, or writes its bytes to --out; a bare hash whose path is not at that commit prints
   a `touched:` line per file it changed, and fails. --record as for sent.
+- `stale <target>`: how far a Target version has fallen behind the Log since its last save (the last
+  `write(` commit of outputs/resumes/<target>.*, else its last commit); it judges nothing. `saved:
+  <short> <date> <subject>`, then `cited changed: <n>` and one `  <entry>: <n> commit(s), last <date>
+  <subject>` line (with `uncommitted changes`) per entry its provenance cites, by path or by name as
+  tools/entries.py rulings-hits reads them, that changed since; `new entries: <n>` and one `
+  <entry>: <title>` line (` (uncommitted)` when not yet committed) per entry added since, listed
+  there and not as cited; `unresolved: <line>: <cell>` per provenance row that names no entry;
+  `no provenance: ...` when the save's commit has no <target>.md, or its <target>.md is empty or
+  names no entry; and, when both lists are empty and the provenance cites an entry, `fresh: ...`
+  and exit 0. Exit 1 otherwise, or with `none: ...` when the target is not saved. `stale(root,
+  target)` gives the same lists to another tool.
 - `risks <saved>`: `risks: <where>` and the `## Risks to handle in conversation` section saved with
   the output: an application folder's provenance.md; a folder with sent-version.md, the target's
   .md at that commit; a target's .md or a report; else `risks: none (saved before the section
@@ -107,6 +122,7 @@ import logfiles
 import entries   # phrasing-add, answer-set, the Past phrasings and stories.md parsers
 import check_save   # what a saved output is, its bullets, its Archived marker
 import writing_lint   # tex_plain: a .tex fragment as the reader sees it
+import config   # direction.md's Target roles, for start's --family and --tier
 
 RISKS = "Risks to handle in conversation"
 BLANK = "skills/career-log/assets/resume-blank.tex"
@@ -242,7 +258,11 @@ def since_lines(root, day):
                   "profile.md").splitlines()
     except AppError as e:
         return ["since %s: unknown (%s)" % (day, e)]
-    return ["since %s: %d commits" % (day, len(log))] + ["  " + l for l in log]
+    return ["since %s: %s" % (day, commit_count(len(log)))] + ["  " + l for l in log]
+
+
+def commit_count(n):
+    return "%d commit%s" % (n, "" if n == 1 else "s")
 
 
 def cmd_prior(root, companies, qtype):
@@ -305,15 +325,47 @@ def fallback(root):
     return "sources/resumes/" + pool[0]
 
 
-def cmd_start(root, name, source, replace):
+START_RECORD = ".build/drafts/%s/start.txt"
+
+
+def start_record(root, name):
+    """{"from", "family", "tier"} from the draft's start.txt, or None when it has none."""
+    path = at(root, START_RECORD % name)
+    if not os.path.isfile(path):
+        return None
+    pairs = (l.partition(":") for l in logfiles.read_text(path).splitlines())
+    return {k.strip(): v.strip() for k, sep, v in pairs if sep}
+
+
+def family_problem(root, family, tier):
+    """Why --family and --tier do not fit direction.md's Target roles, or None."""
+    if (family is None) != (tier is None):
+        return "start takes --family and --tier together"
+    roles = config.target_roles(root)
+    if logfiles.ascii_slug(family) != family:
+        return "--family is a target name, lowercase: %r" % family
+    if not roles and (family != "general" or tier != "none"):
+        return "direction.md's Target roles are empty: --family general --tier none"
+    if roles and family == "general":
+        return "--family general is only for a Log with no Target roles: name the posting's role family"
+    if tier != "none" and not (tier.isdigit() and 1 <= int(tier) <= len(roles)):
+        return "--tier is the role's place in direction.md's Target roles (1 to %d), or none" % len(roles)
+    return None
+
+
+def cmd_start(root, name, source, replace, family=None, tier=None):
     if source is None:
-        if name:
-            raise AppError("start --name takes --from <target or file>")
+        if name or family or tier:
+            raise AppError("start --name, --family and --tier take --from <target or file>")
         ts = targets(root)
         out = ["target: %s | outputs/resumes/%s.tex" % (t, t) for t in ts] or ["targets: none"]
         return out + ["fallback: %s" % fallback(root)]
     if not name or not logfiles.ascii_slug(name) == name:
         raise AppError("start --from takes --name <name>, the name `name` printed")
+    if family is not None or tier is not None:
+        problem = family_problem(root, family, tier)
+        if problem:
+            raise AppError(problem)
     src = "outputs/resumes/%s.tex" % source if source in targets(root) else rel_of(root, source)
     if src == EXAMPLE:
         raise AppError("never copy the example resume (%s): copy a target, a source resume or %s" % (EXAMPLE, BLANK))
@@ -324,7 +376,11 @@ def cmd_start(root, name, source, replace):
                 % (dest, src)], 1
     os.makedirs(os.path.dirname(at(root, dest)), exist_ok=True)
     shutil.copyfile(at(root, src), at(root, dest))
-    return ["copied: %s -> %s" % (src, dest)]
+    out = ["copied: %s -> %s" % (src, dest)]
+    if family is not None:
+        logfiles.write_text(at(root, START_RECORD % name), "from: %s\nfamily: %s\ntier: %s\n" % (src, family, tier))
+        out.append("recorded: " + START_RECORD % name)
+    return out
 
 
 # ---- save ----
@@ -615,6 +671,67 @@ def cmd_sent_show(root, ref, target, dest, folder):
     return out
 
 
+# ---- stale ----
+
+def stale(root, target):
+    """How far a Target version has fallen behind the Log since its last save, as two lists; it
+    judges nothing. The save is the last `write(` commit of outputs/resumes/<target>.* (else its last
+    commit: an upgrade's rewrite saves nothing). A dict: `saved` (full hash, date, subject),
+    `changed` [(entry, [(short hash, date, subject)] since the save, uncommitted)] for each entry its
+    provenance cites (entries.cited_entries) that changed, `new` [(entry, title, uncommitted)] for
+    each entry the save's commit did not hold, `unresolved` [(line, cell)] for each provenance row
+    naming no entry, `provenance` False when the save's commit has no <target>.md to read, and
+    `cites` False when that <target>.md is empty or none of its rows names an entry. None when the
+    target is not saved (no commit touched it, or its files are gone)."""
+    if logfiles.ascii_slug(target) != target:
+        raise AppError("not a target name: %s" % target)
+    if not any(os.path.isfile(at(root, "outputs/resumes/%s.%s" % (target, x))) for x in ("md", "tex")):
+        return None
+    saves = [l.split("|", 2) for l in git(root, "log", "--format=%H|%cd|%s", "--date=short", "--",
+                                          "outputs/resumes/%s.*" % target).splitlines() if l]
+    if not saves:
+        return None
+    full, day, subject = next((s for s in saves if s[2].startswith("write(")), saves[0])
+    blob = logfiles.git_blob(root, full, "./outputs/resumes/%s.md" % target)
+    log = entries.load(root)
+    def paths(cmd, *args):   # -z: each name as it is, spaces and non-ASCII letters included
+        return set(git(root, cmd, "-z", *args, "--", "entries/").split("\0")) - {""}
+    held, tracked = paths("ls-tree", "-r", "--name-only", full), paths("ls-files")
+    new = [(e.path, one_line(entries.one_value(e.fields.get("title"))) or e.slug, e.path not in tracked)
+           for e in log if e.path not in held]
+    cited, unresolved = entries.cited_entries(log, blob.decode("utf-8", "replace")) if blob else (set(), [])
+    changed = []
+    for path in sorted(cited - {n[0] for n in new}):
+        commits = [tuple(c.split("|", 2)) for c in git(root, "log", "--format=%h|%cd|%s", "--date=short",
+                                                       "%s..HEAD" % full, "--", path).splitlines()]
+        edited = bool(git(root, "status", "--porcelain", "--", path).strip())
+        if commits or edited:
+            changed.append((path, commits, edited))
+    return {"saved": (full, day, subject), "changed": changed, "new": new, "unresolved": unresolved,
+            "provenance": blob is not None, "cites": bool(cited)}
+
+
+def cmd_stale(root, target):
+    res = stale(root, target)
+    if res is None:
+        return ["none: no saved target %s (outputs/resumes/%s.* is missing or never committed)" % (target, target)], 1
+    full, day, subject = res["saved"]
+    out = ["saved: %s %s %s" % (full[:7], day, subject), "cited changed: %d" % len(res["changed"])]
+    for path, log, dirty in res["changed"]:
+        what = ["%s, last %s %s" % (commit_count(len(log)), log[0][1], log[0][2])] if log else []
+        out.append("  %s: %s" % (path, ", ".join(what + (["uncommitted changes"] if dirty else []))))
+    out.append("new entries: %d" % len(res["new"]))
+    out += ["  %s: %s%s" % (path, title, " (uncommitted)" if untracked else "") for path, title, untracked in res["new"]]
+    out += ["unresolved: %s: %s" % (n, cell) for n, cell in res["unresolved"]]
+    if not res["provenance"]:
+        out.append("no provenance: the save's commit has no outputs/resumes/%s.md, so no cited entry was checked" % target)
+    elif not res["cites"]:
+        out.append("no provenance: the save's outputs/resumes/%s.md cites no entry, so no cited entry was checked" % target)
+    if res["changed"] or res["new"] or not res["cites"]:
+        return out, 1
+    return out + ["fresh: no entry %s cites changed and no entry was added since %s" % (target, full[:7])]
+
+
 # ---- risks ----
 
 def cmd_risks(root, saved):
@@ -827,6 +944,7 @@ def parser():
     s.add_argument("companies", nargs="+"); s.add_argument("--type")
     s = sub.add_parser("start", epilog=ROOT_HELP)
     s.add_argument("--name"); s.add_argument("--from", dest="source"); s.add_argument("--replace", action="store_true")
+    s.add_argument("--family"); s.add_argument("--tier")
     s = sub.add_parser("save", epilog=ROOT_HELP)
     s.add_argument("--application"); s.add_argument("--target")
     s = sub.add_parser("level", epilog=ROOT_HELP)
@@ -835,6 +953,8 @@ def parser():
     s.add_argument("target"); s.add_argument("--before"); s.add_argument("--record")
     s = sub.add_parser("sent-show", epilog=ROOT_HELP)
     s.add_argument("ref"); s.add_argument("--target"); s.add_argument("--out"); s.add_argument("--record")
+    s = sub.add_parser("stale", epilog=ROOT_HELP)
+    s.add_argument("target")
     s = sub.add_parser("risks", epilog=ROOT_HELP)
     s.add_argument("saved")
     s = sub.add_parser("phrasings", epilog=ROOT_HELP)
@@ -850,7 +970,7 @@ def run(root, a):
     if a.cmd == "prior":
         return cmd_prior(root, a.companies, a.type)
     if a.cmd == "start":
-        return cmd_start(root, a.name, a.source, a.replace)
+        return cmd_start(root, a.name, a.source, a.replace, a.family, a.tier)
     if a.cmd == "save":
         return cmd_save(root, a.application, a.target)
     if a.cmd == "level":
@@ -859,6 +979,8 @@ def run(root, a):
         return cmd_sent(root, a.target, a.before, a.record)
     if a.cmd == "sent-show":
         return cmd_sent_show(root, a.ref, a.target, a.out, a.record)
+    if a.cmd == "stale":
+        return cmd_stale(root, a.target)
     if a.cmd == "risks":
         return cmd_risks(root, a.saved)
     if a.cmd == "phrasings":

@@ -122,8 +122,9 @@ A changed entry that is not this save's gets no Past phrasings check: when its s
 `Past phrasings (<entry>): not this save's (...): not checked, not committed` line and a `check:`
 line under it. An entry of this save's that also changed outside `## Past phrasings` gets a
 `check:` line too: it is committed whole. While a `check:` line printed, it prints `held: not committed: ...` instead (exit 1):
-act on each, then run it again with --checked. On exit 1 it commits nothing, so the same command,
-run again after the fixes, is the commit. Exit 2, with one line saying why, for a <saved> path that is not a saved output in the Log,
+act on each, then run it again with --checked and its output piped into nothing, which the line
+says too. On exit 1 it commits nothing, so the same command, run again after the fixes, is the
+commit. Exit 2, with one line saying why, for a <saved> path that is not a saved output in the Log,
 a --humanizer file that cannot be read, or a git or writing.md read that fails: fix that path or
 file, then run it again. Standard library only, Python 3.11+.
 """
@@ -961,7 +962,9 @@ def main(argv):
     if a.commit is None:
         return 0
     if not a.checked and any(CHECK_LINE.search(l) for l in out.lines):
-        print("held: not committed: act on each `check:` line above, then run this again with --checked added")
+        print("held: not committed: act on each `check:` line above, then run this again with --checked added"
+              " and its output piped into nothing: a filter such as tail, cut, grep or Select-Object drops or"
+              " cuts the lines it prints, and the check then fails")
         return 1
     try:
         return commit(root, saved, a.commit, entries)

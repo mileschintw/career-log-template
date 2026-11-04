@@ -359,6 +359,24 @@ class Upgrade(unittest.TestCase):
         self.assertEqual(self.run_tool("engine", self.tpl)[0], 2)
         self.assertEqual(self.run_tool("plan", self.tpl, "--to", "x")[0], 2)
 
+    def test_plan_flags_after_plan_name_the_flag(self):
+        # only plan takes --to and --url; the others say which flag and why, from the plan's state
+        log = self.log()
+        rc, out = self.run_tool("engine", log, "0.2.0", "--url", self.url)
+        self.assertEqual(rc, 2, out)
+        self.assertEqual(out, ["error: engine takes no --url: plan fetches the releases, and engine reads them from there"])
+        self.assertEqual(self.plan(log)[0], 0)
+        rc, out = self.run_tool("engine", log, "0.2.0", "--url", self.url)
+        self.assertEqual((rc, out), (2, ["error: engine takes no --url: plan fetched the releases (from %s), "
+                                         "and engine reads them from there" % self.url]))
+        rc, out = self.run_tool("reapply", log, "--all", "--to", "0.2.1")
+        self.assertEqual((rc, out), (2, ["error: reapply takes no --to: plan set the target (0.2.1), "
+                                         "and reapply reads it from the plan"]))
+        rc, out = self.run_tool("clean", log, "--to", "0.2.1", "--url", self.url)
+        self.assertEqual(rc, 2, out)
+        self.assertEqual([l.split(":")[1] for l in out], [" clean takes no --to", " clean takes no --url"])
+        self.assertEqual(upgrade.load(log)["done"], [])   # nothing ran
+
 
 @unittest.skipUnless(shutil.which("sh"), "no sh on PATH")
 class Export(unittest.TestCase):

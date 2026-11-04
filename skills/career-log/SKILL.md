@@ -70,24 +70,32 @@ The skill's own folder holds, besides the modes:
   4. **Next up** (below): its block follows the hooks, apart from them.
 
   What the user decides on stays whole, in the chat: a change list or text they approve (consolidate step 5, a `write` draft, an import's report before its yes), a line for `direction.md`, a question they answer or a command they run, and what a mode file says to show whole (fit's requirement map, fit-several-postings step 5's heatmap, rank's ranking). A mode file's own short form (fit-several-postings step 6, *In chat, the plan is short*) is this rule applied. When the user asks for the detail in the chat, show it.
-- **Next up.** Every mode but log ends with the Next up block: once its last step is done, run `python3 -I <root>/tools/check.py done <mode> --since <start>`, with the `<mode>` its mode file's Next up step names and `<start>` the `mode start:` value its first *Trigger check* printed, and do what its `next:` line says. A setup that a mode's *Trigger check* started adds `--for <that mode>`. The tool prints English data lines; you write the block from them as one piece, all of it in the conversation language: the heading, each bold label and each request to say, which you translate. Only mode names stay as code (`consolidate`). It starts with a `###` heading, then, in this order:
-  1. The saved line, from `Saved:`: one line, the commit count and one short summary of what the subjects say was saved, in place of the subjects. A `no commit` or `not listed` line stays one short line.
-  2. The next step, from the `Next:` line, with its reason. With no `Next:` line, this part is left out.
-  3. The session line: start a new session (or `/clear`), or go on here when the tool prints `Go on in this session`. A `Not saved yet:` line takes its place, in bold.
-  4. The other modes from `Also available:`, each with its request to say.
+- **Next up.** Every mode but log ends with the Next up block (log runs the same tool for one sentence, as its step 5 says): once its last step is done, run `python3 -I <root>/tools/check.py done <mode> --since <start>`, with the `<mode>` its mode file's Next up step names and `<start>` the `mode start:` value its first *Trigger check* printed, and do what its `next:` line says. A setup that a mode's *Trigger check* started adds `--for <that mode>`. The tool prints English data lines; you write the block from them as one piece, all of it in the conversation language: the heading, each bold label and each request to say, which you translate. Only mode names stay as code (`consolidate`). The block closes out this run: finished work and what comes next are separate parts, each under its own label. It starts with a `###` heading from `Close-out` that names the run as ended (never "next step"), then, in this order:
+  1. The saved part, from `Saved:`: one line, the commit count and one short summary of what the subjects say was saved, in place of the subjects. A `no commit` or `not listed` line stays one short line.
+  2. The next steps, one per `Next:` line, each with what it acts on (the entries by name, a Target version and its bullets, a role, as the tool gives them) and its reason, under a label of their own. The steps are the tool's `Next:` lines only; with none, this part is left out.
+  3. The session line: start a new session (or `/clear`), or go on here when the tool prints `Go on in this session`, or the `Complete:` line: the run did what it had to, the session can end, and anything else starts in a new session. A `Not saved yet:` line takes its place, in bold.
+  4. The modes from `Also available:`, when the tool prints it, each with its request to say and why it fits this Log now.
 
-  In a Chinese conversation:
+  In a Chinese conversation, after a consolidate that finished one entry while others wait:
 
   ```
-  ### 下一步
+  ### 本次收尾
 
-  **已存進 Log：** 4 個 commit（audit 的修正：3 個 entry 和 profile）
+  **已存進 Log：** 2 個 commit（Widget 這個 entry 整理完成，加上 Story index）
 
-  **接著做：** `consolidate`，還有 2 個 entry 是 imported。
+  **接著可以做：** `consolidate`（說「幫我整理 Gadget 這個 entry」）：還有 3 個 entry 是 stub 或 imported：Gadget、Gizmo、Sprocket，它們還有 gap 和 pending 要整理。
 
   請開新 session（或 /clear）：這個 session 的工作都已存進 Log。
+  ```
 
-  其他可用：`rank`（說「幫我排這些徵才會的公司」）、`guide`（說「接下來做什麼？」）
+  When nothing follows:
+
+  ```
+  ### 本次收尾
+
+  **已存進 Log：** 1 個 commit（stories：衝突處理的 Talking points）
+
+  這次要做的都做完了，這個 session 可以結束；有其他需要，請開新 session。
   ```
 
   With `--for`, the block is the saved line, then going back to that mode in this session (and the bold `Not saved yet:` warning, when printed). Done when the block is the last thing in your last message, everything else you say above it (with `--for`, it is shown before that mode goes on). In an unattended run (`CAREER_LOG_UNATTENDED`), run no Next up, whatever the mode file's Next up step and Done when say.
@@ -99,7 +107,7 @@ The skill's own folder holds, besides the modes:
 - **Commits.** Every commit and push goes through `tools/sync.py` (`--help`: what each command checks and prints). Every run of it ends with `sync: ok`, or with a `next:` line you follow. `<default>` is the default branch's name, the *Trigger check*'s `default branch:` line. Every data commit goes to the default branch, except a scan's drafts, which wait on a throwaway branch ([scan](modes/scan.md)); when it is made depends on its size:
   - **Small data changes** are a pending line with its excerpt, interview notes, an application row, a gap or two answered, a direction update: every write that is not a bulk change. Commit them after every mode that writes: `python3 -I <root>/tools/sync.py commit "<the mode's message>" -- <file>...`, naming each file the mode wrote, so a bulk change waiting for its yes stays out of the commit. A mode's "commit and push" sentence means this command.
   - **Bulk data changes** are any import, and any other mode run that rewrites more than one entry (a consolidate over several entries, the fixes after an audit). Updating the `## Past phrasings` of the entries a `write` used does not count. Leave every file of one uncommitted until the user's yes, as [commits.md › Bulk data changes](commits.md#bulk-data-changes) says; until they answer, a mode that would write to a file `sync.py status` lists waits for the answer.
-  - **What an earlier session left:** the *Trigger check*'s `log change:` lines (changes not committed) and `ahead:` line (commits not pushed), and Next up, say how to settle it; follow them.
+  - **What an earlier session left:** the *Trigger check*'s `log change:` lines (changes not committed) and `ahead:` line (commits not pushed), and Next up, say how to settle it; follow them. Its `log change (live run <key>):` lines are a run still going in another session, which saves them itself.
   - **Engine changes** (anything that changes how the agent behaves) go through a branch, an issue and a pull request, with the exceptions [engine-changes.md](engine-changes.md) lists: read it before the first edit.
 
 ## Sent versions

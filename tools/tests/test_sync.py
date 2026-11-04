@@ -5,7 +5,7 @@ identity they set.
 
   python3 -I tools/tests/test_sync.py
 """
-import importlib.util, os, shutil, subprocess, sys, tempfile, unittest
+import importlib.util, os, shutil, subprocess, sys, tempfile, threading, unittest
 
 sys.dont_write_bytecode = True   # the tool loaded below leaves no tools/__pycache__
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -199,11 +199,41 @@ class Commit(Log):
         self.assertIn("SETUP.md step 3", out.splitlines()[-1])
         self.assertEqual(self.git(root, "status", "--short"), " M README.md\n")
 
-    def test_push_refused(self):
+    def test_push_rebases_once_when_another_clone_pushed(self):
         other = self.clone("other")
         self.write("profile.md", "# Theirs\n", root=other)
         self.git(other, "add", "profile.md")
         self.git(other, "commit", "-q", "-m", "theirs")
+        self.git(other, "push", "-q")
+        self.write("README.md", "# Mine\n")
+        self.write("entries/2031-02-live.md", "a live run's file\n")   # another session's: left as it is
+        code, out = self.sync("commit", "log(widget): mine", "--", "README.md")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.splitlines()[1:], ["push: rebased on origin/master", "pushed: origin/master", "sync: ok"])
+        self.assertEqual(self.git(self.root, "log", "--format=%s", "-2").splitlines(), ["log(widget): mine", "theirs"])
+        self.assertEqual(self.git(self.root, "status", "--short"), "?? entries/2031-02-live.md\n")
+        self.assertEqual(self.git(self.root, "rev-list", "--count", "origin/master..HEAD").strip(), "0")
+
+    def test_rebase_keeps_the_time_of_uncommitted_files(self):
+        other = self.clone("other")
+        self.write("profile.md", "# Theirs\n", root=other)
+        self.git(other, "add", "profile.md")
+        self.git(other, "commit", "-q", "-m", "theirs")
+        self.git(other, "push", "-q")
+        left = os.path.join(self.root, "entries", "2031-01-widget.md")
+        self.write("entries/2031-01-widget.md", "---\ntitle: Widget, left by an earlier session\n---\n")
+        os.utime(left, (1_700_000_000, 1_700_000_000))   # its time tells check.py it is no live run's
+        self.write("README.md", "# Mine\n")
+        code, out = self.sync("commit", "log(widget): mine", "--", "README.md")
+        self.assertEqual(code, 0, out)
+        self.assertIn("push: rebased on origin/master", out)
+        self.assertEqual(self.git(self.root, "status", "--short"), " M entries/2031-01-widget.md\n")
+        self.assertEqual(int(os.path.getmtime(left)), 1_700_000_000)
+
+    def test_push_refused_when_the_rebase_fails(self):
+        other = self.clone("other")
+        self.write("README.md", "# Theirs\n", root=other)
+        self.git(other, "commit", "-q", "-am", "theirs")
         self.git(other, "push", "-q")
         self.write("README.md", "# Mine\n")
         code, out = self.sync("commit", "log(widget): mine", "--", "README.md")
@@ -212,6 +242,27 @@ class Commit(Log):
         self.assertIn("push: refused (the commit is made, not pushed)", out)
         self.assertIn("Never force-push", out.splitlines()[-1])
         self.assertEqual(self.git(self.root, "log", "-1", "--format=%s").strip(), "log(widget): mine")
+        self.assertEqual(self.git(self.root, "status", "--short"), "")   # the rebase was undone
+        gitdir = self.git(self.root, "rev-parse", "--absolute-git-dir").strip()
+        self.assertFalse(os.path.exists(os.path.join(gitdir, "rebase-merge")))
+
+    def test_retries_while_another_session_holds_the_index(self):
+        lock = os.path.join(self.root, ".git", "index.lock")
+        open(lock, "w").close()
+        threading.Timer(1.5, os.remove, [lock]).start()
+        self.write("README.md", "# Log 2\n")
+        code, out = self.sync("commit", "log(widget): while locked", "--", "README.md")
+        self.assertEqual(code, 0, out)
+        self.assertTrue(self.pushed())
+
+    def test_stops_when_the_index_stays_locked(self):
+        lock = os.path.join(self.root, ".git", "index.lock")
+        open(lock, "w").close()
+        self.write("README.md", "# Log 2\n")
+        code, out = self.sync("commit", "log(widget): locked", "--", "README.md")
+        self.assertEqual(code, 1)
+        self.assertIn("commit: refused (git add)", out)
+        self.assertIn("index.lock", out)
 
     def test_no_remote(self):
         self.git(self.root, "remote", "remove", "origin")
@@ -294,9 +345,11 @@ class Push(Log):
 
     def test_refused_and_no_remote(self):
         other = self.clone("other")
-        self.git(other, "commit", "-q", "--allow-empty", "-m", "theirs")
+        self.write("README.md", "# Theirs\n", root=other)
+        self.git(other, "commit", "-q", "-am", "theirs")
         self.git(other, "push", "-q")
-        self.git(self.root, "commit", "-q", "--allow-empty", "-m", "mine")
+        self.write("README.md", "# Mine\n")
+        self.git(self.root, "commit", "-q", "-am", "mine")
         code, out = self.sync("push")
         self.assertEqual(code, 1)
         self.assertEqual(out.splitlines()[0], "push: refused (nothing pushed)")

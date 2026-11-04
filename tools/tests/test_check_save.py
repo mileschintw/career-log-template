@@ -720,6 +720,12 @@ class CheckSave(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("  check: ", out)
         self.assertIn("held: not committed", out)
+        # #633: the rerun is decided on this line, so it says to show that run's output whole.
+        held = next(l for l in out.splitlines() if l.startswith("held: "))
+        self.assertIn("--checked added", held)
+        self.assertIn("piped into nothing", held)
+        for f in ("tail", "cut", "grep", "Select-Object"):
+            self.assertIn(f, held)
         self.assertEqual(self.head(), "base")
         code, out = self.run_tool(FOLDER, "--humanizer", "none", "--commit", "write(example): Engineer", "--checked")
         self.assertEqual(code, 0, out)

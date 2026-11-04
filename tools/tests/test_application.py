@@ -195,9 +195,9 @@ class Prior(Base):
         self.assertIn("untyped: outputs/applications/2025-10-01-acme-data-engineer/answers.md:3 | 2025-10-01 | Reference"
                       " | Why us?", out)
         self.assertIn("sent before: outputs/applications/2025-09-01-acme-sre/answers.md:3 | 2025-09-01 | Archived | Why Acme?", out)
-        self.assertIn("since 2025-10-01: 1 commits", out)   # an untyped candidate's date too
+        self.assertIn("since 2025-10-01: 1 commit", out)   # an untyped candidate's date too
         self.assertFalse(any(l.startswith(("since 2025-11-03", "since 2025-09-01")) for l in out), out)
-        since = out.index("since 2026-02-01: 1 commits")
+        since = out.index("since 2026-02-01: 1 commit")
         self.assertTrue(out[since + 1].strip().endswith("entry"), out)
 
     def test_several_names_and_none(self):
@@ -237,6 +237,46 @@ class Start(Base):
         self.assertEqual(self.run_tool("start", "--name", "backend", "--from", "general", "--replace")[0], 0)
         self.write("skills/career-log/examples/resume.tex", RESUME)
         self.assertEqual(self.run_tool("start", "--name", "x", "--from", "skills/career-log/examples/resume.tex")[0], 2)
+
+    # ---- the starting point a posting run records, for Next up (#614) ----
+
+    def roles(self, *roles):
+        self.write("direction.md", "# Direction\n\n## Target roles, ranked\n"
+                   + "".join("%d. %s (user, 2026-01-01)\n" % (i, r) for i, r in enumerate(roles, 1)))
+
+    def test_records_the_start_family_and_tier(self):
+        self.roles("Backend engineer", "Platform engineer")
+        self.write("outputs/resumes/backend.tex", RESUME)
+        code, out = self.run_tool("start", "--name", "n", "--from", "backend", "--family", "backend", "--tier", "1")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out[-1], "recorded: .build/drafts/n/start.txt")
+        self.assertEqual(application.start_record(self.root, "n"),
+                         {"from": "outputs/resumes/backend.tex", "family": "backend", "tier": "1"})
+        self.write("sources/resumes/2025-01-01-main.tex", RESUME)   # a role outside Direction, from the fallback
+        code, out = self.run_tool("start", "--name", "m", "--from", "sources/resumes/2025-01-01-main.tex",
+                                  "--family", "pm", "--tier", "none")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(application.start_record(self.root, "m"),
+                         {"from": "sources/resumes/2025-01-01-main.tex", "family": "pm", "tier": "none"})
+
+    def test_no_record_without_family(self):
+        self.write("outputs/resumes/general.tex", RESUME)
+        self.assertEqual(self.run_tool("start", "--name", "t", "--from", "general")[0], 0)
+        self.assertIsNone(application.start_record(self.root, "t"))
+
+    def test_family_general_only_while_target_roles_are_empty(self):
+        self.write("outputs/resumes/general.tex", RESUME)
+        code, out = self.run_tool("start", "--name", "a", "--from", "general", "--family", "general", "--tier", "none")
+        self.assertEqual(code, 0, out)   # no target roles: the one family is general
+        for family, tier in (("backend", "none"), ("general", "1")):
+            code, _ = self.run_tool("start", "--name", "b", "--from", "general", "--family", family, "--tier", tier)
+            self.assertEqual(code, 2, (family, tier))
+        self.roles("Backend engineer")
+        for family, tier in (("general", "none"), ("backend", "2"), ("backend", "x"), ("Back End", "1")):
+            code, _ = self.run_tool("start", "--name", "c", "--from", "general", "--family", family, "--tier", tier)
+            self.assertEqual(code, 2, (family, tier))
+        self.assertEqual(self.run_tool("start", "--name", "c", "--from", "general", "--family", "backend")[0], 2)
+        self.assertFalse(os.path.exists(os.path.join(self.root, ".build", "drafts", "c")))
 
 
 class Save(Base):
@@ -601,6 +641,145 @@ class BelowTheTopLevel(Base):
         self.assertEqual(self.run_tool("save", "--application", name)[0], 1)
 
 
+TARGET = """# Resume: general
+
+## Provenance
+
+| Claim | Entry section | Source |
+|---|---|---|
+| 820 ms | entries/2025-06-queue.md › Results | PR 1 |
+| Teaching | Tutoring › What happened | user |
+"""
+
+
+class Stale(Base):
+    def setUp(self):
+        super().setUp()
+        self.write("entries/2025-06-queue.md", ENTRY)
+        self.write("entries/2024-01-tutoring.md", "---\ntitle: Tutoring — weekend classes\n---\n# Tutoring\n")
+        self.write("entries/2023-01-other.md", "---\ntitle: Other work\n---\n# Other work\n")
+        self.write("outputs/resumes/general.md", TARGET)
+        self.write("outputs/resumes/general.tex", RESUME)
+        self.commit("write(general): resume", date="2026-03-01T09:00:00")
+        self.saved = self.git("rev-parse", "HEAD").strip()
+
+    def test_fresh_when_nothing_changed(self):
+        self.write("README.md", "# Log, edited\n")
+        self.commit("other")
+        code, out = self.run_tool("stale", "general")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out[0], "saved: %s 2026-03-01 write(general): resume" % self.saved[:7])
+        self.assertIn("cited changed: 0", out)
+        self.assertIn("new entries: 0", out)
+        self.assertEqual(out[-1], "fresh: no entry general cites changed and no entry was added since %s" % self.saved[:7])
+
+    def test_cited_entry_changed(self):
+        self.write("entries/2025-06-queue.md", ENTRY + "- one more\n")
+        self.write("entries/2023-01-other.md", "---\ntitle: Other work\n---\n# Other work, edited\n")
+        self.commit("log(queue): result", date="2026-03-04T10:00:00")
+        self.write("entries/2024-01-tutoring.md", "---\ntitle: Tutoring — weekend classes\n---\n# Tutoring, edited\n")
+        code, out = self.run_tool("stale", "general")
+        self.assertEqual(code, 1, out)
+        self.assertIn("cited changed: 2", out)
+        self.assertIn("  entries/2025-06-queue.md: 1 commit, last 2026-03-04 log(queue): result", out)
+        self.assertIn("  entries/2024-01-tutoring.md: uncommitted changes", out)
+        self.assertFalse(any("2023-01-other" in l for l in out), out)   # not cited
+        self.assertIn("new entries: 0", out)
+
+    def test_new_entry(self):
+        self.write("entries/2026-02-new.md", "---\ntitle: New project\n---\n# New project\n")
+        self.commit("log(new): start")
+        self.write("entries/2026-03-draft.md", "---\ntitle: Draft — not committed\n---\n")
+        code, out = self.run_tool("stale", "general")
+        self.assertEqual(code, 1, out)
+        self.assertIn("cited changed: 0", out)
+        self.assertIn("new entries: 2", out)
+        self.assertIn("  entries/2026-02-new.md: New project", out)
+        self.assertIn("  entries/2026-03-draft.md: Draft — not committed (uncommitted)", out)
+
+    def test_a_new_entry_its_label_names_is_listed_once(self):
+        self.write("entries/2026-02-tutoring-online.md", "---\ntitle: Tutoring — online\n---\n")
+        self.commit("log(tutoring): online")
+        res = application.stale(self.root, "general")
+        self.assertEqual([c[0] for c in res["changed"]], [])
+        self.assertEqual([n[0] for n in res["new"]], ["entries/2026-02-tutoring-online.md"])
+        self.assertEqual(res["saved"][0], self.saved)
+
+    def test_unresolved_cell(self):
+        self.write("outputs/resumes/general.md", TARGET + "| Award | Nowhere › Results | user |\n")
+        self.commit("write(general): resume")
+        code, out = self.run_tool("stale", "general")
+        self.assertEqual(code, 0, out)
+        self.assertTrue(any(l.startswith("unresolved: ") and "Nowhere" in l for l in out), out)
+
+    def test_no_saved_target(self):
+        code, out = self.run_tool("stale", "backend")
+        self.assertEqual(code, 1)
+        self.assertEqual(out, ["none: no saved target backend (outputs/resumes/backend.* is missing or never committed)"])
+
+
+    def test_an_upgrade_commit_is_no_save(self):
+        self.write("entries/2025-06-queue.md", ENTRY + "- one more\n")
+        self.commit("log(queue): result")
+        self.write("outputs/resumes/general.md", TARGET + "\n")
+        self.commit("upgrade 0.9.0: resume tables")
+        code, out = self.run_tool("stale", "general")
+        self.assertEqual(out[0], "saved: %s 2026-03-01 write(general): resume" % self.saved[:7])
+        self.assertIn("cited changed: 1", out)
+
+    def test_entry_names_with_spaces_and_accents(self):
+        self.write("entries/2024-02-café work.md", "---\ntitle: Café work\n---\n")
+        self.commit("log(cafe): start")
+        self.write("outputs/resumes/general.md", TARGET + "\n")
+        self.commit("write(general): resume")
+        code, out = self.run_tool("stale", "general")
+        self.assertEqual(code, 0, out)
+        self.assertIn("new entries: 0", out)
+
+    def test_no_provenance_is_never_fresh(self):
+        self.git("rm", "-q", "outputs/resumes/general.md")
+        self.write("outputs/resumes/general.tex", RESUME + "% v2\n")
+        self.commit("write(general): resume")
+        code, out = self.run_tool("stale", "general")
+        self.assertEqual(code, 1, out)
+        self.assertTrue(out[-1].startswith("no provenance: "), out)
+
+    def test_an_empty_provenance_is_never_fresh(self):
+        self.write("outputs/resumes/general.md", "")
+        self.commit("write(general): resume")
+        code, out = self.run_tool("stale", "general")
+        self.assertEqual(code, 1, out)
+        self.assertEqual(out[-1], "no provenance: the save's outputs/resumes/general.md cites no entry,"
+                                  " so no cited entry was checked")
+
+    def test_a_provenance_citing_no_entry_is_never_fresh(self):
+        self.write("outputs/resumes/general.md", TARGET.replace("entries/2025-06-queue.md", "Nowhere")
+                   .replace("Tutoring", "Nobody"))
+        self.commit("write(general): resume")
+        code, out = self.run_tool("stale", "general")
+        self.assertEqual(code, 1, out)
+        self.assertEqual(len([l for l in out if l.startswith("unresolved: ")]), 2, out)
+        self.assertTrue(out[-1].startswith("no provenance: "), out)
+        self.assertFalse(any(l.startswith("fresh: ") for l in out), out)
+
+    def test_one_commit_is_singular(self):
+        self.write("entries/2025-06-queue.md", ENTRY + "- one more\n")
+        self.commit("log(queue): result", date="2026-03-04T09:00:00")
+        _, out = self.run_tool("stale", "general")
+        self.assertIn("  entries/2025-06-queue.md: 1 commit, last 2026-03-04 log(queue): result", out)
+        self.write("entries/2025-06-queue.md", ENTRY + "- two more\n")
+        self.commit("log(queue): again", date="2026-03-05T09:00:00")
+        _, out = self.run_tool("stale", "general")
+        self.assertIn("  entries/2025-06-queue.md: 2 commits, last 2026-03-05 log(queue): again", out)
+
+    def test_a_deleted_target_is_not_saved(self):
+        self.git("rm", "-q", "outputs/resumes/general.md", "outputs/resumes/general.tex")
+        self.commit("remove general")
+        code, out = self.run_tool("stale", "general")
+        self.assertEqual(code, 1)
+        self.assertTrue(out[0].startswith("none: "), out)
+
+
 class Edges(Base):
     def test_commented_line_and_per_company_pointer(self):
         rel = self.folder("2026-02-01-acme-platform-engineer")
@@ -625,7 +804,7 @@ class Edges(Base):
         self.write("entries/x.md", "x\n")
         self.commit("early", date="2026-02-01T00:30:00")
         _, out = self.run_tool("prior", "acme", "--type", "Why this company")
-        self.assertIn("since 2026-02-01: 1 commits", out)
+        self.assertIn("since 2026-02-01: 1 commit", out)
 
 
 if __name__ == "__main__":

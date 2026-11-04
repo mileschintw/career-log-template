@@ -8,6 +8,9 @@ outputs/**/*.png
 __pycache__/
 *.pyc
 
+# fit's Plan preview: goals for planned projects, kept out of git (skills/career-log/modes/fit-plan-preview.md)
+plan-previews/
+
 # Browser capture: playwright-cli's skill and its output stay local (SETUP.md step 5)
 .claude/skills/playwright-cli/
 .agents/skills/playwright-cli/

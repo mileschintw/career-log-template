@@ -5,7 +5,7 @@
 
 The tool states are faked, so the tests pass on any machine whatever it has installed.
 """
-import http.server, importlib.util, io, json, os, shutil, socket, subprocess, sys, tempfile, threading, time, unittest
+import datetime, http.server, importlib.util, io, json, os, shutil, socket, subprocess, sys, tempfile, threading, time, unittest
 from contextlib import redirect_stdout
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1105,6 +1105,82 @@ class CheckTest(unittest.TestCase):
     def test_not_a_repo_prints_nothing(self):
         self.assertEqual(self.uncommitted(self.home), ([], [], False))
 
+    # ---- a run still going in another session (#609) ----
+
+    def live_marker(self, root, key, started_ago, touched_ago=0):
+        """A run's live marker (scan.py run), started and last touched that many seconds ago."""
+        path = os.path.join(root, ".build", "runs", key, "live")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        start = datetime.datetime.fromtimestamp(int(time.time() - started_ago)).astimezone()
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"start": start.isoformat(), "mode": "write"}, f)
+        os.utime(path, (time.time() - touched_ago,) * 2)
+
+    def aged(self, root, path, text, ago):
+        """Write a Log file whose time on disk is `ago` seconds back."""
+        self.write(root, path, text)
+        os.utime(os.path.join(root, path), (time.time() - ago,) * 2)
+
+    def test_a_live_runs_files_print_as_its_own_with_no_settle(self):
+        root = self.log_repo()
+        self.live_marker(root, "2031-01-02-100000", started_ago=600)
+        self.aged(root, "entries/2024-01-a.md", "a fact step 7 added\n", ago=60)
+        self.aged(root, "profile.md", "p\n", ago=0)
+        lines, nexts, stop = self.uncommitted(root)
+        self.assertFalse(stop)
+        self.assertEqual(lines, ["log changes: uncommitted (2 file(s), 2 of them a live run's)",
+                                 "log change (live run 2031-01-02-100000): M entries/2024-01-a.md",
+                                 "log change (live run 2031-01-02-100000): ?? profile.md"])
+        self.assertEqual(len(nexts), 1)
+        self.assertNotIn("settle", nexts[0].split("keep them as they are")[0])
+        self.assertIn("another session", nexts[0])
+        self.assertIn("scan.py\" end <key>", nexts[0])
+        self.assertIn("(2031-01-02-100000)", nexts[0])
+
+    def test_a_finished_sessions_leftover_is_offered_beside_a_live_run(self):
+        root = self.log_repo()
+        self.aged(root, "direction.md", "left by an earlier session\n", ago=3600)
+        self.live_marker(root, "2031-01-02-100000", started_ago=600)
+        self.aged(root, "entries/2024-01-a.md", "the live run's\n", ago=30)
+        lines, nexts, _ = self.uncommitted(root)
+        self.assertEqual(lines, ["log changes: uncommitted (2 file(s), 1 of them a live run's)",
+                                 "log change: ?? direction.md",
+                                 "log change (live run 2031-01-02-100000): M entries/2024-01-a.md"])
+        self.assertEqual(len(nexts), 2)
+        self.assertIn("an earlier session left", nexts[0])
+        self.assertIn("settle discard -- <file>...", nexts[0])
+        self.assertIn("still going in another session", nexts[1])
+
+    def test_a_file_under_an_expired_marker_is_offered_as_today(self):
+        root = self.log_repo()
+        self.live_marker(root, "2031-01-02-100000", started_ago=4 * 3600, touched_ago=check.LIVE_HOURS * 3600 + 60)
+        self.aged(root, "entries/2024-01-a.md", "a crashed run's\n", ago=3 * 3600)
+        lines, nexts, _ = self.uncommitted(root)
+        self.assertEqual(lines, ["log changes: uncommitted (1 file(s))", "log change: M entries/2024-01-a.md"])
+        self.assertEqual(len(nexts), 1)
+        self.assertIn("an earlier session left", nexts[0])
+
+    def test_an_ended_or_unreadable_marker_is_no_live_run(self):
+        root = self.log_repo()
+        os.makedirs(os.path.join(root, ".build", "runs", "2031-01-02-100000"))   # ended: its marker deleted
+        bad = os.path.join(root, ".build", "runs", "2031-01-02-110000", "live")
+        os.makedirs(os.path.dirname(bad))
+        self.write(root, ".build/runs/2031-01-02-110000/live", "not json\n")
+        self.write(root, "profile.md", "p\n")
+        lines, _, _ = self.uncommitted(root)
+        self.assertEqual(lines, ["log changes: uncommitted (1 file(s))", "log change: ?? profile.md"])
+
+    def test_two_live_runs_each_take_the_files_since_their_start(self):
+        root = self.log_repo()
+        self.live_marker(root, "2031-01-02-100000", started_ago=1200)
+        self.live_marker(root, "2031-01-02-101500", started_ago=300)
+        self.aged(root, "entries/2024-01-a.md", "the first run's\n", ago=600)
+        self.aged(root, "profile.md", "p\n", ago=60)
+        lines, nexts, _ = self.uncommitted(root)
+        self.assertIn("log change (live run 2031-01-02-100000): M entries/2024-01-a.md", lines)
+        self.assertIn("log change (live run 2031-01-02-101500): ?? profile.md", lines)
+        self.assertIn("(2031-01-02-100000, 2031-01-02-101500)", nexts[0])
+
     def test_uncommitted_line_comes_before_go_on(self):
         root = self.log_repo()
         self.write(root, "profile.md", "p\n")
@@ -1473,7 +1549,8 @@ class ConfigCheckTest(unittest.TestCase):
                                  "config front_page: full (default)", "config window: 7 (default)",
                                  "config scheduled_window: window (default)", "config screen_budget: 40 (default)",
                                  "config fit_budget: 15 (default)", "config n: 10 (default)", "config auto_write: off (default)", "config m: 5 (default)",
-                                 "config update_check: on (default)", "config resume_max_pages: 1 (default)"])
+                                 "config update_check: on (default)", "config resume_max_pages: 1 (default)",
+                                 "config plan_preview: ask (default)"])
 
     def test_unreadable_or_unknown_field_stops(self):
         for text in ("record_language = \n", 'colour = "blue"\n', 'front_page = "half"\n'):
@@ -1781,8 +1858,8 @@ class SessionTest(unittest.TestCase):
                 if mode != "setup":   # consolidate comes again while an entry is still imported
                     self.entry("consolidated" if mode == "consolidate" else "imported")
                 line = self.next_line(mode)
-                if row["next"] == "-":   # the flow's last step: the block names no next step
-                    self.assertIsNone(line)
+                if row["next"] == "-" or mode not in check.NEEDS_TARGET.get(row["next"], (mode,)):
+                    self.assertIsNone(line)   # the flow's last step, or a step with nothing to act on yet
                     continue
                 self.assertTrue(line.startswith("Next: `%s`" % row["next"]), line)
                 self.assertIn(row["why"].rstrip("."), line)
@@ -1803,16 +1880,54 @@ class SessionTest(unittest.TestCase):
         self.entry("consolidated")
         self.assertTrue(self.next_line("setup").startswith("Next: `stories`"))
         self.write("stories/conflict.md", "# Conflict\n")
-        self.assertTrue(self.next_line("setup").startswith("Next: `fit`"))
+        self.assertIsNone(self.next_line("setup"))   # fit needs a posting, which setup leaves none of
         self.write("sources/inbox/chatgpt-export.zip", "x")   # import-chats leaves raw exports here
-        self.assertTrue(self.next_line("setup").startswith("Next: `fit`"))
+        self.assertIsNone(self.next_line("setup"))
 
     def test_consolidate_again_while_an_entry_is_imported(self):
         self.entry("imported")
-        self.assertTrue(self.next_line("consolidate").startswith(
-            'Next: `consolidate` (say "consolidate the <project> entry"). Entries whose status'), self.next_line("consolidate"))
+        self.assertEqual(self.next_line("consolidate"),
+                         'Next: `consolidate` (say "consolidate the <project> entry"). 1 entry is still `stub` or'
+                         ' `imported`: Widget (entries/2031-01-widget.md). They still have gaps and pending notes.')
         self.entry("consolidated (two gaps)")
         self.assertTrue(self.next_line("consolidate").startswith("Next: `stories`"))
+
+    def test_finished_entry_is_not_named_while_others_wait(self):
+        """A consolidate that finishes one entry while others are `stub` or `imported` names those
+        others, never the one it finished; past NAMED it counts the rest (#607)."""
+        self.entry("consolidated")   # the entry this run just finished
+        for i, status in enumerate(["imported", "stub", "imported", "stub (two gaps)"], 2):
+            self.write("entries/2031-0%d-part%d.md" % (i, i),
+                       "---\ntitle: Part %d\nperiod: 2031-0%d\nstatus: %s\n---\n\n# Part %d\n" % (i, i, status, i))
+        _, out = self.done("consolidate")
+        line = next(l for l in out if l.startswith("Next:"))
+        self.assertEqual(line, 'Next: `consolidate` (say "consolidate the <project> entry"). 4 entries are still'
+                               ' `stub` or `imported`: Part 2 (entries/2031-02-part2.md), Part 3'
+                               ' (entries/2031-03-part3.md), Part 4 (entries/2031-04-part4.md) and 1 more. They still'
+                               ' have gaps and pending notes.')
+        self.assertNotIn("Widget", "\n".join(out))
+        self.assertIn(check.FRESH, out)
+        self.assertNotIn(check.COMPLETE, out)
+        self.assertFalse(any(l.startswith("Also available") for l in out), out)   # the Next line names them
+        _, out = self.done("rank")   # no Next line: audit ranks the waiting entries
+        self.assertIn('Also available: `audit` (say "audit my career log"): 4 entries are still `stub` or'
+                      ' `imported`; it ranks which to consolidate first', out)
+        self.assertIn(check.FRESH, out)
+        self.assertNotIn(check.COMPLETE, out)
+
+    def test_no_fitting_next_step_says_the_session_is_complete(self):
+        """With nothing in the Log to act on, the block names no step and offers no mode: it says the
+        run is complete and the session can end (#607)."""
+        self.entry("consolidated")
+        self.write("stories/conflict.md", "# Conflict\n")
+        for mode in ("stories", "write", "interview", "audit", "rank"):
+            with self.subTest(mode=mode):
+                code, out = self.done(mode)
+                self.assertEqual(code, 0)
+                self.assertEqual(out[:2], ["Close-out", "Saved: not listed (no --since)"])
+                self.assertEqual(out[2], check.COMPLETE)
+                self.assertFalse(any(l.startswith(("Next:", "Also available")) for l in out), out)
+                self.assertNotIn(check.FRESH, out)
 
     def test_import_answered_no_comes_again(self):
         """An import answered No leaves no entries, only its `.export-deny` commit: Next up suggests
@@ -1841,8 +1956,8 @@ class SessionTest(unittest.TestCase):
         self.assertIn("The Log has no entries yet, and the later steps read them", self.next_line("consolidate"))
         self.write("stories/conflict.md", "# Conflict\n")   # stories counts as done; fit still reads entries
         self.assertTrue(self.next_line("consolidate").startswith("Next: `import`"), self.next_line("consolidate"))
-        self.entry("consolidated")   # with an entry, consolidate goes on past stories to fit
-        self.assertTrue(self.next_line("consolidate").startswith("Next: `fit`"))
+        self.entry("consolidated")   # with an entry, past stories comes fit, which needs a posting
+        self.assertIsNone(self.next_line("consolidate"))
 
     def test_fit_next_reads_for_several_postings(self):
         """fit-several-postings ends with `done fit` too: its Next reads for a report on several postings,
@@ -1863,25 +1978,29 @@ class SessionTest(unittest.TestCase):
         self.entry("consolidated")
         code, out = self.done("fit")
         self.assertEqual(code, 0)
-        self.assertEqual(out[0], "Next up")
+        self.assertEqual(out[0], "Close-out")
         self.assertEqual(out[1], "Saved: not listed (no --since)")
-        self.assertIn(check.FRESH, out)
-        self.assertEqual(out[-2], 'Also available: `rank` (say "rank these career fair employers"), `audit` (say'
-                                  ' "audit my career log"), `guide` (say "what next?")')
+        self.assertTrue(out[2].startswith("Next: `write`"), out[2])
+        self.assertEqual(out[3], check.FRESH)
+        self.assertEqual(len(out), 5)   # no Also available: no mode outside the flows applies to this Log
         self.assertTrue(out[-1].startswith("next: end your last message with the block above"))
         self.assertIn("as SKILL.md › Next up says", out[-1])
         self.assertNotIn("line for line", out[-1])
 
-    def test_also_available_with_no_entries_is_the_guide(self):
-        _, out = self.done("setup")
-        self.assertIn('Also available: `guide` (say "what next?")', out)
+    def test_also_available_only_when_the_log_calls_for_it(self):
+        _, out = self.done("setup")   # no entries
+        self.assertFalse(any(l.startswith("Also available") for l in out), out)
+        self.entry("imported")
+        _, out = self.done("fit")   # one entry left: consolidate needs no ranking
+        self.assertFalse(any(l.startswith("Also available") for l in out), out)
 
     def test_mode_in_no_flow(self):
-        self.entry("consolidated")
+        self.entry("imported")
+        self.write("entries/2031-02-gadget.md", "---\ntitle: Gadget\nperiod: 2031-02\nstatus: stub\n---\n\n# Gadget\n")
         _, out = self.done("audit")
         self.assertFalse(any(l.startswith("Next:") for l in out), out)   # no fixed step: no line for it
-        self.assertNotIn("`audit` (say", out[-2])
-        self.assertIn(check.FRESH, out)
+        self.assertFalse(any(l.startswith("Also available") for l in out), out)   # never audit after audit
+        self.assertIn(check.COMPLETE, out)
 
     def test_setup_for_a_mode_goes_back_to_it(self):
         code, out = self.done("setup", "--for", "write")
@@ -1892,10 +2011,272 @@ class SessionTest(unittest.TestCase):
         self.assertTrue(out[-1].startswith("next: show the user the block above, then go on with"
                                            " write, starting with its Trigger check"), out[-1])
 
+    # ---- a Target version's stale count reaching 3 (#612) ----
+
+    def stale_log(self):
+        """A repo with Target version `backend` saved: its provenance cites Widget, which then changes
+        (stale count 1). Returns a function that adds and commits one entry, raising the count by 1."""
+        self.entry("consolidated")
+        self.write("outputs/resumes/backend.md", "# Backend\n\n| Bullet | Source |\n|---|---|\n"
+                                                 "| Built it | entries/2031-01-widget.md |\n")
+        self.write("outputs/resumes/backend.tex", "\\documentclass{article}\n")
+        self.repo()   # its seed commit is the save
+        self.write("entries/2031-01-widget.md", "---\ntitle: Widget\nperiod: 2031-01\nstatus: consolidated\n---\n\n"
+                                                "# Widget\n\nMore.\n")
+        self.git("commit", "-qam", "log(widget): result")
+        added = []
+
+        def add():
+            n = len(added) + 2
+            self.write("entries/2032-0%d-part%d.md" % (n, n),
+                       "---\ntitle: Part %d\nperiod: 2032-0%d\nstatus: consolidated\n---\n\n# Part %d\n" % (n, n, n))
+            self.git("add", "-A")
+            self.git("commit", "-qm", "log(part%d): start" % n)
+            added.append(n)
+        return add
+
+    def stale_lines(self, mode, *args):
+        return [l for l in self.done(mode, *args)[1] if "Target version" in l]
+
+    def test_stale_count_two_says_nothing(self):
+        add = self.stale_log()
+        start = "%s@0" % self.head()
+        add()   # this run: 1 -> 2
+        self.assertEqual(self.stale_lines("consolidate", "--since", start), [])
+        self.assertEqual(self.done("log"), (0, []))
+
+    def test_stale_count_reaching_three_points_at_audit(self):
+        add = self.stale_log()
+        add()
+        start = "%s@0" % self.head()
+        add()   # this run: 2 -> 3
+        line = ('Next: `audit` (say "audit my career log"). Target version `backend` has 3 entries behind its last'
+                ' save: Widget (entries/2031-01-widget.md, changed), Part 2 (entries/2032-02-part2.md, new), Part 3'
+                ' (entries/2032-03-part3.md, new). It decides whether to refresh the Target version')
+        code, out = self.done("consolidate", "--since", start)
+        self.assertEqual(code, 0, out)
+        self.assertIn(line + ".", out)
+        self.assertIn(check.FRESH, out)
+        self.assertFalse(any(l.startswith("Also available: `audit`") for l in out), out)   # named once
+        code, out = self.done("log")   # log's change is its last commit, step 4's
+        self.assertEqual(code, 0)
+        # no English request to copy (#624): the agent words it in the user's language
+        self.assertEqual(out[0], line.replace(' (say "audit my career log")', "", 1) + ".")
+        self.assertFalse(any("audit my career log" in l for l in out), out)
+        self.assertTrue(out[-1].startswith("next: add it to the one-line report"), out)
+        self.assertEqual(len(out), 2)
+
+    def test_stale_count_four_says_nothing_again(self):
+        add = self.stale_log()
+        add()
+        add()
+        start = "%s@0" % self.head()
+        add()   # this run: 3 -> 4
+        self.assertEqual(self.stale_lines("consolidate", "--since", start), [])
+        self.assertEqual(self.done("log"), (0, []))
+
+    def test_stale_count_jumping_past_three_still_points_at_audit(self):
+        add = self.stale_log()
+        add()
+        start = "%s@0" % self.head()
+        add()
+        add()   # this run: 2 -> 4
+        lines = self.stale_lines("consolidate", "--since", start)
+        self.assertEqual(len(lines), 1)
+        self.assertIn("has 4 entries behind its last save", lines[0])
+
+    def test_stale_count_crossed_by_a_cited_entry_edit(self):
+        self.stale_log()
+        part = "---\ntitle: Part %d\nperiod: 2032-0%d\nstatus: consolidated\n---\n\n# Part %d\n%s"
+        for n in (2, 3):
+            self.write("entries/2032-0%d-part%d.md" % (n, n), part % (n, n, n, ""))
+        self.write("outputs/resumes/backend.md", "# Backend\n\n| Bullet | Source |\n|---|---|\n"
+                                                 "| Built it | entries/2031-01-widget.md |\n"
+                                                 "| Ran it | entries/2032-02-part2.md |\n"
+                                                 "| Led it | entries/2032-03-part3.md |\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "write(backend): resume")   # a save citing all three: count 0
+        for n in (2, 3):
+            self.write("entries/2032-0%d-part%d.md" % (n, n), part % (n, n, n, "\nMore.\n"))
+        self.git("commit", "-qam", "log: two results")   # count 2
+        start = "%s@0" % self.head()
+        self.write("entries/2031-01-widget.md", "---\ntitle: Widget\nperiod: 2031-01\nstatus: consolidated\n---\n\n"
+                                                "# Widget\n\nEven more.\n")
+        self.git("commit", "-qam", "consolidate(widget): sections")   # this run: 2 -> 3, by an edit
+        lines = self.stale_lines("consolidate", "--since", start)
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn("Widget (entries/2031-01-widget.md, changed)", lines[0])
+
+    def test_stale_count_left_out_without_since_and_for_other_modes(self):
+        add = self.stale_log()
+        add()
+        start = "%s@0" % self.head()
+        add()
+        self.assertEqual(self.stale_lines("consolidate"), [])   # no --since: this run's change is unknown
+        self.assertEqual(self.stale_lines("import", "--since", start), [])
+        check.UNATTENDED = True
+        self.assertEqual(self.done("log"), (0, []))
+
+    # ---- a posting run's save feeds Target versions and Direction (#614) ----
+
+    APP = "2032-05-01-acme-product-manager"
+    TARGET_TEX = ("\\documentclass{article}\n\\begin{document}\n\\section{Experience}\n\\begin{itemize}\n"
+                  "  \\item Cut quote API p95 latency from 820 ms to 210 ms with a Redis rate cache\n"
+                  "\\end{itemize}\n\\end{document}\n")
+    NEW_BULLET = "Ran weekly roadmap reviews with sales and support for three product lines"
+    SWAP_BULLET = "Cut checkout API p95 latency from 820 ms to 210 ms with a Redis rate cache"
+
+    def posting_save(self, roles=("Backend engineer",), targets=("backend",), start=None, bullets=(NEW_BULLET,),
+                     archived=False, accept=False):
+        """A Log with these Target roles and Target versions; then this run: a posting run whose draft
+        recorded `start` (from, family, tier; None: no start.txt), saved with `bullets` added to an
+        entry's Past phrasings. Returns done write's Next lines. `accept`: the run is a scan accept, its
+        start.txt in the scan's draft folder, which `scan.py draft` copies (#626)."""
+        self.write("direction.md", "# Direction\n\n## Target roles, ranked\n"
+                   + "".join("%d. %s (user, 2032-01-01)\n" % (i, r) for i, r in enumerate(roles, 1)))
+        for t in targets:
+            self.write("outputs/resumes/%s.tex" % t, self.TARGET_TEX)
+            self.write("outputs/resumes/%s.md" % t, "# %s\n" % t)
+        entry = "---\ntitle: Widget\nperiod: 2031-01\nstatus: consolidated\n---\n\n# Widget\n\n## Past phrasings\n%s"
+        self.write("entries/2031-01-widget.md", entry % "")
+        self.write("README.md", README_HEAD + "| 2031-01 | [Widget](entries/2031-01-widget.md) | project | done |\n")
+        self.repo()
+        since = "%s@0" % self.head()
+        if start and accept:
+            draft = ".build/scan/2032-05-01/drafts/" + self.APP
+            self.write(draft + "/start.txt", "from: %s\nfamily: %s\ntier: %s\n" % start)
+            self.write("outputs/reports/2032-05-01-scan.md", "# Scan 2032-05-01\n\n## Pending\n\n| URL | Company | Role"
+                       " | Status | Draft | Fit map commit |\n|---|---|---|---|---|---|\n| https://acme.example/j/1 |"
+                       " Acme | Product Manager | draft to review | %s/ | - |\n" % draft)
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(check.tools_module("scan").main(["--root", self.root, "draft",
+                                                                  "https://acme.example/j/1"]), 0)
+            self.assertTrue(os.path.isfile(os.path.join(self.root, ".build/drafts", self.APP, "start.txt")))
+        elif start:
+            self.write(".build/drafts/%s/start.txt" % self.APP, "from: %s\nfamily: %s\ntier: %s\n" % start)
+        folder = "outputs/applications/" + self.APP
+        self.write(folder + "/resume.tex", self.TARGET_TEX)
+        self.write(folder + "/provenance.md", "# Provenance\n")
+        if archived:
+            self.write(folder + "/archived.md", "Archived (user, 2032-05-01)\n")
+        self.write("entries/2031-01-widget.md", entry % "".join(
+            '- **backend:** "%s" (%s)\n' % (b, folder) for b in bullets))
+        self.git("add", "-A")
+        self.git("commit", "-qm", "write(acme): Product Manager")
+        return [l for l in self.done("write", "--since", since)[1] if l.startswith("Next:")]
+
+    def test_update_names_the_target_version_and_the_bullets(self):
+        nexts = self.posting_save(start=("outputs/resumes/backend.tex", "backend", "1"),
+                                  bullets=(self.NEW_BULLET, self.SWAP_BULLET))
+        self.assertEqual(nexts, ['Next: `write` (say "update my backend resume with the new bullets"). Target version'
+                                 ' `backend` lacks 1 bullet this save added to Past phrasings: "%s" (Widget,'
+                                 ' entries/2031-01-widget.md). A target run for `backend` decides which to bring'
+                                 ' in.' % self.NEW_BULLET])
+
+    def test_update_left_out_when_no_bullet_was_added(self):
+        for bullets in ((), (self.SWAP_BULLET,)):   # none, or only a swap of the posting's terms
+            with self.subTest(bullets=bullets):
+                self.setUp()
+                self.assertEqual(self.posting_save(start=("outputs/resumes/backend.tex", "backend", "1"),
+                                                   bullets=bullets), [])
+
+    def test_create_from_the_fallback_seeded_from_the_approved_resume(self):
+        nexts = self.posting_save(start=("sources/resumes/2030-01-01-main.tex", "pm", "1"), roles=("PM",))
+        self.assertEqual(nexts, ['Next: `write` (say "make my first pm resume from the %s application"). No Target'
+                                 ' version is close to this role (this run started from'
+                                 ' sources/resumes/2030-01-01-main.tex): a target run creates `pm`, seeded from this'
+                                 ' application\'s approved resume (outputs/applications/%s/resume.tex), which it'
+                                 ' generalises (it drops the posting\'s own terms and company emphasis) and reviews'
+                                 ' on its own.' % (self.APP, self.APP)])
+
+    def test_create_from_another_role_familys_target_version(self):
+        nexts = self.posting_save(start=("outputs/resumes/backend.tex", "pm", "2"), roles=("Backend", "PM"))
+        self.assertEqual(len(nexts), 1, nexts)
+        self.assertIn("a target run creates `pm`", nexts[0])
+        self.assertIn("started from outputs/resumes/backend.tex", nexts[0])
+
+    def test_create_is_general_only_while_target_roles_are_empty(self):
+        nexts = self.posting_save(start=(check.tools_module("application").BLANK, "general", "none"), roles=(),
+                                  targets=())
+        self.assertEqual(len(nexts), 2, nexts)
+        self.assertIn("a target run creates `general`", nexts[0])
+        self.assertTrue(nexts[1].startswith('Next: `setup` (say "add Product Manager to my target roles")'), nexts)
+
+    def test_a_family_with_a_target_version_gets_update_never_create(self):
+        nexts = self.posting_save(start=("sources/resumes/2030-01-01-main.tex", "backend", "1"))   # user named a file
+        self.assertEqual(len(nexts), 1, nexts)
+        self.assertTrue(nexts[0].startswith('Next: `write` (say "update my backend resume'), nexts)
+        self.setUp()
+        self.assertEqual(self.posting_save(start=("sources/resumes/2030-01-01-main.tex", "backend", "1"),
+                                           bullets=()), [])
+
+    def test_direction_offered_only_for_a_role_outside_target_roles(self):
+        nexts = self.posting_save(start=("outputs/resumes/backend.tex", "backend", "none"), bullets=())
+        self.assertEqual(nexts, ['Next: `setup` (say "add Product Manager to my target roles"). Product Manager is'
+                                 ' not among Direction\'s target roles, and `rank`, `scan` and `fit` order by that'
+                                 ' list.'])
+
+    def test_an_archived_save_gets_no_offer(self):
+        self.assertEqual(self.posting_save(start=("sources/resumes/2030-01-01-main.tex", "pm", "none"),
+                                           archived=True), [])
+
+    def test_a_scan_accept_saved_at_reference_gets_the_posting_runs_offers(self):
+        start = ("sources/resumes/2030-01-01-main.tex", "pm", "none")
+        posting_run = self.posting_save(start=start, roles=("PM",))
+        self.setUp()
+        self.assertEqual(self.posting_save(start=start, roles=("PM",), accept=True), posting_run)
+        self.assertEqual(len(posting_run), 2, posting_run)   # Create and Direction
+
+    def test_a_scan_accept_saved_at_archived_gets_no_offer(self):
+        self.assertEqual(self.posting_save(start=("sources/resumes/2030-01-01-main.tex", "pm", "none"),
+                                           archived=True, accept=True), [])
+
+    def test_no_offer_without_a_start_record_or_since(self):
+        self.assertEqual(self.posting_save(start=None), [])
+        self.setUp()
+        self.posting_save(start=("sources/resumes/2030-01-01-main.tex", "pm", "none"))
+        self.assertEqual(self.next_line("write"), None)   # no --since: this run's save is unknown
+
     def test_log_and_unattended_print_nothing(self):
         self.assertEqual(self.done("log"), (0, []))
         check.UNATTENDED = True
         self.assertEqual(self.done("write"), (0, []))
+
+    # ---- done rank: the top target role's Target version (#615) ----
+
+    def rank_nexts(self, roles, targets, *args):
+        self.write("direction.md", "# Direction\n\n## Target roles, ranked\n"
+                   + "".join("%d. %s\n" % (i, r) for i, r in enumerate(roles, 1)))
+        for t in targets:
+            self.write("outputs/resumes/%s.tex" % t, self.TARGET_TEX)
+        code, out = self.done("rank", *args)
+        self.assertEqual(code, 0, out)
+        return [l for l in out if l.startswith("Next:")]
+
+    RANK_LINE = ('Next: `write` (say "make a Backend engineer resume"). Your top target role, Backend engineer, has no'
+                 ' Target version, and it is what you hand out where there is no posting, as at this ranking\'s'
+                 ' event: a target run creates one.')
+
+    def test_rank_offers_a_target_run_when_the_top_role_has_no_target_version(self):
+        self.assertEqual(self.rank_nexts(("GAP: ask", "Backend engineer (user, 2032-01-01)", "PM"), ()),
+                         [self.RANK_LINE])   # none at all; the role named without its citation
+        self.assertEqual(self.rank_nexts(("Backend engineer", "PM"), ("pm",), "--family", "backend"), [self.RANK_LINE])
+
+    def test_rank_says_nothing_when_the_top_role_has_one_or_roles_are_empty(self):
+        self.assertEqual(self.rank_nexts(("Backend engineer",), ("backend",), "--family", "backend"), [])
+        self.assertEqual(self.rank_nexts((), ("backend",)), [])
+        self.assertEqual(self.rank_nexts((), ()), [])
+
+    def test_rank_needs_family_while_a_target_version_exists(self):
+        self.write("direction.md", "# Direction\n\n## Target roles, ranked\n1. Backend engineer\n")
+        self.write("outputs/resumes/pm.tex", self.TARGET_TEX)
+        for args in ([], ["--family"], ["--family", "Back End"]):
+            code, out = self.done("rank", *args)
+            self.assertEqual(code, 2, (args, out))
+            self.assertTrue(out[0].startswith("usage:"), out)
+        self.assertEqual(self.done("write", "--family", "pm")[0], 2)   # rank only
+        check.UNATTENDED = True   # no block at all, so nothing to refuse
+        self.assertEqual(self.done("rank"), (0, []))
 
     def test_bad_arguments(self):
         for args in (["deploy"], [], ["fit", "--since"], ["setup", "--for", "deploy"], ["fit", "--for", "write"]):
@@ -1921,6 +2302,24 @@ class SessionTest(unittest.TestCase):
         self.assertIn("Not saved yet: 1 Log file(s) not committed (M entries/2031-01-widget.md). Save it before"
                       " you leave this session.", out)
         self.assertTrue(out[-1].startswith("next: now, first: settle what is not saved"))
+
+    def test_a_live_runs_files_are_not_unsaved(self):
+        self.entry("consolidated")
+        self.repo()
+        live = os.path.join(self.root, ".build", "runs", "2031-01-02-100000", "live")
+        os.makedirs(os.path.dirname(live))
+        start = datetime.datetime.fromtimestamp(int(time.time() - 600)).astimezone()
+        with open(live, "w", encoding="utf-8") as f:
+            json.dump({"start": start.isoformat(), "mode": "write"}, f)
+        self.write("entries/2031-01-widget.md", "another session's fact\n")
+        code, out = self.done("fit")
+        self.assertEqual(code, 0, out)
+        self.assertFalse([l for l in out if l.startswith("Not saved yet")], out)
+        os.remove(live)   # that run ended without saving: its file is this Log's to settle again
+        code, out = self.done("fit")
+        self.assertEqual(code, 1)
+        self.assertIn("Not saved yet: 1 Log file(s) not committed (M entries/2031-01-widget.md). Save it before"
+                      " you leave this session.", out)
 
     def test_uncommitted_talking_points_and_guard_files_count(self):
         self.entry("consolidated")

@@ -721,9 +721,13 @@ class Commits(unittest.TestCase):
         return self.git(self.root, "rev-list", "--count", "origin/master..HEAD").strip() == "0"
 
     def push_from_another_clone(self):
+        """Another clone pushes lines of its own to both guard files, so this clone's push is refused
+        and sync.py's one rebase (#609) stops on the conflict."""
         other = self.clone("other")
-        self.write("README.md", "# Log\n\nother\n", root=other)
-        self.git(other, "commit", "-q", "-am", "other")
+        self.write(".export-deny", "# names\nSomeone\nWidget\nOther\n", root=other)
+        self.write(".export-cleared", "Other\n", root=other)
+        self.git(other, "add", "-A")
+        self.git(other, "commit", "-q", "-m", "other")
         self.git(other, "push", "-q", "origin", "master")
 
     def test_entry_commit_commits_only_the_deny_file(self):

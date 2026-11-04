@@ -36,6 +36,10 @@ _Avoid_: setting, preference (`direction.md` uses "preferences" for its own cont
 A choice about how the Engine runs for one Log, each with a safe default: the record language, whether to read interviewer profiles only signed-in members can see (default `never`), whether the front page is trimmed, and how far back and how much a scan collects, screens, fits and drafts. Kept in `config.toml` at the Log root, committed; a field left out takes its default from `tools/config.default.toml`. No `config.toml` means setup has not run for that Log. Formerly part of "settings".
 _Avoid_: setting, preference, option
 
+**Target version**:
+A reusable resume for one role family (`backend`, `platform`) or for no role (`general`), approved by the user and not tied to a posting. Every posting run starts from the closest one and tailors it to the posting; it is also what the user sends where there is no posting (a career fair, a recruiter email), and its name is the angle that past wordings and per-angle answers are kept under. Any saved one counts; none is marked as more polished than another.
+_Avoid_: general version, base resume, master resume, domain version
+
 **Save level**:
 Whether a saved application or bullets report feeds later runs (**Reference**, the default) or is kept only as the record of what was sent (**Archived**); chosen per run, and the rules are in write's Save levels.
 _Avoid_: draft (an Archived application was sent), record (that word is the Log's)

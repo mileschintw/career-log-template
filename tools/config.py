@@ -59,13 +59,20 @@ the user's yes to the dry run that showed them. A line given twice is refused.
   as show prints it), written `- **<target>:** <line>`; the other targets' lines stay.
 It prints `before:` and `after:` lines in show's `direction` form, any `drops:` lines, then
 `unchanged` (the same lines, sources aside: nothing written), `dry run: nothing written` or `written`.
+After `written`, a target roles or what to emphasise change in a Log with a Target version
+(outputs/resumes/<target>.tex) also prints `target versions: <target>, ...` and a `target change:`
+line for each role or target it touched: `emphasis: <target>` (as its label reads), or `role added:`,
+`role removed:`, `role moved:` (its rank among the roles both lists hold changed) or `role edited:`
+(its indented lines changed) with the role's line; a role both moved and edited gets both, and a
+`GAP:` line is no role. A role whose own line changes is removed under its old line and added under
+its new one. setup › Changes step 5 matches them to Target versions.
 
 Exit 0 on success, 1 when config.toml is missing (show, set), exists (init) or does not parse,
 tools/config.default.toml cannot be read, direction.md or the item's section is missing (direction
 set), or a name or value is not allowed, 2 on a bad argument. Standard library only, Python 3.11+
 (tomllib).
 """
-import datetime, os, re, sys
+import datetime, glob, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -105,6 +112,7 @@ FIELDS = {
     "m": (Count(1, 20),),
     "update_check": ("on", "off"),
     "resume_max_pages": (Count(1, 3),),
+    "plan_preview": ("ask", "always", "never"),
 }
 # Pairs of Count fields `set` keeps in order: (smaller, larger), the first never above the second.
 ORDERED = [("fit_budget", "screen_budget")]
@@ -414,6 +422,16 @@ def is_gap(text):
     return text.startswith("GAP") or bool(m) and text[m.end():].lstrip(" :").startswith("GAP")
 
 
+# a trailing citation: `(user, 2026-10-01)`, a dated key, `(sources/...)`, `(<repo>@<sha>:...)`, a link
+CITED = re.compile(r"\s*(?:\([^()]*(?:\d{4}-\d{2}|://|sources/|\w@\w+:)[^()]*\)|\[[^\]]*\]\([^()\s]+\))\s*$")
+
+
+def role_name(text):
+    """A Target role's line as a name to say: its trailing citation left out (SKILL.md › Provenance's
+    forms), a qualifier such as `(Infra)` or `(C/C++)` kept."""
+    return CITED.sub("", text).strip() or text
+
+
 def item_lines(text, item, target=None):
     """(span of the item's section body in the text, the body's lines, the item's [((first, end), text)])."""
     heading = DIRECTION_LINES[item][0]
@@ -606,6 +624,7 @@ def direction_set(root, item, texts, target=None, dry_run=False, drop_indented=F
     out += drops
     if dry_run:
         return out + ["dry run: nothing written"]
+    was = [(t, lines[first + 1:end]) for (first, end), t in found]
     for (first, end), _ in reversed(found):
         del lines[first:end]
     items = list_lines(lines)
@@ -632,7 +651,38 @@ def direction_set(root, item, texts, target=None, dry_run=False, drop_indented=F
     if not body.endswith("\n"):
         body += "\n"
     logfiles.write_text(os.path.join(root, DIRECTION_FILE), text[:span[0]] + body + text[span[1]:])
-    return out + ["written"]
+    return out + ["written"] + target_changes(root, item, name if kind == BY_TARGET else None, was, now)
+
+
+def target_changes(root, item, target, old, now):
+    """After a written target roles or what to emphasise change, while the Log has a Target version:
+    `target versions:` and one `target change:` line per role or target the change touched, for setup
+    › Changes to offer a target run for each Target version one of them is about. old and now: the
+    item's [(list line, its indented lines)] before and after."""
+    if item not in ("target roles", "what to emphasise"):
+        return []
+    # the Target versions application.py's targets() lists: outputs/resumes/<target>.tex
+    versions = sorted(os.path.basename(p)[:-4] for p in glob.glob(os.path.join(glob.escape(root), "outputs", "resumes", "*.tex")))
+    if not versions:
+        return []
+    out = ["target versions: %s" % ", ".join(versions)]
+    if target is not None:
+        return out + ["target change: emphasis: %s" % target]
+    def roles(pairs):   # a GAP: line is no role
+        return {key(t): (SOURCE.sub("", t).strip(), [SOURCE.sub("", l.strip()) for l in rest if l.strip()])
+                for t, rest in pairs if not is_gap(t)}
+    old, now = roles(old), roles(now)
+    kept_old, kept_now = [k for k in old if k in now], [k for k in now if k in old]
+    out += ["target change: role removed: %s" % t for k, (t, _) in old.items() if k not in now]
+    for k, (t, rest) in now.items():
+        if k not in old:
+            out.append("target change: role added: %s" % t)
+            continue
+        if kept_old.index(k) != kept_now.index(k):   # its rank among the roles both lists hold
+            out.append("target change: role moved: %s" % t)
+        if rest != old[k][1]:
+            out.append("target change: role edited: %s" % t)
+    return out if len(out) > 1 else []
 
 
 def main(argv):

@@ -43,7 +43,13 @@ ask the user says setup is needed instead, since no one is there to answer a que
 
 Uncommitted Log changes: the Log's own files (LOG_PATHS) that git shows as changed or new are
 listed, so a session settles what an earlier one left before it writes anything; the `next:` line
-points at tools/sync.py's `status` and `settle`.
+points at tools/sync.py's `status` and `settle`. A file a run still going in another session wrote
+is that run's, and is left out of the settle: a live run is a `.build/runs/<key>/live` marker
+(tools/scan.py run) touched in the last LIVE_HOURS hours, and a file on disk whose time is at or
+after its `start` belongs to it (to the latest-started such run, when several are live). It prints
+as `log change (live run <key>): <XY> <path>`, with a `next:` line to leave it alone that names
+`scan.py end <key>` for a session that ended without saving. `done`'s `Not saved yet` leaves these
+files out too.
 
 This Log's git state, read only (tools/sync.py makes every change): `identity: ok (<email>)` or
 `identity: missing`, the repo-local user.email every commit needs (SETUP.md step 3); a missing one
@@ -80,27 +86,45 @@ line (HEAD and the time, for `done --since`; the mode keeps its first check's, a
 suggest a fresh session when this session already ran another mode. The modes that do not count
 come from the flows table of docs/guide.md (tools/guide.py flows): a step whose session is `same`.
 
-  python3 -I tools/check.py done <mode> [--since <sha>@<time>] [--for <mode>] [--no-posting]
+  python3 -I tools/check.py done <mode> [--since <sha>@<time>] [--for <mode>] [--no-posting] [--family <target>]
 
 (--root as above) prints the Next up block that ends <mode>, as English data lines the agent renders in the user's
-language (SKILL.md › Next up): the count and subjects of the commits made since `mode start` (pulled ones, older,
-left out), the next step from the flows table for this Log's state (consolidate again while an
-entry is `stub` or `imported`, import again while the Log has no entries, and import in place
-of a step that reads entries while the Log has none; a step whose work is
-done is skipped: import once there are entries, consolidate once no entry is `stub` or
-`imported`, stories once stories/ holds a Talking points file; no line when the mode has no fixed next step or ends
-its flow), the fresh-session line, and the modes in no flow under "Also available". `--for <mode>`: setup ran because the Trigger check of <mode>
+language (SKILL.md › Next up): a `Close-out` heading line; the count and subjects of the commits made since `mode
+start` (pulled ones, older, left out); a `Next:` line for each step that applies now, naming what it acts on, never
+the work just saved. The step comes from the flows table for this Log's state: consolidate again while an
+entry is `stub` or `imported` (naming them; the entry a consolidate finished is `consolidated` by then), import again
+while the Log has no entries, and import in place of a step that reads entries while the Log has none; a step whose
+work is done is skipped: import once there are entries, consolidate once no entry is `stub` or `imported`, stories
+once stories/ holds a Talking points file. A step that needs a target the Log cannot name gets no line except right
+after the mode that leaves one (fit after scan-results, write after fit; interview never); nor does a mode with no
+fixed next step, or one that ends its flow. After consolidate, also a `Next:` line naming `audit` for each Target
+version whose stale count (tools/application.py stale: its two lists added together) is 3 or more now and was
+below 3 at `mode start`, with its entries: it shows once, on the run that crosses 3. After write, for an
+application folder saved since `mode start` without archived.md, from the family and tier `application.py start`
+recorded in its draft folder: a `Next:` line for a target run that updates the family's Target version with the
+Past phrasings bullets the save added that it lacks (none added: no line), or, when the family has no Target
+version yet, one that creates it from the application's resume; and a `Next:` line for setup when the role is
+not among direction.md's Target roles (tier `none`). After rank, a `Next:` line for a target run when
+direction.md's first target role has no Target version: `--family <target>` (rank only) names that role's
+family's Target version, or the name a target run for it would take, as application.py start's --family does;
+it is needed (else exit 2) while outputs/resumes/ holds a Target version and the target roles are not empty,
+and the line shows when no Target version has that name; with no target roles, no line. Then the fresh-session
+line, or a `Complete:` line when neither a `Next:` line nor "Also available" follows (the run did what it had
+to; the session can end). "Also available" names a mode outside the flows only when this Log's state calls
+for it and no `Next:` line covers it (audit while more than one entry is `stub` or `imported` and no `Next:` line
+names consolidate or audit; never after audit). `--for <mode>`: setup ran because the Trigger check of <mode>
 started it, so the block sends the user back to <mode> in this session. `--no-posting` (fit only):
 the run answered a question with no posting ("does <company> sponsor?"), so no next step follows
 from a posting's fit, and the block names none. With Log changes
 uncommitted or commits not pushed, it says so in place of the fresh-session line and exits 1; for
-commits not pushed, its `next:` line names `sync.py push`. It prints nothing for log, nor in an
-unattended run.
+commits not pushed, its `next:` line names `sync.py push`. For log it prints only that Target version
+line, measured from log's last commit (HEAD~1, or --since), or nothing; nothing in an unattended run.
 
 Exit 1 when the check ends the run (a `next: stop:` line, or this Python is too old), 2 on a bad
 argument, 0 otherwise. -h or --help prints this text and exits 0. Standard library only.
 Python 3.11+ (tomllib); an older Python gets as far as saying so, and where a newer one is.
 """
+import datetime
 import glob
 import json
 import os
@@ -862,8 +886,38 @@ def tool_cmd(root, name):
     return '%s -I "%s"' % (python_cmd(), os.path.join(root, "tools", name))
 
 
+LIVE_HOURS = 2   # a run's live marker untouched this long has expired (scan.py run --touch refreshes it)
+
+
+def live_runs(root):
+    """[(start, key)] of the runs still going, oldest first: each .build/runs/<key>/live touched in the
+    last LIVE_HOURS hours, `start` its start time in seconds since the epoch."""
+    runs = []
+    for path in glob.glob(os.path.join(root, ".build", "runs", "*", "live")):
+        try:
+            if time.time() - os.path.getmtime(path) > LIVE_HOURS * 3600:
+                continue
+            with open(path, encoding="utf-8") as f:
+                start = datetime.datetime.fromisoformat(json.load(f)["start"]).timestamp()
+        except (OSError, ValueError, KeyError, TypeError):
+            continue   # expired, gone, or unreadable: no live run
+        runs.append((start, os.path.basename(os.path.dirname(path))))
+    return sorted(runs)
+
+
+def live_run(root, path, runs):
+    """The key of the latest-started live run that started at or before path's time on disk, or None."""
+    try:
+        mtime = os.path.getmtime(os.path.join(root, path))
+    except OSError:   # a deleted file has no time: an earlier session's
+        return None
+    keys = [key for start, key in runs if int(start) <= mtime]
+    return keys[-1] if keys else None
+
+
 def check_uncommitted(ctx):
-    """One line per Log file with uncommitted changes; nothing when the Log is clean or git fails."""
+    """One line per Log file with uncommitted changes, a live run's marked as its; nothing when the
+    Log is clean or git fails."""
     try:
         p = subprocess.run(["git", "-C", ctx.root, "-c", "core.quotepath=false", "status", "--porcelain",
                             "-z", "--untracked-files=all", "--"] + LOG_PATHS,
@@ -872,23 +926,37 @@ def check_uncommitted(ctx):
         return [], [], False
     if p.returncode != 0:
         return [], [], False
-    files, entries = [], iter(p.stdout.split("\0"))
+    files, entries, runs = [], iter(p.stdout.split("\0")), live_runs(ctx.root)
     for entry in entries:
         if len(entry) > 3:
             status, path = entry[:2], entry[3:]
+            key = live_run(ctx.root, path, runs) if runs else None
             if "R" in status or "C" in status:   # a rename's -z entry is followed by its old path
                 path += " (from %s)" % next(entries, "?")
-            files.append((status.strip(), path))
+            files.append((status.strip(), path, key))
     if not files:
         return [], [], False
-    lines = ["log changes: uncommitted (%d file(s))" % len(files)]
-    lines += ["log change: %s %s" % (status, path) for status, path in files]
+    live = [f for f in files if f[2]]
+    lines = ["log changes: uncommitted (%d file(s)%s)" % (len(files), ", %d of them a live run's" % len(live) if live else "")]
+    lines += ["log change: %s %s" % (status, path) for status, path, key in files if not key]
+    lines += ["log change (live run %s): %s %s" % (key, status, path) for status, path, key in live]
     sync = tool_cmd(ctx.root, "sync.py")
-    nexts = ["next: now, first: the files above that are not this session's own bulk change waiting for the"
-             " user's yes are changes an earlier session left. Show the user what `%s status -- <file>...`"
-             " prints for those files and ask whether to commit them (`%s settle commit -- <file>...`) or"
-             " discard them (`%s settle discard -- <file>...`, then follow its output), naming those files"
-             " each time; then go on with the request." % (sync, sync, sync)]
+    nexts = []
+    if len(live) < len(files):
+        nexts.append("next: now, first: the `log change:` files above that are not this session's own bulk change"
+                     " waiting for the user's yes are changes an earlier session left. Show the user what `%s status"
+                     " -- <file>...` prints for those files and ask whether to commit them (`%s settle commit --"
+                     " <file>...`) or discard them (`%s settle discard -- <file>...`, then follow its output),"
+                     " naming those files each time; then go on with the request." % (sync, sync, sync))
+    if live:
+        keys = sorted({key for _, _, key in live})
+        scan = tool_cmd(ctx.root, "scan.py")
+        nexts.append("next: now, first: the `log change (live run <key>):` files above are the work of a run still"
+                     " going in another session in this Log (%s): keep them as they are, out of every settle and"
+                     " commit of this session, and tell the user so in one line. A run stays live for %d hours after"
+                     " its last draft; when the user says its session has ended without saving, `%s end <key>`"
+                     " ends it, and the next check offers its files as an earlier session's."
+                     % (", ".join(keys), LIVE_HOURS, scan))
     return lines, nexts, False
 
 
@@ -1206,14 +1274,22 @@ def check_release(ctx):
 # ---- Session hygiene ----
 
 FRESH = "Start a new session (or `/clear`) first: everything this session did is in the Log."
+# In place of FRESH when no Next line applies (#607)
+COMPLETE = ("Complete: this run did what it had to, and no next step follows from it. The session can end; start"
+            " a new session for any other need.")
 # Files the Log's mode commits keep beside LOG_PATHS (which holds stories/): the guard files
 # (SKILL.md › Commits)
 SAVED_TOO = [".export-deny", ".export-cleared"]
 
 
+def unconsolidated(root):
+    """The entries whose status (their front matter's `status:`) is `stub` or `imported`."""
+    return [e for e in tools_module("entries").load(root) if re.match(r"(stub|imported)\b", e.status)]
+
+
 def consolidated(root):
-    """True when no entry's status (its front matter's `status:`) is `stub` or `imported`."""
-    return not any(re.match(r"(stub|imported)\b", e.status) for e in tools_module("entries").load(root))
+    """True when no entry's status is `stub` or `imported`."""
+    return not unconsolidated(root)
 
 
 # A step of the first-use flow is done, and skipped, when the Log's state says so. The inbox is no
@@ -1340,18 +1416,161 @@ def pushable(root):
 
 # Why a step comes again when the Log's state says its work is not done yet. An import answered No
 # leaves no entries; the steps after it, which read entries, are not done but cannot start.
-AGAIN = {"consolidate": "Entries whose status is still `stub` or `imported` have gaps and pending notes too",
+AGAIN = {"consolidate": "They still have gaps and pending notes",
          "import": "The Log has no entries yet: the import was undone, or found nothing to keep"}
 # The steps that read entries: on a Log with none, import comes first, whichever mode ran (#424)
 READS_ENTRIES = ("consolidate", "stories", "fit", "write", "interview")
 NO_ENTRIES = ("The Log has no entries yet, and the later steps read them: import your old resumes, exports and chat"
               " histories first")
+# A step that acts on something the Log cannot name is offered only right after the modes that
+# leave it one: fit, the postings scan-results kept; write, the posting fit just checked.
+# interview waits for an application to turn into an interview, which no run sees (#607).
+NEEDS_TARGET = {"fit": ("scan-results",), "write": ("fit",), "interview": ()}
+NAMED = 3   # the entries a Next line names; the rest it counts
+
+
+def target(root, step):
+    """What a Next of <step> acts on in this Log, the start of its reason; "" when <step> acts on no
+    part of the Log it can name."""
+    if step != "consolidate":
+        return ""
+    left = unconsolidated(root)
+    names = ["%s (%s)" % (tools_module("entries").one_value(e.fields.get("title")) or e.slug, e.path)
+             for e in left[:NAMED]]
+    more = " and %d more" % (len(left) - NAMED) if len(left) > NAMED else ""
+    return "%s still `stub` or `imported`: %s%s" % ("1 entry is" if len(left) == 1 else "%d entries are" % len(left),
+                                                     ", ".join(names), more)
+
+
+def entry_titles(root):
+    """{entry path: its title on one line, or its slug}."""
+    app, entries = tools_module("application"), tools_module("entries")
+    return {e.path: app.one_line(entries.one_value(e.fields.get("title"))) or e.slug for e in entries.load(root)}
+
+
+STALE_AT = 3   # a Target version's stale count that gets a Next line, on the run that crosses it (#612)
+
+
+def stale_nexts(root, guide, base, example=True):
+    """A Next line for each Target version whose stale count (its two staleness lists added together,
+    tools/application.py stale) is STALE_AT or more now and was below it at commit <base>, the run's
+    start: it appears once, on the run that crosses, with no stored state. None when <base> is None.
+    example=False leaves out audit's English request to say, for a sentence the agent words itself."""
+    if base is None:
+        return []
+    app = tools_module("application")
+    titles = entry_titles(root)
+    held = set((git_out(root, "ls-tree", "-r", "-z", "--name-only", base, "--", "entries/") or "").split("\0"))
+    said = guide.said("audit") if example else "`audit`"
+    out = []
+    for name in app.targets(root):
+        try:
+            res = app.stale(root, name)
+        except app.AppError:
+            continue
+        if not res or git_out(root, "merge-base", "--is-ancestor", res["saved"][0], base) is None:
+            continue   # not saved, saved during this run, or <base> is not in this Log: nothing to compare
+        since_save = "%s..%s" % (res["saved"][0], base)
+        # (entry, how it is behind, whether it already was at <base>)
+        behind = [(path, "changed", bool(git_out(root, "log", "-1", "--format=%h", since_save, "--", path)))
+                  for path, _, _ in res["changed"]]
+        behind += [(path, "new", path in held and not untracked) for path, _, untracked in res["new"]]
+        if not len(behind) >= STALE_AT > sum(was for *_, was in behind):
+            continue
+        out.append("Next: %s. Target version `%s` has %d entries behind its last save: %s. It decides whether to"
+                   " refresh the Target version." % (said, name, len(behind), ", ".join(
+                       "%s (%s, %s)" % (titles.get(path, path), path, how) for path, how, _ in behind)))
+    return out
+
+
+def added_phrasings(root, base, cite):
+    """(wording, entry path) for each ## Past phrasings line added since commit <base> that cites <cite>."""
+    diff = git_out(root, "-c", "core.quotepath=false", "diff", "-U0", "--no-color", "%s..HEAD" % base, "--", "entries/")
+    out, path, header = [], None, False
+    for line in (diff or "").splitlines():
+        if line.startswith("diff --git "):
+            path, header = None, True
+        elif header and line.startswith("+++ "):   # the file's header, not an added line
+            path, header = (line[6:] if line.startswith("+++ b/") else None), False
+        elif line.startswith("+") and path and line.rstrip().endswith("(%s)" % cite):
+            got = tools_module("entries").phrasings("## Past phrasings\n" + line[1:])
+            if got:
+                out.append((re.sub(r"\s*\([^()]*\)\s*$", "", got[0][1]).strip("\"“” "), path))
+    return out
+
+
+def feed_nexts(root, base):
+    """After a posting run's Reference save since commit <base>, the Next lines that feed it back
+    (#614): Update, the bullets it added to Past phrasings that its role family's Target version
+    lacks (each below entries.py's SIMILAR to all of that version's bullets); Create, when that
+    family has no Target version yet; Direction, when the role is not among the Target roles. The
+    family and the role's tier are the ones `application.py start` recorded in the draft folder.
+    None for an Archived save, without that record, or when <base> is None."""
+    if base is None:
+        return []
+    app, entries = tools_module("application"), tools_module("entries")
+    added = git_out(root, "-c", "core.quotepath=false", "diff", "--name-only", "--diff-filter=A", "%s..HEAD" % base,
+                    "--", app.APPLICATIONS + "/")
+    titles = None
+    out = []
+    for name in sorted({p.split("/")[2] for p in (added or "").splitlines() if p.count("/") >= 3}):
+        rel = "%s/%s" % (app.APPLICATIONS, name)
+        rec = app.start_record(root, name) or {}
+        if os.path.isfile(os.path.join(root, *rel.split("/"), "archived.md")) or not {"from", "family", "tier"} <= set(rec):
+            continue
+        subject = git_out(root, "log", "-1", "--format=%s", "%s..HEAD" % base, "--", rel) or ""
+        role = re.sub(r"^write\([^)]*\):\s*", "", subject) if subject.startswith("write(") else name
+        family = rec["family"]
+        if family in app.targets(root):
+            have = [(None, app.wording(i)) for _, i in logfiles.tex_bullets(
+                app.read(root, "outputs/resumes/%s.tex" % family))]
+            new = [(w, path) for w, path in added_phrasings(root, base, rel)
+                   if all(entries.similar((None, w), h) < entries.SIMILAR for h in have)]
+            if new:
+                titles = titles or entry_titles(root)
+                out.append('Next: `write` (say "update my %s resume with the new bullets"). Target version `%s` lacks'
+                           ' %d bullet%s this save added to Past phrasings: %s. A target run for `%s` decides which'
+                           ' to bring in.' % (family, family, len(new), "" if len(new) == 1 else "s", ", ".join(
+                               '"%s" (%s, %s)' % (w, titles.get(path, path), path) for w, path in new), family))
+        elif family != "general" or not tools_module("config").target_roles(root):
+            out.append('Next: `write` (say "make my first %s resume from the %s application"). No Target version is'
+                       ' close to this role (this run started from %s): a target run creates `%s`, seeded from this'
+                       ' application\'s approved resume (%s/resume.tex), which it generalises (it drops the posting\'s'
+                       ' own terms and company emphasis) and reviews on its own.'
+                       % (family, name, rec["from"], family, rel))
+        if rec["tier"] == "none":
+            out.append('Next: `setup` (say "add %s to my target roles"). %s is not among Direction\'s target roles,'
+                       ' and `rank`, `scan` and `fit` order by that list.' % (role, role))
+    return out
+
+
+def rank_nexts(root, family):
+    """After rank (#615): a Next line for a target run when the top target role (direction.md's first
+    one) has no Target version, the resume handed out where there is no posting. <family> is that
+    role's family's target name, as application.py start's --family names it; None while
+    outputs/resumes/ holds no Target version. None when the target roles are empty."""
+    roles = tools_module("config").target_roles(root)
+    if not roles or family in tools_module("application").targets(root):
+        return []
+    role = tools_module("config").role_name(roles[0])
+    return ['Next: `write` (say "make a %s resume"). Your top target role, %s, has no Target version, and it is'
+            ' what you hand out where there is no posting, as at this ranking\'s event: a target run creates one.'
+            % (role, role)]
+
+
+def relevant_also(root, mode, nexts):
+    """The modes outside the flows that this Log's state calls for and no Next line covers, as
+    (mode, why); none otherwise. rank and guide wait for the user's own request."""
+    left = len(unconsolidated(root))
+    if mode != "audit" and left > 1 and not any(n.startswith(("Next: `consolidate`", "Next: `audit`")) for n in nexts):
+        return [("audit", "%d entries are still `stub` or `imported`; it ranks which to consolidate first" % left)]
+    return []
 
 
 def next_step(guide, mode, root):
     """The flows row whose Next is the step for this Log's state: this mode again while its own work
     is not done (AGAIN), else its Next, walking past steps already done; import when that Next reads
-    entries and the Log has none."""
+    entries and the Log has none; None when that Next has nothing to act on here (NEEDS_TARGET)."""
     if mode in AGAIN and not DONE[mode](root):
         return {"mode": mode, "next": mode, "why": AGAIN[mode], "session": "new"}
     row, seen = guide.step(mode), set()
@@ -1363,15 +1582,18 @@ def next_step(guide, mode, root):
         row = dict(after, session="new")
     if row and row["next"] in READS_ENTRIES and not DONE["import"](root):
         return {"mode": mode, "next": "import", "why": NO_ENTRIES, "session": "new"}
+    if row and mode not in NEEDS_TARGET.get(row["next"], (mode,)):
+        return None
     return row
 
 
 def done(argv, root=ROOT):
-    """`done <mode> [--since <sha>@<time>] [--for <mode>] [--no-posting]`: the Next up block; (exit code, lines)."""
+    """`done <mode> [--since <sha>@<time>] [--for <mode>] [--no-posting] [--family <target>]`: the Next up
+    block; (exit code, lines)."""
     opts, args = {}, list(argv)
     no_posting = "--no-posting" in args
     args = [a for a in args if a != "--no-posting"]
-    for flag in ("--since", "--for"):
+    for flag in ("--since", "--for", "--family"):
         if flag in args:
             i = args.index(flag)
             if i + 1 >= len(args):
@@ -1382,40 +1604,61 @@ def done(argv, root=ROOT):
     known = set(MODES) | set(guide.modes) | {r["mode"] for r in guide.flows}
     if (len(args) != 1 or args[0] not in known
             or ("--for" in opts and (args[0] != "setup" or opts["--for"] not in MODES))
-            or (no_posting and args[0] != "fit")):
+            or (no_posting and args[0] != "fit")
+            or ("--family" in opts and (args[0] != "rank" or logfiles.ascii_slug(opts["--family"]) != opts["--family"]))):
         return 2, ["usage: %s -I tools/check.py done <mode> [--since <sha>@<time>] [--for <mode>] [--no-posting]"
-                   " (--for with setup only, --no-posting with fit only); <mode> is one of %s"
-                   % (python_cmd(), ", ".join(sorted(known)))]
+                   " [--family <target>] (--for with setup only, --no-posting with fit only, --family with rank"
+                   " only, a lowercase target name); <mode> is one of %s" % (python_cmd(), ", ".join(sorted(known)))]
     mode = args[0]
-    if mode == "log" or UNATTENDED:
+    if UNATTENDED:
         return 0, []
-    out = ["Next up"] + saved_lines(root, opts.get("--since"))
+    versions = tools_module("application").targets(root) if mode == "rank" else []
+    if versions and "--family" not in opts and tools_module("config").target_roles(root):
+        return 2, ["usage: done rank needs --family <target>, the Target version of your first target role's family"
+                   " (or the name a target run for it would take), while outputs/resumes/ holds one: %s"
+                   % ", ".join(versions)]
+    since = opts.get("--since", "").partition("@")[0] or None
+    if mode == "log":   # no block: only a Target version's stale line, from log's last commit (step 4's)
+        # no English request to say (#624): an example to copy kept it in English in a non-English conversation
+        lines = stale_nexts(root, guide, since or "HEAD~1", example=False)
+        return 0, lines + ["next: add it to the one-line report (log's step 5) as one sentence, every word of it in"
+                           " the user's language: write the request the user can say to start audit in their"
+                           " language too, with no English words in it, and name the mode beside it as `audit`,"
+                           " in code"] if lines else []
+    out = ["Close-out"] + saved_lines(root, opts.get("--since"))
     missing = unsaved(Context(mode, root=root))
     if "--for" in opts:
         out.append("Next: go back to `%s` in this session: setup ran for that request." % opts["--for"])
         if missing:
             out.append("Not saved yet: %s. Save it before you go on." % "; ".join(missing))
     else:
+        # One Next line per step that applies now, naming what it acts on; never the work just saved
+        nexts = []
         row = None if no_posting else next_step(guide, mode, root)   # its Next follows from a posting's fit
         if row and row["next"] == "-":
             row = None   # the flow's last step: like no fixed step, no Next line (#549)
         if guide.error:
-            out.append("Next: not found (docs/guide.md: %s)." % guide.error)
+            nexts.append("Next: not found (docs/guide.md: %s)." % guide.error)
         elif row:
-            out.append("Next: %s. %s." % (guide.said(row["next"]), row["why"].rstrip(".")))
+            why = [w[:1].upper() + w[1:] for w in (target(root, row["next"]), row["why"].rstrip(".")) if w]
+            nexts.append("Next: %s. %s." % (guide.said(row["next"]), ". ".join(why)))
+        if mode == "consolidate":
+            nexts += stale_nexts(root, guide, since)
+        elif mode == "write":
+            nexts += feed_nexts(root, since)
+        elif mode == "rank":
+            nexts += rank_nexts(root, opts.get("--family"))
+        out += nexts
+        also = relevant_also(root, mode, nexts)
         if missing:
             out.append("Not saved yet: %s. Save it before you leave this session." % "; ".join(missing))
         elif row and row["session"] == "same":
             out.append("Go on in this session: the guide runs `%s` right after `%s`, in the same session."
                        % (row["next"], mode))
         else:
-            out.append(FRESH)
-        flow_modes = {r["mode"] for r in guide.flows} | {r["next"] for r in guide.flows}
-        # upgrade is the user's call, on a release they heard of, not a next step to offer
-        also = [m for m in guide.modes if m not in flow_modes and m not in ("guide", "upgrade", mode)]
-        if not tools_module("entries").load(root):
-            also = []   # with no entries, the modes outside the flows have nothing to read
-        out.append("Also available: " + ", ".join(guide.said(m) for m in also + ["guide"]))
+            out.append(FRESH if nexts or also else COMPLETE)
+        if also:
+            out.append("Also available: " + "; ".join("%s: %s" % (guide.said(m), why) for m, why in also))
     show = ("end your last message with the block above, nothing after it" if "--for" not in opts else
             "show the user the block above, then go on with %s, starting with its Trigger check" % opts["--for"])
     as_printed = ", rendered as SKILL.md › Next up says: its Saved line included, its requests to say translated."

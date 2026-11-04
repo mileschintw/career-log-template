@@ -29,6 +29,21 @@ class ConfigTest(unittest.TestCase):
         with open(os.path.join(self.root, "config.toml"), "w", encoding="utf-8") as f:
             f.write(text)
 
+    def test_role_name_leaves_out_the_citation(self):
+        """#615: a Target role said in a Next or report line, without its source."""
+        for line, name in (("Backend engineer (user, 2026-10-01)", "Backend engineer"),
+                           ("Data (sources/resumes/2025-01-01-main.tex)", "Data"),
+                           ("Platform (https://example.com/post)", "Platform"),
+                           ("ML engineer (Infra)", "ML engineer (Infra)"),
+                           ("ML engineer (Infra) (user, 2026-10-01)", "ML engineer (Infra)"),
+                           ("Engineer (C/C++)", "Engineer (C/C++)"), ("SRE (24/7)", "SRE (24/7)"),
+                           ("Platform (Infra: k8s)", "Platform (Infra: k8s)"),
+                           ("Data (me@abc123:notes.md:4)", "Data"),
+                           ("Platform [post](https://x.com/a)", "Platform"),
+                           ("PM", "PM")):
+            with self.subTest(line=line):
+                self.assertEqual(config.role_name(line), name)
+
     def read(self):
         with open(os.path.join(self.root, "config.toml"), encoding="utf-8") as f:
             return f.read()
@@ -65,7 +80,7 @@ class ConfigTest(unittest.TestCase):
                                  'front_page = "trimmed"', 'window = 7 (default)', 'scheduled_window = "window" (default)',
                                  'screen_budget = 40 (default)', 'fit_budget = 15 (default)', 'n = 10 (default)', 'auto_write = "off" (default)',
                                  'm = 5 (default)', 'update_check = "on" (default)',
-                                 'resume_max_pages = 1 (default)'])
+                                 'resume_max_pages = 1 (default)', 'plan_preview = "ask" (default)'])
 
     def test_numbers_are_written_without_quotes(self):
         self.run_tool("init")
@@ -132,6 +147,20 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(lines[-2:], [config.NOTICES["interviewer_profiles", "always"], "dry run: nothing written"])
         self.assertTrue(lines[-2].startswith("tell the user: the site may show each interviewer the visit"))
         self.assertNotIn("tell the user", " ".join(self.run_tool("set", "update_check", "off", "--dry-run")[1]))
+
+    def test_plan_preview_values_and_default(self):
+        self.write('record_language = "English"\n')
+        self.assertIn('plan_preview = "ask" (default)', self.run_tool("show")[1])
+        self.assertIn('config: plan_preview ("ask" or "always" or "never")', self.run_tool("fields")[1])
+        self.assertEqual(self.run_tool("set", "plan_preview", "ask")[1][-1], "unchanged")
+        for value in ("always", "never", "ask"):
+            code, lines = self.run_tool("set", "plan_preview", value)
+            self.assertEqual((code, lines[1:]), (0, ['after: plan_preview = "%s"' % value, "written"]), value)
+        for value in ("yes", "on", "Always"):
+            code, lines = self.run_tool("set", "plan_preview", value)
+            self.assertEqual(code, 1, value)
+            self.assertTrue(lines[0].startswith("config: "), lines)
+        self.assertEqual(self.read(), 'record_language = "English"\nplan_preview = "ask"\n')
 
     def test_dry_run_writes_nothing(self):
         self.run_tool("init")
@@ -658,6 +687,67 @@ class ConfigTest(unittest.TestCase):
         self.assertIn('config: scheduled_window ("window" or a whole number from 1 to 90)', lines)
         self.assertIn("direction: work authorisation (direction.md › Constraints)", lines)
         self.assertEqual(len(lines), len(config.FIELDS) + len(config.DIRECTION))
+
+    def target_versions(self, *names):
+        os.makedirs(os.path.join(self.root, "outputs", "resumes"), exist_ok=True)
+        for name in names:
+            with open(os.path.join(self.root, "outputs", "resumes", name + ".tex"), "w", encoding="utf-8") as f:
+                f.write("x\n")
+
+    TARGETS = ("## Target roles, ranked\n1. Backend (user, 2025-01-01)\n   - search systems (user, 2025-01-01)\n"
+               "2. Platform (user, 2025-01-01)\n\n"
+               "## Employer preferences\n- **Sorting order:** size (user, 2025-01-01)\n\n"
+               "## Constraints\n- **Work authorisation:** none (user, 2025-01-01)\n\n"
+               "## What to emphasise, by target\n- **Backend:** x (user, 2025-01-01)\n- **Platform:** y (user, 2025-01-01)\n")
+
+    def after_written(self, *args):
+        code, lines = self.run_tool(*args)
+        self.assertEqual(code, 0, lines)
+        self.assertIn("written", lines, lines)
+        return lines[lines.index("written") + 1:]
+
+    def test_target_change_one_emphasis(self):
+        self.direction(self.TARGETS)
+        self.target_versions("backend", "platform")
+        self.assertEqual(self.after_written("direction", "set", "what to emphasise", "z", "--target", "Backend"),
+                         ["target versions: backend, platform", "target change: emphasis: Backend"])
+
+    def test_target_change_reordered_or_edited_roles(self):
+        self.direction(self.TARGETS)
+        self.target_versions("backend", "platform")
+        self.assertEqual(self.after_written("direction", "set", "target roles", "Platform", "Backend"),
+                         ["target versions: backend, platform", "target change: role moved: Platform",
+                          "target change: role moved: Backend"])
+        self.assertEqual(self.after_written("direction", "set", "target roles", "Platform engineer", "Backend",
+                                            "   - search and ranking systems", "--drop-indented"),
+                         ["target versions: backend, platform", "target change: role removed: Platform",
+                          "target change: role added: Platform engineer", "target change: role edited: Backend"])
+        self.assertEqual(self.after_written("direction", "set", "target roles", "Backend", "   - ranking systems",
+                                            "Platform engineer", "--drop-indented"),
+                         ["target versions: backend, platform", "target change: role moved: Backend",
+                          "target change: role edited: Backend", "target change: role moved: Platform engineer"])
+
+    def test_target_change_none_for_another_item(self):
+        self.direction(self.TARGETS)
+        self.target_versions("backend", "platform")
+        self.assertEqual(self.after_written("direction", "set", "sorting order", "pay"), [])
+        self.assertEqual(self.after_written("direction", "set", "other hard constraints", "Remote only"), [])
+        self.assertEqual(self.after_written("direction", "set", "target roles", "Backend", "Platform", "GAP: a third?"), [])
+
+    def test_target_change_added_role_moves_no_other(self):
+        self.direction(self.TARGETS)
+        self.target_versions("backend")
+        self.assertEqual(self.after_written("direction", "set", "target roles", "Data", "Backend", "Platform"),
+                         ["target versions: backend", "target change: role added: Data"])
+
+    def test_target_change_needs_a_target_version_and_a_write(self):
+        self.direction(self.TARGETS)
+        self.assertEqual(self.after_written("direction", "set", "what to emphasise", "z", "--target", "Backend"), [])
+        self.target_versions("backend")
+        self.assertEqual(self.run_tool("direction", "set", "target roles", "Platform", "Backend", "--dry-run")[1][-1],
+                         "dry run: nothing written")
+        self.assertEqual(self.run_tool("direction", "set", "what to emphasise", "z", "--target", "Backend")[1][-1],
+                         "unchanged")
 
     def test_bad_arguments(self):
         self.assertEqual(self.run_tool()[0], 2)

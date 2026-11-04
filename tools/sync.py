@@ -37,6 +37,13 @@ the mode's message, or a `commit: <subject>` line another tool printed. --no-pus
 stops there (`push: held (--no-push)`), for the upgrade mode, whose push waits for the user's yes;
 the clean check still runs.
 
+Two sessions in one Log: a git add, commit, restore or rebase that finds `.git/index.lock` (another
+session's git step holds the index) tries again, LOCK_TRIES times LOCK_WAIT seconds apart, before it
+stops. A push origin refuses as non-fast-forward (another clone pushed first) runs `git pull --rebase
+--autostash` once, printing `push: rebased on origin/<branch>`, and pushes again; each uncommitted
+file keeps its time on disk, which tools/check.py reads. A rebase that fails is undone (`git rebase
+--abort`) and the push stops as a refused one does.
+
 push: pushes the commits already on HEAD and not on origin (those a mode that commits nothing left,
 SKILL.md › Commits), adding and committing nothing. It refuses on the branches commit refuses, but
 needs no identity. It prints `pushed: origin/<branch>` (or `push: no remote`) and `sync: ok`. Done
@@ -63,6 +70,7 @@ on a bad argument. -h or --help prints this text and exits 0. Standard library o
 """
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I leaves this folder off sys.path
 sys.dont_write_bytecode = True   # no tools/__pycache__ left in the Log
@@ -73,6 +81,8 @@ USAGE = ("usage: sync.py pull | commit [--no-push] <subject> -- <path>... | push
          " | settle discard [--sources-checked] [-- <path>...]   (each takes --root <root>)")
 SOURCES = "sources/"
 UNATTENDED = bool(os.environ.get("CAREER_LOG_UNATTENDED"))
+LOCK_TRIES = 10   # another session's git step holds .git/index.lock: try again, LOCK_WAIT seconds apart
+LOCK_WAIT = 0.5
 
 
 class Stop(Exception):
@@ -101,6 +111,16 @@ def log_changes(root, paths=None):
         files = [(s, p) for s, p in files
                  if p in logs or p.split("/")[0] in logfiles.LOG_FOLDERS and not p.startswith(logfiles.INBOX + "/")]
     return files
+
+
+def git_locked(root, *args, timeout=60):
+    """git_run, tried again while another git step holds .git/index.lock (a second session in this Log)."""
+    for _ in range(LOCK_TRIES - 1):
+        p = logfiles.git_run(root, *args, timeout=timeout)
+        if p.returncode == 0 or "index.lock" not in p.stderr:
+            return p
+        time.sleep(LOCK_WAIT)
+    return logfiles.git_run(root, *args, timeout=timeout)
 
 
 def has_remote(root):
@@ -187,14 +207,14 @@ def commit(root, subject, paths, push_too=True):
     # a path whose deletion is already staged is in neither the tree nor the index: git add refuses it
     adding = [p for p in paths if os.path.exists(os.path.join(root, p))
               or logfiles.git_run(root, "ls-files", "--", p).stdout.strip()]
-    staged = logfiles.git_run(root, "add", "-A", "--", *adding) if adding else None
+    staged = git_locked(root, "add", "-A", "--", *adding) if adding else None
     if staged and staged.returncode != 0:
         raise Stop("commit: refused (git add)", *indented(staged.stderr),
                    "next: stop: show the user git's message above and ask how to go on.")
     if logfiles.git_run(root, "diff", "--cached", "--quiet", "HEAD", "--", *paths).returncode == 0:
         out.append("commit: nothing to commit (%s as HEAD has them)" % ", ".join(paths))
     else:
-        p = logfiles.git_run(root, "commit", "-q", "-m", subject, "--only", "--", *paths)
+        p = git_locked(root, "commit", "-q", "-m", subject, "--only", "--", *paths)
         if p.returncode != 0:
             raise Stop("commit: refused", *indented(p.stderr or p.stdout),
                        "next: stop: show the user git's message above and ask how to go on.")
@@ -221,8 +241,29 @@ def push(root, current, default, made=True):
     if current != default:
         args[1:1] = ["-u"]
     p = logfiles.git_run(root, *args, timeout=180)
+    out = []
+    if p.returncode != 0 and ("non-fast-forward" in p.stderr or "fetch first" in p.stderr):
+        # another clone pushed first: put this branch's commits on top of origin's once, then push again
+        # --autostash puts back the uncommitted files with a new time on disk; keep each one's own time,
+        # which tools/check.py reads to tell a live run's files from an earlier session's
+        times = {f: os.stat(os.path.join(root, f)) for f in logfiles.git(root, "diff", "--name-only", "-z", "HEAD").split("\0")
+                 if f and os.path.isfile(os.path.join(root, f))}
+        r = git_locked(root, "pull", "--rebase", "--autostash", "origin", current, timeout=180)
+        if r.returncode == 0:
+            out.append("push: rebased on origin/%s" % current)
+            p = logfiles.git_run(root, *args, timeout=180)
+        else:
+            gitdir = logfiles.git(root, "rev-parse", "--absolute-git-dir").strip()
+            if any(os.path.isdir(os.path.join(gitdir, d)) for d in ("rebase-merge", "rebase-apply")):
+                logfiles.git_run(root, "rebase", "--abort")
+            p = r
+        for f, st in times.items():
+            try:
+                os.utime(os.path.join(root, f), ns=(st.st_atime_ns, st.st_mtime_ns))
+            except OSError:
+                pass
     if p.returncode != 0:
-        raise Stop("push: refused (the commit is made, not pushed)" if made else "push: refused (nothing pushed)",
+        raise Stop(*out, "push: refused (the commit is made, not pushed)" if made else "push: refused (nothing pushed)",
                    *indented(p.stderr or p.stdout),
                    "next: stop: show the user git's message above and ask how to go on. Never"
                    " force-push: other clones pull with --ff-only.")
@@ -230,7 +271,7 @@ def push(root, current, default, made=True):
     if ahead != "0":
         raise Stop("push: %s commit(s) still not on origin/%s" % (ahead, current),
                    "next: stop: show the user this line and ask how to go on.")
-    return ["pushed: origin/%s" % current]
+    return out + ["pushed: origin/%s" % current]
 
 
 # ---- status and settle ----
@@ -278,7 +319,9 @@ def settle_discard(root, paths, sources_checked):
     out = []
     old = [p for _, p in files if p not in new]
     if old:
-        logfiles.git(root, "restore", "--source=HEAD", "--staged", "--worktree", "--", *old)
+        p = git_locked(root, "restore", "--source=HEAD", "--staged", "--worktree", "--", *old)
+        if p.returncode != 0:
+            raise logfiles.LogError("git restore failed: %s" % p.stderr.strip())
         out += ["restored: %s" % p for p in old]
     for p in new:
         logfiles.git_run(root, "rm", "-q", "--cached", "--", p)

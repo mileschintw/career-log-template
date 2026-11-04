@@ -10,12 +10,15 @@
   python3 -I tools/scan.py prefilter <dir>
   python3 -I tools/scan.py screen <dir> --screen-budget <s> --fit-budget <f> [--sort [--give-up]]
   python3 -I tools/scan.py screen --check <results.jsonl> [--batch <batch.todo>]
+  python3 -I tools/scan.py run [--mode <mode>]
+  python3 -I tools/scan.py run --touch <key>
+  python3 -I tools/scan.py end <key>
   python3 -I tools/scan.py fetch <capture path> <url>
   python3 -I tools/scan.py capture <capture path> <url> <page.json | text file> [--stand-in <API url> | --pasted]
   python3 -I tools/scan.py state <capture path>
   python3 -I tools/scan.py fitmap <url> [--out <fit result>]
   python3 -I tools/scan.py rank <dir> --n <n> [--m <m>] [--give-up]
-  python3 -I tools/scan.py report <rows.jsonl> [--name <name>] [--top <line>] [--drafting] [--screen <dir>] [--body <file>]
+  python3 -I tools/scan.py report <rows.jsonl> [--name <name>] [--top <line>] [--drafting] [--screen <dir> [--family <tier>=<target>]...] [--body <file>]
   python3 -I tools/scan.py summary <dir>
   python3 -I tools/scan.py status <url> <status> [--draft <cell>] [--reason <text>]
   python3 -I tools/scan.py cleanup [--dry-run]
@@ -171,6 +174,26 @@ key is the current one.
   and with --batch, that it holds one line for each capture of the batch file that exists (by the
   URL on its first line) and none for another posting. `check: ok` lines, else exit 1 with one
   `bad:`, `missing:`, `extra:` or `repeated:` line per problem.
+- `run`: makes a posting run's own folder (fit.md › Capture a posting), so two runs in one Log, in
+  two agent sessions, never share a working file: `.build/runs/<key>/`, `<key>` --date and the time
+  now (`<YYYY-MM-DD>-<HHMMSS>`), with `-<n>` from 2 on when that folder exists. It prints `run:
+  <key>`, `folder:`, `capture:` (`<folder>/posting.md`, the run's capture path) and `sessions:
+  posting-<key>, company-lookup-<key>, lca-<key>` (its Browser sessions' names). It also writes the
+  run's live marker, `<folder>/live`: `{"start", "mode"}`, `start` the time now (ISO 8601 with its
+  UTC offset, to the second) and `mode` the --mode given (write, fit) or null, and prints `live:
+  <folder>/live`; with --mode write, its last line is a `next: now, first:` line with the line to
+  tell the user (write.md step 1: the first draft's wait, and that another session in this folder
+  can take the next posting). While the marker was touched in the last 2 hours, tools/check.py counts each
+  uncommitted Log file changed since `start` as this run's (a run in another session) and offers
+  none of them for settle. It deletes each
+  earlier run's folder whose key's date is more than 7 days before --date (no run lasts that long,
+  and the folder holds page text): one `deleted: .build/runs/<key>/ (older than 7 days)` line each.
+- `run --touch <key>`: the run's heartbeat: sets its live marker's time to now, so the run stays
+  live for 2 more hours; it prints `live: <folder>/live (touched)`. A run whose marker is gone (ended
+  by hand) gets it back, its `start` the time in its key: `live: <folder>/live (made again)`.
+- `end <key>`: ends the run: deletes its live marker, `live: <folder>/live (deleted)`, or `live: none
+  (<key> has no live marker)`. The run's folder stays (the 7-day rule above deletes it). It is the
+  last step of a run that saved its work, and clears the marker of a session that ended without one.
 - `fetch`: the plain fetch of a posting's own page (browser.md › Fallback order item 1, for scan's
   captures): a GET of <url>, its HTML read as the text a reader sees (no script, style or template).
   It refuses a posting API or JSON endpoint (an `api.` host, an `/api/` path, Workday's `/wday/cxs/`,
@@ -228,6 +251,14 @@ key is the current one.
   given whose URL has a pending row with a draft there keeps that row's status, draft and fit map
   commit. A draft whose branch is gone reads `pruned (<branch>)`, and its status `undecided`.
   --drafting adds to the top line that the drafts are on this machine only, when there is no remote.
+  With --screen and a `ranked.jsonl` there, a `Target version: ...` paragraph follows the top line for
+  each role family that at least half the postings fitted fall in, by their tiers, when it has no
+  Target version (a .tex in outputs/resumes/): a posting run there starts from the fallback original
+  resume. `--family <tier>=<target name>`, once per target role, names the Target version of that
+  role's family, or the name a target run for it would take (application.py start's --family); tiers
+  given one name count together. While outputs/resumes/ holds no Target version it is not needed (each
+  tier is its own family); else report refuses, writing nothing, when the tier of a posting fitted
+  lacks one, and on a tier that is no target role or a name not lowercase.
   With --screen, it refuses a `read.jsonl` line with no source or a `read` not in READS, and a
   source of `collected.jsonl` with no line there.
   With --screen <dir> and a `ranked.jsonl` there, it writes the sections after the table from the
@@ -275,9 +306,11 @@ key is the current one.
   folder exists, a capture or a fit map is missing, or the report is not written yet; it, and
   `--save`, refuse an exploratory run.
 - `drafts --check <folder>`: checks a draft folder's mechanical part: its files are exactly
-  DRAFT_FILES, plus DRAFT_OPTIONAL (`answers.md`) when there were form questions, no PDF; decisions.md's
-  first table has the header `| Decision | Chosen | Alternatives | Why |`, four cells a row, and a
-  row whose Decision starts `needs you` reads `| needs you: <what> | GAP | - | <where> |`. `check:
+  DRAFT_FILES (`start.txt` among them: the record `application.py start --family --tier` wrote,
+  which `draft` copies for check.py done write), plus DRAFT_OPTIONAL (`answers.md`) when there were
+  form questions; no PDF. decisions.md's first table has the header `| Decision | Chosen | Alternatives |
+  Why |`, four cells a row, and a row whose Decision starts `needs you` reads `| needs you: <what> |
+  GAP | - | <where> |`; start.txt has `from:`, `family:` and `tier:` lines. `check:
   ok`, else exit 1 with one `missing:`, `extra:` or `bad:` line per problem and a `check: <n>
   problem(s)` line. What the files say is not checked.
 - `drafts <dir> --save`: records the drafts once step 5.1 has committed and pushed them. A refusal ends
@@ -327,6 +360,8 @@ DECLINED = REPORTS + "/scan-declined.jsonl"
 REPORT_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2})-scan(?:-(\d+))?\.md$")
 BRANCH_NAME = re.compile(r"^scan/(\d{4}-\d{2}-\d{2})(?:-(\d+))?$")
 PRUNE_DAYS = 90
+RUN_KEEP_DAYS = 7   # a posting run's folder older than this belongs to no live run (`run` deletes it)
+RUN_KEY = re.compile(r"^(\d{4}-\d{2}-\d{2})-\d{6}(?:-\d+)?$")
 PENDING_COLUMNS = [("URL", "url"), ("Company", "company"), ("Role", "role"), ("Status", "status"),
                    ("Draft", "draft"), ("Fit map commit", "fit_commit")]
 STATUSES = ("draft to review", "undecided", "accepted", "declined")
@@ -1490,6 +1525,80 @@ def cmd_fetch(root, path, url):
             " read the page with playwright-cli and run capture with the file it wrote"]
 
 
+def clock():
+    """The time now, as HHMMSS: the middle of a posting run's key."""
+    return datetime.datetime.now().strftime("%H%M%S")
+
+
+LIVE = "live"   # a run's live marker, in its folder (tools/check.py reads it)
+
+
+def write_live(path, start, mode):
+    logfiles.write_text(path, json.dumps({"start": start, "mode": mode}) + "\n")
+
+
+def run_folder(root, key):
+    if not RUN_KEY.match(key or ""):
+        raise ScanError("%s is not a run key (<YYYY-MM-DD>-<HHMMSS>[-<n>], the `run:` line of scan.py run)" % key)
+    return os.path.join(root, ".build", "runs", key), ".build/runs/%s" % key
+
+
+def cmd_touch(root, key):
+    path, folder = run_folder(root, key)
+    live = os.path.join(path, LIVE)
+    if os.path.isfile(live):
+        os.utime(live)
+        return ["live: %s/%s (touched)" % (folder, LIVE)]
+    if not os.path.isdir(path):
+        raise ScanError("run --touch: no run folder %s/" % folder)
+    m = re.match(r"^(\d{4}-\d{2}-\d{2})-(\d{2})(\d{2})(\d{2})", key)
+    start = datetime.datetime.fromisoformat("%sT%s:%s:%s" % m.groups()).astimezone().isoformat()
+    write_live(live, start, None)
+    return ["live: %s/%s (made again)" % (folder, LIVE)]
+
+
+def cmd_end(root, key):
+    path, folder = run_folder(root, key)
+    try:
+        os.remove(os.path.join(path, LIVE))
+    except FileNotFoundError:
+        return ["live: none (%s has no live marker)" % key]
+    return ["live: %s/%s (deleted)" % (folder, LIVE)]
+
+
+def cmd_run(root, date, mode=None):
+    base = "%s-%s" % (date, clock())
+    parent = os.path.join(root, ".build", "runs")
+    os.makedirs(parent, exist_ok=True)
+    n = 1
+    while True:   # mkdir makes the folder or fails, so two runs started the same second never share one
+        key = base if n == 1 else "%s-%d" % (base, n)
+        try:
+            os.mkdir(os.path.join(parent, key))
+            break
+        except FileExistsError:
+            n += 1
+    folder = ".build/runs/%s" % key
+    write_live(os.path.join(parent, key, LIVE), datetime.datetime.now().astimezone().isoformat(timespec="seconds"), mode)
+    out = ["run: %s" % key, "folder: %s" % folder, "capture: %s/posting.md" % folder,
+           "sessions: posting-%s, company-lookup-%s, lca-%s" % (key, key, key), "live: %s/%s" % (folder, LIVE)]
+    oldest = (datetime.date.fromisoformat(date) - datetime.timedelta(days=RUN_KEEP_DAYS)).isoformat()
+    for name in sorted(os.listdir(parent)):
+        m = RUN_KEY.match(name)
+        if m and m.group(1) < oldest and os.path.isdir(os.path.join(parent, name)):
+            shutil.rmtree(os.path.join(parent, name))
+            out.append("deleted: .build/runs/%s/ (older than %d days)" % (name, RUN_KEEP_DAYS))
+    if mode == "write":
+        out.append(WRITE_HINT)
+    return out
+
+
+# write.md step 1: the user may start the next posting in another session while this run drafts
+WRITE_HINT = ("next: now, first: send the user this line as its own message, in the conversation language, before"
+              " the next step: the first draft comes in about 10 minutes; nothing needs you until then unless a fact"
+              " is missing; you can open another session in this same folder for the next posting.")
+
+
 def cmd_capture(root, path, url, source, stand_in=None, pasted=False):
     found = urls(url)
     if not found:
@@ -1895,9 +2004,67 @@ def cmd_summary(root, d, date):
     return 0, out + ["summary: ok, every posting collected is in one of the run's files"]
 
 
-def cmd_report(root, date, src, top, name=None, body=None, screen=None, drafting=False):
+def family_args(root, given):
+    """{tier: target name} from report's --family values, `<tier>=<target name>`; ScanError on a bad one."""
+    roles, out = role_names(root), {}
+    for v in given or []:
+        tier, eq, name = v.partition("=")
+        if not eq or not tier.strip().isdigit():
+            raise ScanError("--family takes <tier>=<target name>, as 1=backend: %r" % v)
+        if int(tier) not in roles:
+            raise ScanError("--family %s: tier %s is no target role in direction.md" % (v, tier.strip()))
+        if not name or logfiles.ascii_slug(name) != name:
+            raise ScanError("--family %s: a target name is lowercase letters, digits and hyphens" % v)
+        out[int(tier)] = name
+    return out
+
+
+def role_names(root):
+    """{tier: the target role's name, its citation left out (config.role_name)}, a tier counted as
+    fit.ranks counts it, `GAP:` lines left out."""
+    if not config.target_roles(root):
+        return {}
+    _, _, found = config.item_lines(config.direction_text(root), "target roles")
+    return {n: config.role_name(t) for n, (_, t) in enumerate(found, 1) if not config.is_gap(t)}
+
+
+def family_lines(root, ranked, families):
+    """The report's Target version lines (#615): one per role family that at least half the postings
+    fitted (`ranked`) fall in, by their tiers, when it has no Target version (a .tex in outputs/resumes/,
+    as tools/application.py's targets lists them). `families` maps a tier to its family's target name,
+    as application.py start's --family names it, so that tiers of one family count together; while
+    there is no Target version at all, none is needed and each tier is its own family. ScanError when a
+    tier of a fitted posting needs one and has none."""
+    roles = role_names(root)
+    tiers = sorted({p.get("tier") for p in ranked} & set(roles))
+    versions = sorted(os.path.basename(p)[:-4]
+                      for p in glob.glob(os.path.join(glob.escape(root), "outputs", "resumes", "*.tex")))
+    lacking = [t for t in tiers if t not in families]
+    if versions and lacking:
+        raise ScanError("--family <tier>=<target name> needed for tier %s: name each one's role family's Target"
+                        " version (%s), or the name a target run for it would take, as application.py start's"
+                        " --family does" % (", ".join("%d (%s)" % (t, roles[t]) for t in lacking), ", ".join(versions)))
+    groups = {}   # the family's name (or its tier, with no names given): its tiers
+    for t in tiers:
+        groups.setdefault(families.get(t, t), []).append(t)
+    out = []
+    for name, group in groups.items():
+        n = sum(1 for p in ranked if p.get("tier") in group)
+        if 2 * n >= len(ranked) and name not in versions:
+            out.append("Target version: %d of the %d postings fitted are %s roles (tier%s %s), a role family with no"
+                       " Target version, so a posting run for one starts from the fallback original resume. A target"
+                       " run (say \"make a %s resume\") makes one; this scan starts none."
+                       % (n, len(ranked), " or ".join(roles[t] for t in group), "s" if len(group) > 1 else "",
+                          ", ".join(map(str, group)), roles[group[0]]))
+    return out
+
+
+def cmd_report(root, date, src, top, name=None, body=None, screen=None, drafting=False, families=None):
     for d in [os.path.dirname(at_root(root, src))] + ([at_root(root, screen)] if screen else []):
         refuse_explore(d, "report")
+    families = family_args(root, families)
+    has_ranked = bool(screen) and os.path.exists(os.path.join(at_root(root, screen), "ranked.jsonl"))
+    family = family_lines(root, run_file(at_root(root, screen), "ranked.jsonl"), families) if has_ranked else []
     warn = fetch(root)
     rows = []
     for i, r in enumerate(read_jsonl(at_root(root, src)), 1):
@@ -1934,9 +2101,10 @@ def cmd_report(root, date, src, top, name=None, body=None, screen=None, drafting
         raise ScanError("%s exists" % path)
     if drafting and not has_remote(root):
         top = top.rstrip() + " The drafts are on this machine only (no remote)."
-    lines = ["# Scan %s" % name, "", top, "", "## Pending", ""] + table_lines(rows + carried)
+    lines = ["# Scan %s" % name, "", top, ""] + [l for f in family for l in (f, "")] + ["## Pending", ""] + \
+        table_lines(rows + carried)
     text = read(at_root(root, body)).replace("\r\n", "\n").strip("\n") if body else ""
-    if screen and os.path.exists(os.path.join(at_root(root, screen), "ranked.jsonl")):
+    if has_ranked:
         d = at_root(root, screen)
         text = (add_screen_lines(run_sections(root, d), run_file(d, "ranked.jsonl")) + "\n\n" + text).strip("\n")
     elif screen:   # a body the agent wrote: the Screen sections go after its Ranking
@@ -2086,8 +2254,9 @@ def cmd_cleanup(root, dry_run):
 
 # ---- Drafts ----
 
-DRAFT_FILES = ("posting.md", "fit.md", "resume.tex", "company.md", "decisions.md", "handoff.md")
+DRAFT_FILES = ("posting.md", "fit.md", "resume.tex", "company.md", "decisions.md", "handoff.md", "start.txt")
 DRAFT_OPTIONAL = ("answers.md",)
+START_KEYS = ("from", "family", "tier")   # the lines of application.py start's record
 DECISIONS_HEADER = ["Decision", "Chosen", "Alternatives", "Why"]
 NEEDS_YOU = re.compile(r"^needs you:\s*\S")
 PLAYWRIGHT = ".playwright-cli"
@@ -2204,16 +2373,19 @@ def needs_you_rows(text):
 
 
 def draft_problems(path):
-    """One line per way the draft folder differs from scan.md's step 4: its files, its decisions table."""
+    """One line per way the draft folder differs from scan.md's step 4: its files, its decisions table,
+    start.txt's lines."""
     if not os.path.isdir(path):
         return ["missing: the folder %s" % path]
     names = sorted(os.listdir(path))
     decisions = read(os.path.join(path, "decisions.md")) if "decisions.md" in names else None
-    return draft_file_problems(names, decisions)
+    start = read(os.path.join(path, "start.txt")) if "start.txt" in names else None
+    return draft_file_problems(names, decisions, start)
 
 
-def draft_file_problems(names, decisions):
-    """draft_problems() of a folder holding the files `names`, decisions.md's text `decisions`."""
+def draft_file_problems(names, decisions, start=None):
+    """draft_problems() of a folder holding the files `names`, decisions.md's text `decisions`,
+    start.txt's text `start`."""
     problems = ["missing: %s" % n for n in DRAFT_FILES if n not in names]
     for n in names:
         if n.lower().endswith(".pdf"):
@@ -2221,6 +2393,12 @@ def draft_file_problems(names, decisions):
         elif n not in DRAFT_FILES + DRAFT_OPTIONAL:
             problems.append("extra: %s (a draft folder holds only %s, and answers.md for form questions)"
                             % (n, ", ".join(DRAFT_FILES)))
+    if start is not None:
+        have = {l.partition(":")[0].strip() for l in start.splitlines() if ":" in l}
+        lacks = [k + ":" for k in START_KEYS if k not in have]
+        if lacks:
+            problems.append("bad: start.txt: it lacks %s (application.py start --family --tier writes it)"
+                            % ", ".join(lacks))
     if decisions is None:
         return problems
     tables = logfiles.md_tables(decisions)
@@ -2288,8 +2466,10 @@ def cmd_drafts_save(root, date, d):
             found = draft_problems(where(f))
         else:   # an earlier --save removed the worktree, or a file: the drafts as origin has them
             files = tree_files(root, ref, "scan-drafts/" + f) if remote else None
-            found = draft_file_problems(sorted(files), files.get("decisions.md")) if files is not None \
-                else ["not a folder (a draft is a folder)"]
+            if files is None:
+                found = ["not a folder (a draft is a folder)"]
+            else:
+                found = draft_file_problems(sorted(files), files.get("decisions.md"), files.get("start.txt"))
         problems += ["%s: %s" % (f, x) for x in found]
     if problems:
         first = ("git -C <root> worktree add %s %s, then " % (paths["worktree"], branch)
@@ -2395,6 +2575,11 @@ def main(argv):
     sp.add_argument("--give-up", action="store_true")
     sp.add_argument("--check")
     sp.add_argument("--batch")
+    sp = sub.add_parser("run")
+    sp.add_argument("--mode")
+    sp.add_argument("--touch", metavar="KEY")
+    sp = sub.add_parser("end")
+    sp.add_argument("key")
     sp = sub.add_parser("fetch")
     sp.add_argument("path")
     sp.add_argument("url")
@@ -2421,6 +2606,7 @@ def main(argv):
     sp.add_argument("--body")
     sp.add_argument("--screen")
     sp.add_argument("--drafting", action="store_true")
+    sp.add_argument("--family", action="append")
     sp = sub.add_parser("summary")
     sp.add_argument("dir")
     sp = sub.add_parser("status")
@@ -2468,6 +2654,9 @@ def main(argv):
         if bad:
             print("scan: %s" % bad)
             return 2
+    if a.cmd == "run" and a.touch and a.mode:
+        print("scan: run --touch <key> takes nothing else")
+        return 2
     if a.cmd == "drafts":
         if a.check:
             bad = "drafts --check <folder> takes nothing else" if a.dir or a.m is not None or a.save else None
@@ -2498,6 +2687,12 @@ def main(argv):
             lines = cmd_screen_check(root, a.check, a.batch)
         elif a.cmd == "screen":
             lines = cmd_screen(root, a.date, a.dir, a.screen_budget, a.fit_budget, a.sort, a.give_up)
+        elif a.cmd == "run" and a.touch:
+            lines = cmd_touch(root, a.touch)
+        elif a.cmd == "run":
+            lines = cmd_run(root, a.date, a.mode)
+        elif a.cmd == "end":
+            lines = cmd_end(root, a.key)
         elif a.cmd == "fetch":
             lines = cmd_fetch(root, a.path, a.url)
         elif a.cmd == "capture":
@@ -2509,7 +2704,7 @@ def main(argv):
         elif a.cmd == "rank":
             lines = cmd_rank(root, a.dir, a.n, a.m, a.give_up)
         elif a.cmd == "report":
-            lines = cmd_report(root, a.date, a.rows, a.top, a.name, a.body, a.screen, a.drafting)
+            lines = cmd_report(root, a.date, a.rows, a.top, a.name, a.body, a.screen, a.drafting, a.family)
         elif a.cmd == "summary":
             code, lines = cmd_summary(root, a.dir, a.date)
         elif a.cmd == "status":
