@@ -212,13 +212,13 @@ def declined(root):
 
 def applications(root):
     out = []
-    for d in sorted(glob.glob(os.path.join(root, "outputs", "applications", "*")), reverse=True):
+    for d in sorted(glob.glob(os.path.join(glob.escape(os.path.join(root, "outputs", "applications")), "*")), reverse=True):
         if not os.path.isdir(d):
             continue
         name = os.path.basename(d)
         m = re.match(r"(\d{4}-\d{2}-\d{2})-(.*)", name)
         date, rest = (m.group(1), m.group(2)) if m else ("", name)
-        level = "Archived" if "archived.md" in os.listdir(d) else "Reference"   # exact case on every OS
+        level = "Archived" if scan.logfiles.is_archived_folder(root, "outputs/applications/" + name) else "Reference"
         posting = os.path.join(d, "posting.md")
         found = scan.urls(scan.read(posting)) if os.path.exists(posting) else []
         out.append([esc(date), esc(rest), esc(level), link(found[0]) if found else "-"])

@@ -171,7 +171,7 @@ def blank_comments(text):
 
 def tex_plain(text):
     """A .tex fragment as the reader sees it: commands and braces dropped, escapes undone."""
-    text = re.sub(r"\\\\\*?(?:\[[^\]]*\])?", " ", text)   # a line break: \\, \\*, \\[2pt]
+    text = logfiles.TEX_LINE_BREAK.sub(" ", text)   # a line break: \\, \\*, \\[2pt], \newline
     text = re.sub(r"\\(?:href|[hv]space\*?)\{[^}]*\}", "", text)
     text = re.sub(r"\\[A-Za-z]+\*?(?:\[[^\]]*\])?", "", text)
     text = re.sub(r"\\(?=\s|$)", " ", text)   # a control space, or a lone \ at the line's end
@@ -218,19 +218,8 @@ class Resume:
     """A .tex resume: its body lines, its sections, its bullets and its Skills lines."""
 
     def __init__(self, text):
-        self.lines, self.sections = [], []
-        body = not re.search(r"^[^%\n]*\\begin\{document\}", text, re.M)
-        for n, raw in enumerate(text.splitlines(), 1):
-            line = re.sub(r"(?<!\\)%.*$", "", raw)
-            if "\\begin{document}" in line:
-                body = True
-                continue
-            if not body or not line.strip():
-                continue
-            self.lines.append((n, line))
-            m = re.search(r"\\section\*?\{([^}]*)\}", line)
-            if m:
-                self.sections.append((n, tex_plain(m.group(1))))
+        self.lines = [(n, line) for n, line, _ in logfiles.tex_body(text) if line.strip()]
+        self.sections = [(n, tex_plain(title)) for n, title in logfiles.tex_sections(text)]
         self.items = []
         for n, item in logfiles.tex_items(text):
             title = ""

@@ -95,6 +95,8 @@ class LayoutTest(unittest.TestCase):
         text = ("\\begin{document}\n\\section*{\\textsc{Skills}}\n\\item \\textbf{Languages:} Go\n"
                 "\\section*{\\textsc{Experience}}\n")
         self.assertEqual(resume.skills_of(text), ("Skills", ["Languages:"], ["Skills", "Experience"]))
+        # #651 C5: a section with bullets is no Skills section, as logfiles.tex_bullets reads it
+        self.assertIsNone(resume.skills_of("\\section*{Experience and Skills}\n\\item \\textbf{Go:} a queue\n"))
         rows[1]["text"] = "Languages: Go"
         del rows[2]   # no heading it knows after Skills: it stops at the first bullet
         self.assertEqual(self.fails(*rows, skills=("Skills", ["Languages:"], ["Skills"])), [])
@@ -365,10 +367,17 @@ class PageLimitTest(unittest.TestCase):
     def test_stale_tells_a_missing_package_from_a_broken_tex(self):   # #482
         _, out = self.stale_failing("careerlognosuchpkg.sty")
         self.assertRegex(out, r"(?m)^FAIL: backend: this machine lacks careerlognosuchpkg\.sty, so backend\.tex "
-                              r"was not compared: python3 -I \".*resume\.py\" \".*backend\.tex\" --install-missing --root \"")
+                              r"was not compared: %s -I '.*resume\.py' '.*backend\.tex' --install-missing --root '"
+                              % ("py -3" if os.name == "nt" else "python3"))   # #651 C7: this platform's command
+        # each FAIL line says what audit reports for it (#651 D8)
+        self.assertRegex(out, r"(?m) installs it and builds the copy; report: a LaTeX package missing on this machine,"
+                              r" not a fault of the resume: give the user that command, then run this --stale again$")
         self.assertNotIn("does not build", out)
         _, out = self.stale_failing(None)
-        self.assertIn("FAIL: backend: backend.tex does not build (the lines above say why)", out)
+        self.assertIn("FAIL: backend: backend.tex does not build (the lines above say why); report: a broken .tex\n", out)
+        # a `$` in a path is quoted so that neither shell expands it
+        self.assertIn(" '/logs/$work/a.tex' --install-missing --root '/logs/$work' ",
+                      resume.install_command("/logs/$work/a.tex", "/logs/$work") + " ")
 
     def test_stale_copies_the_local_files_a_tex_inputs(self):   # #504
         folder = os.path.join(self.root, "outputs", "resumes")
@@ -417,7 +426,7 @@ class PageLimitTest(unittest.TestCase):
         for target in ("a", "b"):   # each has its own .pdf: a resume, though the other \input's it
             self.assertIn("FAIL: %s: %s.tex does not build" % (target, target), out.getvalue())
         self.assertIn("note: c.tex is part of pct.tex", out.getvalue())
-        self.assertIn("FAIL: d: no d.pdf beside its .tex", out.getvalue())
+        self.assertIn("FAIL: d: no d.pdf beside its .tex; report: a target never built\n", out.getvalue())
 
     def test_stale_a_local_file_left_behind_is_no_package(self):   # one the .tex names in no \input or \include
         folder = os.path.join(self.root, "outputs", "resumes")
@@ -607,7 +616,8 @@ class BuildTest(unittest.TestCase):
         self.assertIn("Missing package file; rerun with --install-missing.", out)
         code, out = self.build(text, "--install-missing")
         self.assertEqual(code, 2, out)
-        self.assertIn("tlmgr found no package providing careerlognosuchpkg.sty", out)
+        self.assertIn("tlmgr found no package providing careerlognosuchpkg.sty: the .tex names a package no TeX has"
+                      " (a broken .tex), or tlmgr could not reach its repository; check which", out)
 
     @unittest.skipUnless(os.environ.get("RESUME_TEST_INSTALL") == "1", "set RESUME_TEST_INSTALL=1 to install lipsum")
     def test_missing_package_installs(self):   # SETUP.md step 7 as it was: installs lipsum, then removes it
@@ -662,7 +672,9 @@ class BuildTest(unittest.TestCase):
         code, out = run_tool("--stale", os.path.join(self.root, "outputs", "resumes"), "--root", self.root)
         self.assertEqual(code, 1, out)
         self.assertRegex(out, r"(?m)^backend: same text \(\d+ words\)$")
-        self.assertRegex(out, r"(?m)^FAIL: platform: text differs at word \d+: .*platform.pdf is not the one its .tex builds$")
+        self.assertRegex(out, r"(?m)^FAIL: platform: text differs at word \d+: .*platform.pdf is not the one its .tex builds;"
+                              r" report: its committed .pdf was built from something else, so a sent-version hash"
+                              r" would point at the wrong PDF$")
         self.assertTrue(os.path.isfile(os.path.join(self.root, ".build", "audit", "platform", "platform.pdf")))
         # a package this machine lacks is no broken .tex (#482)
         shutil.copy(same[:-4] + ".pdf", os.path.join(self.root, "outputs", "resumes", "infra.pdf"))

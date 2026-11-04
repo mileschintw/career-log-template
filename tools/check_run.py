@@ -155,9 +155,9 @@ Save checks, on the changes between <sha> and the copy's HEAD:
   `write(`; SKIP otherwise, since other modes trim the section by their own steps): in each entry
   the save changed, the `## Past phrasings` lines are kept as they stand: no line removed and a
   similar one added (a rewrite), no more lines removed than added (a drop happens only beside an
-  addition, at the three-wording cap), and no added line that differs only in its words from a line
-  already there for the same angle. Otherwise FAIL. Any other removed line: NOTE, since a drop at
-  the cap and a rewrite in new words both show as +1 -1. A line's angle is its own prefix in the
+  addition, at the cap of check_save.py PHRASING_CAP wordings), and no added line that differs
+  only in its words from a line already there for the same angle. Otherwise FAIL. Any other
+  removed line: NOTE, since a drop at the cap and a rewrite in new words both show as +1 -1. A line's angle is its own prefix in the
   format entries/_template.md gives, `- **ai-infra:** "..."`: a hyphen slug, then the wording in
   quotes (straight, curly or corner), so a bold label inside a wording (`- **Queues:** Designed...`)
   is no angle. Entries written before that format may group wordings under a label line
@@ -193,6 +193,7 @@ from entries import SIMILAR, phrasings, similar, words   # the Past phrasings pa
 import logfiles   # git with a timeout, UTF-8 reads
 from logfiles import provenance_rows   # a provenance table's rows
 from check_save import PROVENANCE_FILE, report_marks, row_problem   # write step 10's provenance rule; a report's Archived line
+import fit   # the map table's headers (COLUMNS)
 
 
 # ---------- transcript ----------
@@ -493,7 +494,7 @@ MAP_LABEL = re.compile(r"^[\s>|-]*(Map(?:\s*\(.*?\))?:)", re.M)
 MAP_RE = re.compile(r"Map(?:\s*\((.*?)\))?:\s*(\d+)\s+requirements? and dut(?:y|ies)\s*,\s*"
                     r"(\d+)\s+rows?\s*;\s*no row:?\s*([^\n]*)")
 COURSE_WORK = re.compile(r"^[\s>|-]*(Course work:[^\n]*)", re.M)
-MAP_TABLE = re.compile(r"^[ \t>]*\|\s*Requirement\s*\|", re.M)   # a table headed as fit.py's map table is
+MAP_TABLE = re.compile(r"^[ \t>]*\|\s*%s\s*\|" % re.escape(fit.COLUMNS[0][0]), re.M)   # a table headed as fit.py's map table is
 TABLE_ROW = re.compile(r"^\s*\|", re.M)
 # a shell command that runs tools/fit.py's map subcommand (--root may come before it)
 FIT_MAP = re.compile(r"\bfit\.py[\"']?\s(?:[^;&|\n]*?\s)?map(?=\s|$)")

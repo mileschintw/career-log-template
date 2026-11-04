@@ -218,6 +218,13 @@ class Start(Base):
         self.assertEqual(out, ["target: general | outputs/resumes/general.tex",
                                "fallback: sources/resumes/2025-01-01-main.tex"])
 
+    def test_fallback_in_a_root_with_glob_characters(self):
+        root = os.path.join(self.tmp, "log [1]")
+        os.makedirs(os.path.join(root, "sources", "resumes"))
+        with open(os.path.join(root, "sources", "resumes", "2025-01-01-main.tex"), "w", encoding="utf-8") as f:
+            f.write(RESUME)
+        self.assertEqual(application.fallback(root), "sources/resumes/2025-01-01-main.tex")
+
     def test_newest_tex_tie_and_blank(self):
         _, out = self.run_tool("start")
         self.assertEqual(out, ["targets: none", "fallback: skills/career-log/assets/resume-blank.tex"])
@@ -250,19 +257,19 @@ class Start(Base):
         code, out = self.run_tool("start", "--name", "n", "--from", "backend", "--family", "backend", "--tier", "1")
         self.assertEqual(code, 0, out)
         self.assertEqual(out[-1], "recorded: .build/drafts/n/start.txt")
-        self.assertEqual(application.start_record(self.root, "n"),
+        self.assertEqual(application.logfiles.start_record(self.root, "n"),
                          {"from": "outputs/resumes/backend.tex", "family": "backend", "tier": "1"})
         self.write("sources/resumes/2025-01-01-main.tex", RESUME)   # a role outside Direction, from the fallback
         code, out = self.run_tool("start", "--name", "m", "--from", "sources/resumes/2025-01-01-main.tex",
                                   "--family", "pm", "--tier", "none")
         self.assertEqual(code, 0, out)
-        self.assertEqual(application.start_record(self.root, "m"),
+        self.assertEqual(application.logfiles.start_record(self.root, "m"),
                          {"from": "sources/resumes/2025-01-01-main.tex", "family": "pm", "tier": "none"})
 
     def test_no_record_without_family(self):
         self.write("outputs/resumes/general.tex", RESUME)
         self.assertEqual(self.run_tool("start", "--name", "t", "--from", "general")[0], 0)
-        self.assertIsNone(application.start_record(self.root, "t"))
+        self.assertIsNone(application.logfiles.start_record(self.root, "t"))
 
     def test_family_general_only_while_target_roles_are_empty(self):
         self.write("outputs/resumes/general.tex", RESUME)
@@ -362,12 +369,28 @@ class Level(Base):
     def test_bullets_report(self):
         rel = "outputs/reports/2026-03-01-bullets.md"
         self.write(rel, "Kind: resume bullets\n\n- Built a queue\n\n| Claim | Entry section | Source |\n|---|---|---|\n")
+        self.commit("write(2026-03-01-bullets): resume bullets")
         code, out = self.run_tool("level", rel, "archived", "--today", "2026-03-02")
         self.assertEqual(code, 0, out)
         self.assertEqual(self.read(rel).splitlines()[:2], ["Kind: resume bullets", "Archived (user, 2026-03-02)"])
         self.assertEqual(out[-1], "commit: write(2026-03-01-bullets): resume bullets to Archived")
         self.run_tool("level", rel, "reference")
         self.assertNotIn("Archived", self.read(rel))
+
+    def test_archived_save_not_yet_committed(self):
+        """An Archived save writes its marker before the save's own commit (write › Save levels):
+        no files: or commit: line for a level commit, which would split the save in two."""
+        rel = "outputs/reports/2026-03-01-bullets.md"
+        self.write(rel, "Kind: resume bullets\n\n- Built a queue\n")
+        code, out = self.run_tool("level", rel, "archived", "--today", "2026-03-02")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.read(rel).splitlines()[:2], ["Kind: resume bullets", "Archived (user, 2026-03-02)"])
+        self.assertEqual(out, ["wrote: %s: Archived (user, 2026-03-02)" % rel,
+                               "not committed: %s has no commit yet: the save's own commit takes the marker"
+                               " (write step 10's Save and commit)" % rel])
+        rel = self.folder("2026-01-10-globex-sre")   # a new folder: archived.md beside its files
+        code, out = self.run_tool("level", rel, "archived", "--today", "2026-03-02")
+        self.assertEqual((code, out[0], out[-1].split(":")[0]), (0, "wrote: %s/archived.md" % rel, "not committed"), out)
 
     def test_subject_from_the_first_write_commit_else_the_folder(self):
         rel = self.folder("2026-01-10-globex-sre")
@@ -417,6 +440,12 @@ class Sent(Base):
         _, out = self.run_tool("sent", "general", "--before", "2026-03-02")
         self.assertEqual(out[0], "version: %s:outputs/resumes/general.tex" % self.v2)
         self.assertIn("changed that day: 0 commits", out)
+
+    def test_before_one_commit_that_day(self):
+        self.write("outputs/resumes/general.tex", RESUME + "% v3\n")
+        self.commit("v3", date="2026-03-04T10:00:00")
+        _, out = self.run_tool("sent", "general", "--before", "2026-03-04")
+        self.assertIn("changed that day: 1 commit", out)
 
     def test_record(self):
         folder = "outputs/applications/2026-03-05-acme-backend-engineer"
@@ -671,7 +700,7 @@ class Stale(Base):
         self.assertEqual(out[0], "saved: %s 2026-03-01 write(general): resume" % self.saved[:7])
         self.assertIn("cited changed: 0", out)
         self.assertIn("new entries: 0", out)
-        self.assertEqual(out[-1], "fresh: no entry general cites changed and no entry was added since %s" % self.saved[:7])
+        self.assertEqual(out[-1], "verdict: fresh")
 
     def test_cited_entry_changed(self):
         self.write("entries/2025-06-queue.md", ENTRY + "- one more\n")
@@ -742,15 +771,16 @@ class Stale(Base):
         self.commit("write(general): resume")
         code, out = self.run_tool("stale", "general")
         self.assertEqual(code, 1, out)
-        self.assertTrue(out[-1].startswith("no provenance: "), out)
+        self.assertTrue(out[-2].startswith("no provenance: "), out)
+        self.assertEqual(out[-1], "verdict: not compared")
 
     def test_an_empty_provenance_is_never_fresh(self):
         self.write("outputs/resumes/general.md", "")
         self.commit("write(general): resume")
         code, out = self.run_tool("stale", "general")
         self.assertEqual(code, 1, out)
-        self.assertEqual(out[-1], "no provenance: the save's outputs/resumes/general.md cites no entry,"
-                                  " so no cited entry was checked")
+        self.assertEqual(out[-2:], ["no provenance: the save's outputs/resumes/general.md cites no entry,"
+                                    " so no cited entry was checked", "verdict: not compared"])
 
     def test_a_provenance_citing_no_entry_is_never_fresh(self):
         self.write("outputs/resumes/general.md", TARGET.replace("entries/2025-06-queue.md", "Nowhere")
@@ -759,8 +789,8 @@ class Stale(Base):
         code, out = self.run_tool("stale", "general")
         self.assertEqual(code, 1, out)
         self.assertEqual(len([l for l in out if l.startswith("unresolved: ")]), 2, out)
-        self.assertTrue(out[-1].startswith("no provenance: "), out)
-        self.assertFalse(any(l.startswith("fresh: ") for l in out), out)
+        self.assertTrue(out[-2].startswith("no provenance: "), out)
+        self.assertEqual(out[-1], "verdict: not compared")
 
     def test_one_commit_is_singular(self):
         self.write("entries/2025-06-queue.md", ENTRY + "- one more\n")
@@ -805,6 +835,89 @@ class Edges(Base):
         self.commit("early", date="2026-02-01T00:30:00")
         _, out = self.run_tool("prior", "acme", "--type", "Why this company")
         self.assertIn("since 2026-02-01: 1 commit", out)
+
+
+class Contract(Base):
+    """The rows of #661 where application.py's copy behaved apart from the other tools'."""
+    def roles(self, *roles):
+        self.write("direction.md", "# Direction\n\n## Target roles, ranked\n"
+                   + "".join("%d. %s\n" % (i, r) for i, r in enumerate(roles, 1)))
+
+    def test_tier_counts_gap_lines_as_fit_and_scan_do(self):
+        self.roles("Backend engineer", "GAP: a second role", "Infra engineer")
+        self.write("outputs/resumes/backend.tex", RESUME)
+        code, out = self.run_tool("start", "--name", "n", "--from", "backend", "--family", "infra", "--tier", "3")
+        self.assertEqual(code, 0, out)
+        code, out = self.run_tool("start", "--name", "m", "--from", "backend", "--family", "backend", "--tier", "2")
+        self.assertEqual(code, 2, out)   # the GAP line is no role
+        self.assertEqual(application.fit.ranks(self.root), {1: False, 2: True, 3: False})
+
+    def test_start_lists_targets_in_a_root_with_glob_characters(self):
+        root = os.path.join(self.tmp, "log [1]")
+        os.makedirs(os.path.join(root, "outputs", "resumes"))
+        with open(os.path.join(root, "outputs", "resumes", "backend.tex"), "w", encoding="utf-8") as f:
+            f.write(RESUME)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            application.main(["--root", root, "start"])
+        self.assertEqual(out.getvalue().splitlines()[0], "target: backend | outputs/resumes/backend.tex")
+
+    def test_a_misnamed_marker_is_refused_with_its_rename(self):
+        rel = self.folder("2026-01-10-globex-sre")
+        self.write(rel + "/Archived.md", "Archived (user, 2026-01-01)\n")
+        self.assertFalse(application.logfiles.is_archived_folder(self.root, rel))
+        for level in ("archived", "reference"):
+            code, out = self.run_tool("level", rel, level, "--today", "2026-02-01")
+            self.assertEqual(code, 1, out)
+            self.assertIn("`git mv %s/Archived.md %s/archived.md`" % (rel, rel), out[0])
+        self.assertEqual(os.listdir(os.path.join(self.root, *rel.split("/"))).count("archived.md"), 0)
+
+    def test_tier_zero_is_no_place(self):
+        self.roles("Backend engineer")
+        self.write("outputs/resumes/backend.tex", RESUME)
+        code, out = self.run_tool("start", "--name", "n", "--from", "backend", "--family", "backend", "--tier", "0")
+        self.assertEqual(code, 2, out)
+        self.assertNotIn("null", out[0])
+
+    def test_an_empty_target_name_is_refused(self):
+        for args in (("sent", ""), ("stale", "")):
+            code, out = self.run_tool(*args)
+            self.assertEqual(code, 2, (args, out))
+            self.assertIn("not a target name", out[0])
+
+    def test_a_company_with_no_ascii_letter_is_named_posting(self):
+        code, out = self.run_tool("name", "--company", "日本電気", "--role", "Backend", "--today", "2026-01-01")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out[0], "name: 2026-01-01-posting-backend")
+        self.assertEqual(out[-1], "commit: write(posting): Backend")
+
+    def test_a_placeholder_line_is_no_older_form(self):
+        self.write("entries/2025-06-queue.md", "# Q\n\n## Past phrasings\n- none\n- GAP (ask the user)\n")
+        self.assertEqual(application.older_lines(self.root, "entries/2025-06-queue.md"), 0)
+
+    def test_entries_after_angle_on_every_python(self):
+        self.write("entries/2025-06-queue.md", ENTRY)
+        self.write(".build/drafts/n/resume.tex", RESUME)
+        code, out = self.run_tool("phrasings", ".build/drafts/n/resume.tex", "--angle", "backend", "entries/2025-06-queue.md")
+        self.assertEqual(code, 0, out)   # write steps 9 and 10 give this order; argparse before 3.12 left the entry over
+        self.assertIn("entry: entries/2025-06-queue.md: 2 lines for backend", out)
+        self.assertEqual(self.run_tool("phrasings", ".build/drafts/n/resume.tex", "--angle", "backend", "--bogus")[0], 2)
+
+    def test_at_cap_names_the_claims_two_wordings(self):
+        self.write("entries/2025-06-queue.md", """# Queue
+
+## Past phrasings
+- **backend:** "Reduced quote API p95 latency from 820 ms with a Redis cache" (outputs/applications/2026-01-05-a-b)
+- **backend:** "Brought quote API p95 latency down to 210 ms with Redis caching" (outputs/applications/2026-01-06-a-b)
+- **backend:** "Built a job queue on PostgreSQL" (outputs/applications/2026-01-07-a-b)
+""")
+        self.write(".build/drafts/n/resume.tex", RESUME)
+        code, out = self.run_tool("phrasings", ".build/drafts/n/resume.tex", "--angle", "backend", "entries/2025-06-queue.md")
+        self.assertEqual(code, 0, out)
+        caps = [l for l in out if l.startswith("  at cap:")]
+        self.assertEqual(len(caps), 1, out)   # bullet 1's claim; bullet 2's claim keeps one wording
+        self.assertTrue(caps[0].startswith("  at cap: entries/2025-06-queue.md: 4,5: "), out)
+        self.assertEqual(out[out.index(caps[0]) - 1], "  add: entries/2025-06-queue.md")
 
 
 if __name__ == "__main__":

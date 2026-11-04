@@ -45,11 +45,11 @@ Uncommitted Log changes: the Log's own files (LOG_PATHS) that git shows as chang
 listed, so a session settles what an earlier one left before it writes anything; the `next:` line
 points at tools/sync.py's `status` and `settle`. A file a run still going in another session wrote
 is that run's, and is left out of the settle: a live run is a `.build/runs/<key>/live` marker
-(tools/scan.py run) touched in the last LIVE_HOURS hours, and a file on disk whose time is at or
-after its `start` belongs to it (to the latest-started such run, when several are live). It prints
-as `log change (live run <key>): <XY> <path>`, with a `next:` line to leave it alone that names
-`scan.py end <key>` for a session that ended without saving. `done`'s `Not saved yet` leaves these
-files out too.
+(tools/scan.py run) touched in the last logfiles.LIVE_HOURS hours, in a folder named as a run key,
+and a file on disk whose time is at or after its `start` belongs to it (to the latest-started such
+run, when several are live). It prints as `log change (live run <key>): <XY> <path>`, with a
+`next:` line to leave it alone that names `scan.py end <key>` for a session that ended without
+saving. `done`'s `Not saved yet` leaves these files out too.
 
 This Log's git state, read only (tools/sync.py makes every change): `identity: ok (<email>)` or
 `identity: missing`, the repo-local user.email every commit needs (SETUP.md step 3); a missing one
@@ -124,7 +124,6 @@ Exit 1 when the check ends the run (a `next: stop:` line, or this Python is too 
 argument, 0 otherwise. -h or --help prints this text and exits 0. Standard library only.
 Python 3.11+ (tomllib); an older Python gets as far as saying so, and where a newer one is.
 """
-import datetime
 import glob
 import json
 import os
@@ -886,54 +885,11 @@ def tool_cmd(root, name):
     return '%s -I "%s"' % (python_cmd(), os.path.join(root, "tools", name))
 
 
-LIVE_HOURS = 2   # a run's live marker untouched this long has expired (scan.py run --touch refreshes it)
-
-
-def live_runs(root):
-    """[(start, key)] of the runs still going, oldest first: each .build/runs/<key>/live touched in the
-    last LIVE_HOURS hours, `start` its start time in seconds since the epoch."""
-    runs = []
-    for path in glob.glob(os.path.join(root, ".build", "runs", "*", "live")):
-        try:
-            if time.time() - os.path.getmtime(path) > LIVE_HOURS * 3600:
-                continue
-            with open(path, encoding="utf-8") as f:
-                start = datetime.datetime.fromisoformat(json.load(f)["start"]).timestamp()
-        except (OSError, ValueError, KeyError, TypeError):
-            continue   # expired, gone, or unreadable: no live run
-        runs.append((start, os.path.basename(os.path.dirname(path))))
-    return sorted(runs)
-
-
-def live_run(root, path, runs):
-    """The key of the latest-started live run that started at or before path's time on disk, or None."""
-    try:
-        mtime = os.path.getmtime(os.path.join(root, path))
-    except OSError:   # a deleted file has no time: an earlier session's
-        return None
-    keys = [key for start, key in runs if int(start) <= mtime]
-    return keys[-1] if keys else None
-
-
 def check_uncommitted(ctx):
     """One line per Log file with uncommitted changes, a live run's marked as its; nothing when the
     Log is clean or git fails."""
-    try:
-        p = subprocess.run(["git", "-C", ctx.root, "-c", "core.quotepath=false", "status", "--porcelain",
-                            "-z", "--untracked-files=all", "--"] + LOG_PATHS,
-                           capture_output=True, encoding="utf-8", errors="replace", timeout=30)
-    except (OSError, subprocess.TimeoutExpired):
-        return [], [], False
-    if p.returncode != 0:
-        return [], [], False
-    files, entries, runs = [], iter(p.stdout.split("\0")), live_runs(ctx.root)
-    for entry in entries:
-        if len(entry) > 3:
-            status, path = entry[:2], entry[3:]
-            key = live_run(ctx.root, path, runs) if runs else None
-            if "R" in status or "C" in status:   # a rename's -z entry is followed by its old path
-                path += " (from %s)" % next(entries, "?")
-            files.append((status.strip(), path, key))
+    found = logfiles.uncommitted(ctx.root)
+    files = [(status, path + (" (from %s)" % old if old else ""), key) for status, path, old, key in found or []]
     if not files:
         return [], [], False
     live = [f for f in files if f[2]]
@@ -956,7 +912,7 @@ def check_uncommitted(ctx):
                      " commit of this session, and tell the user so in one line. A run stays live for %d hours after"
                      " its last draft; when the user says its session has ended without saving, `%s end <key>`"
                      " ends it, and the next check offers its files as an earlier session's."
-                     % (", ".join(keys), LIVE_HOURS, scan))
+                     % (", ".join(keys), logfiles.LIVE_HOURS, scan))
     return lines, nexts, False
 
 
@@ -1340,8 +1296,9 @@ class Guide:
         """The first flows row of a mode, or None."""
         return next((r for r in self.flows if r["mode"] == mode), None)
 
-    def said(self, mode):
-        example = self.modes.get(mode, {}).get("example")
+    def said(self, mode, example=True):
+        """`<mode>` (say "<its example>"), or `<mode>` alone with no example (or example=False)."""
+        example = example and self.modes.get(mode, {}).get("example")
         return '`%s` (say "%s")' % (mode, example) if example else "`%s`" % mode
 
 
@@ -1461,9 +1418,9 @@ def stale_nexts(root, guide, base, example=True):
     app = tools_module("application")
     titles = entry_titles(root)
     held = set((git_out(root, "ls-tree", "-r", "-z", "--name-only", base, "--", "entries/") or "").split("\0"))
-    said = guide.said("audit") if example else "`audit`"
+    said = guide.said("audit", example)
     out = []
-    for name in app.targets(root):
+    for name in logfiles.targets(root):
         try:
             res = app.stale(root, name)
         except app.AppError:
@@ -1492,10 +1449,10 @@ def added_phrasings(root, base, cite):
             path, header = None, True
         elif header and line.startswith("+++ "):   # the file's header, not an added line
             path, header = (line[6:] if line.startswith("+++ b/") else None), False
-        elif line.startswith("+") and path and line.rstrip().endswith("(%s)" % cite):
-            got = tools_module("entries").phrasings("## Past phrasings\n" + line[1:])
-            if got:
-                out.append((re.sub(r"\s*\([^()]*\)\s*$", "", got[0][1]).strip("\"“” "), path))
+        elif line.startswith("+") and path:
+            m = tools_module("entries").PHRASING_PARTS.fullmatch(line[1:].strip())
+            if m and tools_module("check_save").cites(m.group(3), cite):
+                out.append((m.group(2), path))
     return out
 
 
@@ -1504,33 +1461,39 @@ def feed_nexts(root, base):
     (#614): Update, the bullets it added to Past phrasings that its role family's Target version
     lacks (each below entries.py's SIMILAR to all of that version's bullets); Create, when that
     family has no Target version yet; Direction, when the role is not among the Target roles. The
-    family and the role's tier are the ones `application.py start` recorded in the draft folder.
-    None for an Archived save, without that record, or when <base> is None."""
+    family and the role's tier are the ones `application.py start` recorded in the draft folder; a
+    record that lacks one of its lines gets a `Not read:` line in their place. None for an Archived
+    save, without that record, or when <base> is None."""
     if base is None:
         return []
-    app, entries = tools_module("application"), tools_module("entries")
+    app, entries, check_save = tools_module("application"), tools_module("entries"), tools_module("check_save")
     added = git_out(root, "-c", "core.quotepath=false", "diff", "--name-only", "--diff-filter=A", "%s..HEAD" % base,
                     "--", app.APPLICATIONS + "/")
     titles = None
     out = []
     for name in sorted({p.split("/")[2] for p in (added or "").splitlines() if p.count("/") >= 3}):
         rel = "%s/%s" % (app.APPLICATIONS, name)
-        rec = app.start_record(root, name) or {}
-        if os.path.isfile(os.path.join(root, *rel.split("/"), "archived.md")) or not {"from", "family", "tier"} <= set(rec):
+        rec = logfiles.start_record(root, name)
+        if rec is None or logfiles.is_archived_folder(root, rel):
             continue
-        subject = git_out(root, "log", "-1", "--format=%s", "%s..HEAD" % base, "--", rel) or ""
-        role = re.sub(r"^write\([^)]*\):\s*", "", subject) if subject.startswith("write(") else name
+        if logfiles.start_record_lacks(rec):
+            out.append("Not read: %s lacks %s (application.py start --family --tier writes it), so %s gets no"
+                       " Target version or Direction offer." % (logfiles.START_RECORD % name,
+                                                                ", ".join(logfiles.start_record_lacks(rec)), rel))
+            continue
+        subject = git_out(root, "log", "--format=%s", "--reverse", "%s..HEAD" % base, "--", rel) or ""
+        role = next((m[1] for m in map(check_save.parse_write_subject, subject.splitlines()) if m), name)
         family = rec["family"]
-        if family in app.targets(root):
+        if family in logfiles.targets(root):
             have = [(None, app.wording(i)) for _, i in logfiles.tex_bullets(
-                app.read(root, "outputs/resumes/%s.tex" % family))]
+                app.read(root, "%s/%s.tex" % (logfiles.RESUMES, family)))]
             new = [(w, path) for w, path in added_phrasings(root, base, rel)
                    if all(entries.similar((None, w), h) < entries.SIMILAR for h in have)]
             if new:
                 titles = titles or entry_titles(root)
                 out.append('Next: `write` (say "update my %s resume with the new bullets"). Target version `%s` lacks'
-                           ' %d bullet%s this save added to Past phrasings: %s. A target run for `%s` decides which'
-                           ' to bring in.' % (family, family, len(new), "" if len(new) == 1 else "s", ", ".join(
+                           ' %s this save added to Past phrasings: %s. A target run for `%s` decides which'
+                           ' to bring in.' % (family, family, logfiles.plural(len(new), "bullet"), ", ".join(
                                '"%s" (%s, %s)' % (w, titles.get(path, path), path) for w, path in new), family))
         elif family != "general" or not tools_module("config").target_roles(root):
             out.append('Next: `write` (say "make my first %s resume from the %s application"). No Target version is'
@@ -1549,10 +1512,10 @@ def rank_nexts(root, family):
     one) has no Target version, the resume handed out where there is no posting. <family> is that
     role's family's target name, as application.py start's --family names it; None while
     outputs/resumes/ holds no Target version. None when the target roles are empty."""
-    roles = tools_module("config").target_roles(root)
-    if not roles or family in tools_module("application").targets(root):
+    role = tools_module("config").top_role(root)
+    if not role or family in logfiles.targets(root):
         return []
-    role = tools_module("config").role_name(roles[0])
+    role = tools_module("config").role_name(role)
     return ['Next: `write` (say "make a %s resume"). Your top target role, %s, has no Target version, and it is'
             ' what you hand out where there is no posting, as at this ranking\'s event: a target run creates one.'
             % (role, role)]
@@ -1605,14 +1568,14 @@ def done(argv, root=ROOT):
     if (len(args) != 1 or args[0] not in known
             or ("--for" in opts and (args[0] != "setup" or opts["--for"] not in MODES))
             or (no_posting and args[0] != "fit")
-            or ("--family" in opts and (args[0] != "rank" or logfiles.ascii_slug(opts["--family"]) != opts["--family"]))):
+            or ("--family" in opts and (args[0] != "rank" or not logfiles.is_target_name(opts["--family"])))):
         return 2, ["usage: %s -I tools/check.py done <mode> [--since <sha>@<time>] [--for <mode>] [--no-posting]"
                    " [--family <target>] (--for with setup only, --no-posting with fit only, --family with rank"
                    " only, a lowercase target name); <mode> is one of %s" % (python_cmd(), ", ".join(sorted(known)))]
     mode = args[0]
     if UNATTENDED:
         return 0, []
-    versions = tools_module("application").targets(root) if mode == "rank" else []
+    versions = logfiles.targets(root) if mode == "rank" else []
     if versions and "--family" not in opts and tools_module("config").target_roles(root):
         return 2, ["usage: done rank needs --family <target>, the Target version of your first target role's family"
                    " (or the name a target run for it would take), while outputs/resumes/ holds one: %s"

@@ -11,7 +11,7 @@ The parity test compares the steps that run a test or a script: `python -I <scri
 and fails on a run: line naming python, sh or the like in any other form, and on a path filter
 other than `paths:` under `pull_request:`.
 """
-import importlib.util, os, re, shutil, subprocess, sys, tempfile, unittest
+import contextlib, importlib.util, io, os, re, shutil, subprocess, sys, tempfile, time, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS = os.path.dirname(HERE)
@@ -148,15 +148,16 @@ class Typical(unittest.TestCase):
         # tools/logfiles.py is imported by every tool tools/entries.py is, and by tools/sync.py and
         # tools/config.py (which test_guide.py and test_upgrade.py load too), tools/resume.py and tools/chat_export.py
         # (which test_perplexity.py loads)
-        both = ["tools/export-template.sh", "tools/tests/test_chat_export.py", "tools/tests/test_check_run.py",
+        # (tools/chat_export.py imports logfiles.py but not entries.py)
+        both = ["tools/tests/test_check_run.py",
                 "tools/tests/test_check_save.py", "tools/tests/test_deny_coverage.py", "tools/tests/test_logfiles.py",
                 "tools/tests/test_entries.py"]
-        self.assertEqual(scripts(runs(["tools/entries.py"])), both + [
-            "tools/tests/test_check.py", "tools/setup.sh", "tools/setup.ps1", "tools/tests/test_scan.py",
+        self.assertEqual(scripts(runs(["tools/entries.py"])), ["tools/export-template.sh"] + both + [
+            "tools/tests/test_check.py", "tools/tests/test_scan.py",
             "tools/tests/test_fit.py", "tools/tests/test_dashboard.py", "tools/tests/test_writing_lint.py",
             "tools/tests/test_application.py"])
-        self.assertEqual(scripts(runs(["tools/logfiles.py"])), both + [
-            "tools/tests/test_config.py", "tools/tests/test_check.py", "tools/setup.sh", "tools/setup.ps1",
+        self.assertEqual(scripts(runs(["tools/logfiles.py"])), ["tools/export-template.sh", "tools/tests/test_chat_export.py"] + both + [
+            "tools/tests/test_config.py", "tools/tests/test_check.py",
             "tools/tests/test_resume.py", "tools/tests/test_guide.py", "tools/tests/test_skill_lint.py", "tools/skill_lint.py", "tools/tests/test_scan.py",
             "tools/tests/test_fit.py", "tools/tests/test_dashboard.py", "tools/tests/test_sponsorship.py", "tools/tests/test_perplexity.py",
             "tools/tests/test_upgrade.py", "maintainer/tests/test_harness.py",
@@ -179,6 +180,35 @@ class Typical(unittest.TestCase):
         got = runs(["tools/setup.ps1"])
         self.assertTrue(any(l.startswith("do: run SETUP.md step 5") for l in got))
         self.assertIn("tools/setup.ps1", scripts(got))
+
+    def test_setup_parse_only_for_the_scripts(self):
+        self.assertNotIn("tools/setup.sh", scripts(runs(["tools/check.py"])))
+        got = runs([".github/workflows/machine-check.yml"])
+        self.assertIn("tools/setup.ps1", scripts(got))
+        self.assertFalse(any(l.startswith("do: ") for l in got), got)
+
+    def test_chat_export_and_check_run_apart(self):
+        # check_run.py imports chat_export.py; chat_export.py imports neither of them
+        self.assertEqual(scripts(runs(["tools/check_run.py"]))[1:],
+                         ["tools/tests/test_check_run.py", "tools/tests/test_check_save.py"])
+        self.assertEqual(scripts(runs(["tools/tests/fixtures/x.json"])),
+                         ["tools/export-template.sh", "tools/tests/test_chat_export.py"])
+        self.assertEqual(scripts(runs(["tools/chat_export.py"]))[:4],
+                         ["tools/export-template.sh", "tools/tests/test_chat_export.py",
+                          "tools/tests/test_check_run.py", "tools/tests/test_check_save.py"])
+
+    def test_check_run_and_save_imports(self):
+        # check_run.py imports fit.py, check_save.py imports sponsorship.py, and dashboard.py inside one function
+        for path in ("tools/fit.py", "tools/sponsorship.py", "tools/dashboard.py"):
+            got = scripts(runs([path]))
+            self.assertIn("tools/tests/test_check_run.py", got, path)
+            self.assertIn("tools/tests/test_check_save.py", got, path)
+
+    def test_closing_refs_apart(self):
+        self.assertNotIn("maintainer/tests/test_closing_refs.py", scripts(runs(["tools/deny_coverage.py"])))
+        got = scripts(runs([".github/workflows/closing_refs.py"]))
+        self.assertIn("maintainer/tests/test_closing_refs.py", got)
+        self.assertNotIn("maintainer/tests/test_coord.py", got)
 
     def test_resume(self):
         got = runs(["tools/resume.py"])
@@ -256,6 +286,119 @@ class InATemplate(unittest.TestCase):
             f.write("#!/bin/sh\n")
         with self.assertRaises(checks_for.ChecksError):
             checks_for.report(["tools/x.py"], self.root)
+
+
+class TestNext(unittest.TestCase):
+    """A change to upgrade-next.* prints the test-next.sh step only once that script is in the repo."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        os.makedirs(os.path.join(self.root, "tools"))
+        os.makedirs(os.path.join(self.root, "docs", "upgrades"))
+        shutil.copy(os.path.join(TOOLS, "export-template.sh"), os.path.join(self.root, "tools"))
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def steps(self):
+        return [l for l in checks_for.report(["docs/upgrades/upgrade-next.md"], self.root) if "test-next.sh" in l]
+
+    def test_only_when_present(self):
+        self.assertEqual(self.steps(), [])
+        open(os.path.join(self.root, "docs", "upgrades", "test-next.sh"), "w").close()
+        got = self.steps()
+        self.assertEqual(len(got), 1)
+        self.assertTrue(got[0].startswith("do: run docs/upgrades/test-next.sh"), got)
+
+
+class Run(unittest.TestCase):
+    """--run: the py and sh checks side by side, each one's result in order, then the rest."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        os.makedirs(os.path.join(self.root, "tools"))
+        shutil.copy(os.path.join(TOOLS, "export-template.sh"), os.path.join(self.root, "tools"))
+        self.groups = checks_for.GROUPS
+        self.write("pass.py", "print('OK')\n")
+        self.write("fail.py", "import sys\nprint('boom')\nsys.exit(1)\n")
+        self.write("skip.py", "print('OK (skipped=1)')\n")
+
+    def tearDown(self):
+        checks_for.GROUPS = self.groups
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def write(self, rel, text):
+        with open(os.path.join(self.root, rel), "w", newline="\n") as f:
+            f.write(text)
+
+    def run_checks(self, checks, jobs=4):
+        checks_for.GROUPS = [("g", None, ["x"], checks)]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = checks_for.run(["x"], self.root, jobs)
+        return code, out.getvalue().splitlines()
+
+    def test_results_in_order_and_the_rest_after(self):
+        code, lines = self.run_checks([checks_for.py("pass.py"), checks_for.py("fail.py"),
+                                       checks_for.py("skip.py", "one skipped"),
+                                       ("ps", "$e", "it prints nothing"), checks_for.do("by hand")])
+        self.assertEqual(code, 1)
+        self.assertEqual(lines[0], "not engine: x")
+        self.assertRegex(lines[1], r"^ok: +\d+s \S.* -I pass\.py: OK$")
+        self.assertRegex(lines[2], r"^FAIL: +\d+s \S.* -I fail\.py: boom$")
+        self.assertEqual(lines[3], "      | boom")
+        self.assertRegex(lines[4], r"^ok: .* skip\.py: OK \(skipped=1\)$")
+        self.assertEqual(lines[5], "      check: one skipped")
+        self.assertTrue(lines[6].startswith("ran 3 checks side by side in "), lines[6])
+        self.assertIn("1 failed", lines[6])
+        self.assertEqual(lines[7:], ["run: $e", "check: it prints nothing", "do: by hand"])
+
+    def test_all_pass(self):
+        code, lines = self.run_checks([checks_for.py("pass.py")])
+        self.assertEqual(code, 0)
+        self.assertTrue(lines[-1].endswith(": all exited 0"), lines)
+
+    def test_side_by_side(self):
+        self.write("slow.py", "import time\ntime.sleep(4)\nprint('OK')\n")
+        self.write("slow2.py", "import time\ntime.sleep(4)\nprint('OK')\n")
+        start = time.monotonic()
+        code, _ = self.run_checks([checks_for.py("slow.py"), checks_for.py("slow2.py")], jobs=2)
+        self.assertEqual(code, 0)
+        self.assertLess(time.monotonic() - start, 7.5)   # one after the other: 8s and more
+
+    @unittest.skipUnless(checks_for.find_sh()[0], "no sh")
+    def test_sh_with_scratch(self):
+        self.write("mk.sh", 'mkdir "$1" && echo "note: made $1" && echo OK\n')
+        code, lines = self.run_checks([checks_for.sh("sh mk.sh <scratch>/out", "it made the folder")])
+        self.assertEqual(code, 0, lines)
+        self.assertRegex(lines[1], r"^ok: +\d+s sh mk\.sh <scratch>/out: OK$")
+        made = lines[2].strip()[len("note: made "):]
+        self.assertTrue(lines[2].startswith("      note: made ") and made.endswith("/out"), lines)
+        self.assertFalse(os.path.exists(made))   # the scratch folder is removed
+
+    @unittest.skipUnless(checks_for.find_sh()[0], "no sh")
+    def test_scratch_with_a_space(self):
+        self.write("mk.sh", '[ $# = 1 ] && mkdir "$1" && echo OK\n')
+        spaced = os.path.join(self.root, "a b")
+        os.makedirs(spaced)
+        real = checks_for.tempfile.mkdtemp
+        checks_for.tempfile.mkdtemp = lambda **kw: spaced
+        try:
+            code, lines = self.run_checks([checks_for.sh("sh mk.sh <scratch>/out", "it made the folder")])
+        finally:
+            checks_for.tempfile.mkdtemp = real
+        self.assertEqual(code, 0, lines)   # mk.sh got one argument
+
+    def test_only_steps_by_hand(self):
+        code, lines = self.run_checks([checks_for.do("by hand")])
+        self.assertEqual((code, lines), (0, ["not engine: x", "do: by hand"]))
+
+    def test_nothing_to_run(self):
+        checks_for.GROUPS = []
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(checks_for.run(["x"], self.root, 1), 0)
+        self.assertEqual(out.getvalue().splitlines(), ["not engine: x", "run: none (no check covers these paths)"])
 
 
 class FromGit(unittest.TestCase):

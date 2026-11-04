@@ -185,6 +185,15 @@ class ConfigTest(unittest.TestCase):
         with open(os.path.join(self.root, "README.md"), encoding="utf-8") as f:
             return f.read()
 
+    def test_front_page_heading_reads_as_entries_py_reads_it(self):
+        """#651 C1: `##  Entries` (two spaces) is the Entries heading here too."""
+        self.run_tool("init")
+        self.copy_front_page()
+        page = self.page().replace("## Entries", "##  Entries", 1)
+        with open(os.path.join(self.root, "README.md"), "w", encoding="utf-8") as f:
+            f.write(page)
+        self.assertEqual(config.front_page_state(self.root), "template")
+
     def test_trim_writes_the_personal_index(self):
         self.run_tool("init")
         self.copy_front_page()

@@ -4,7 +4,7 @@ built in a temporary directory.
 
   python3 -I tools/tests/test_logfiles.py
 """
-import ast, importlib.util, os, shutil, subprocess, sys, tempfile, unittest
+import ast, datetime, importlib.util, os, shutil, subprocess, sys, tempfile, time, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.join(HERE, "..", "logfiles.py")
@@ -86,6 +86,7 @@ class Tables(unittest.TestCase):
         self.assertEqual(tables[1].rows, [(9, ["2031-01-01", "Acme | Co"])])
         self.assertEqual(tables[1].dicts(), [{"date": "2031-01-01", "company": "Acme | Co"}])
         self.assertEqual(tables[2].rows, [])
+        self.assertEqual([t.end for t in tables], [3, 10, 12])   # #651 C2: the last line, an empty row too
 
     def test_provenance_rows(self):
         text = ("# Provenance\n\n| Claim | Entry › section | Source |\n|---|---|---|\n"
@@ -122,6 +123,23 @@ class Sections(unittest.TestCase):
         self.assertEqual(logfiles.heading_names(text), {"dead-ends": "Dead ends", "dead-ends-1": "Dead ends",
                                                         "c--go": "C++ / Go!", "done": "Done"})
         self.assertEqual(logfiles.anchor("  What I Did  "), "what-i-did")
+
+    def test_heading_forms_and_comments(self):
+        """#651 C1: one rule for a section's heading: spaces or tabs around it, a CRLF line end, and
+        no heading inside an HTML comment, as the Entries section reads it."""
+        text = "# Log\n<!--\n## Entries\nold\n-->\n##  Entries \t\r\nrow\n<!-- ## Other -->\n# not an end\n## Next\n"
+        self.assertEqual(logfiles.section(text, "Entries"), "row\n<!-- ## Other -->\n# not an end\n")
+        self.assertEqual(logfiles.heading_re("Entries").search(logfiles.blank_comments(text)).group(0), "##  Entries \t\r")
+        lines = text.splitlines(keepends=True)
+        self.assertEqual(logfiles.section_lines(lines, "Entries"), (5, 9))
+        self.assertEqual(logfiles.section_lines(lines, "Next"), (9, 10))
+        self.assertEqual(logfiles.section_lines(["## Last"], "Last"), (0, 1))
+        self.assertIsNone(logfiles.section_lines(lines, "Other"))
+
+    def test_outside_code(self):
+        """#651 C10: the fenced-code rule heading_names and entries.py diff share."""
+        lines = ["a", "````md", "```", "# in code", "````", "~~~", "b", "~~~", "c", "```", "unclosed"]
+        self.assertEqual(list(logfiles.outside_code(lines)), [(0, "a"), (8, "c")])
 
 
 class Names(unittest.TestCase):
@@ -164,6 +182,51 @@ class Names(unittest.TestCase):
         self.assertEqual(logfiles.tex_bullets("\\begin{itemize}\n  \\item No heading above\n\\end{itemize}\n"
                                               "\\section*{Projects \\& Skills}\n  \\item Built a cache\n"),
                          [(2, "No heading above"), (5, "Built a cache")])
+
+    def test_tex_comments(self):
+        """#651 C4: \\\\% is a line break, then a comment; a % in an \\href address is none."""
+        tex = ("\\item See \\href{https://example.com/a%20b}{the demo} % a note\n"
+               "\\item Line one\\\\% gone\n\\item Grew 40\\% a year\n")
+        self.assertEqual(logfiles.tex_items(tex), [
+            (1, "See \\href{https://example.com/a%20b}{the demo}"), (2, "Line one\\\\"), (3, "Grew 40\\% a year")])
+        self.assertEqual(logfiles.tex_comment_at("\\url{x%y} 5% off"), 11)
+        self.assertIsNone(logfiles.tex_comment_at("40\\% off"))
+
+    def test_tex_sections(self):
+        """#651 C5: a section is read in the body only, and one with bullets is no Skills section."""
+        tex = ("\\newcommand{\\skills}{\\section*{Skills}}\n\\begin{document}\n"
+               "\\begin{itemize}\n  \\item Built a cache\n\\end{itemize}\n"
+               "\\section*{Experience and Skills}\n  \\item Ran the queue\n\n\\section{Technical Skills}\n"
+               "  \\item \\textbf{Go:} yes\n")
+        self.assertEqual(logfiles.tex_sections(tex), [(6, "Experience and Skills"), (9, "Technical Skills")])
+        self.assertEqual(logfiles.tex_bullets(tex), [(4, "Built a cache"), (7, "Ran the queue")])
+        self.assertEqual([logfiles.is_skills(t) for t in ("Experience and Skills", "Technical Skills", "Education")],
+                         [False, True, False])
+
+    def test_tex_line_break(self):
+        """#651 C6: every form of a line break inside a source line."""
+        self.assertEqual(logfiles.TEX_LINE_BREAK.split("a\\\\b\\\\*c\\\\[2pt]d\\\\ [2pt]e\\newline f\\newlines"),
+                         ["a", "b", "c", "d", "e", " f\\newlines"])
+
+
+class ArgPath(unittest.TestCase):
+    def test_root_then_the_current_folder(self):
+        """#651 C8: a relative path is read against root first, then the current folder."""
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as here:
+            for folder, name in ((root, "both.md"), (here, "both.md"), (here, "here.md")):
+                open(os.path.join(folder, name), "w").close()
+            saved = os.getcwd()
+            try:
+                os.chdir(here)
+                same = lambda p: os.path.normcase(os.path.realpath(p))
+                self.assertEqual(same(logfiles.arg_path(root, "both.md")), same(os.path.join(root, "both.md")))
+                self.assertEqual(same(logfiles.arg_path(root, "here.md")), same(os.path.join(here, "here.md")))
+                self.assertIsNone(logfiles.arg_path(root, "none.md"))
+                self.assertIsNone(logfiles.arg_path(root, "both.md", os.path.isdir))
+                full = os.path.join(here, "here.md")
+                self.assertEqual(logfiles.arg_path(root, full), full)
+            finally:
+                os.chdir(saved)
 
 
 class Files(unittest.TestCase):
@@ -246,6 +309,20 @@ class Git(unittest.TestCase):
         finally:
             os.environ["PATH"] = path
 
+    def test_git_blob_in_a_log_below_the_top(self):
+        """#651 C9: a path is read from the Log's root, a folder below the git top level."""
+        log = os.path.join(self.root, "log")
+        os.makedirs(log)
+        for folder, text in ((self.root, "top"), (log, "log")):
+            with open(os.path.join(folder, "README.md"), "w") as f:
+                f.write(text)
+        self.run_git("add", "-A")
+        self.run_git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "x")
+        self.assertEqual(logfiles.git_blob(log, "HEAD", "README.md"), b"log")
+        self.assertEqual(logfiles.git_blob(log, "", "./README.md"), b"log")   # the index
+        self.assertEqual(logfiles.git_blob(self.root, "HEAD", "README.md"), b"top")
+        self.assertIsNone(logfiles.git_blob(log, "HEAD", "log/README.md"))
+
     def test_local_identity(self):
         self.assertEqual(logfiles.local_identity(self.root), (None, None))
         self.run_git("config", "--local", "user.email", "me@example.com")
@@ -292,6 +369,98 @@ class ShellArg(unittest.TestCase):
             self.assertEqual(logfiles.shell_arg(text), '"%s"' % text, text)
         both = logfiles.shell_arg("O'Neil $x")
         self.assertEqual(both, "'O''Neil $x'" if os.name == "nt" else "'O'\\''Neil $x'")
+
+
+class TargetContract(unittest.TestCase):
+    """The Target versions, target names and posting slugs every tool shares (#661)."""
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp)
+
+    def write(self, root, rel, text):
+        path = os.path.join(root, *rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def test_targets_in_a_root_with_glob_characters(self):
+        root = os.path.join(self.tmp, "log [1]")
+        self.write(root, "outputs/resumes/backend.tex", "x")
+        self.assertEqual(logfiles.targets(root), ["backend"])
+
+    def test_application_records_in_a_root_with_glob_characters(self):
+        root = os.path.join(self.tmp, "log [1]")
+        self.write(root, "outputs/applications/2026-09-01-acme-swe/posting.md", "https://acme.com/j/1\n")
+        self.assertEqual([w for _, _, w in logfiles.application_records(root)], ["outputs/applications/2026-09-01-acme-swe"])
+
+    def test_a_part_another_target_inputs_is_no_target(self):
+        root = os.path.join(self.tmp, "log")
+        self.write(root, "outputs/resumes/backend.tex", "\\input{header}\n")
+        self.write(root, "outputs/resumes/header.tex", "% shared header\n")
+        self.write(root, "outputs/resumes/pm.tex", "x")
+        self.assertEqual(logfiles.targets(root), ["backend", "pm"])
+        self.write(root, "outputs/resumes/header.pdf", "")   # built on its own: a resume after all
+        self.assertEqual(logfiles.targets(root), ["backend", "header", "pm"])
+
+    def test_target_names(self):
+        for name, ok in (("backend", True), ("ml-infra", True), ("", False), ("Backend", False), ("a b", False)):
+            self.assertEqual(logfiles.is_target_name(name), ok, name)
+
+    def test_posting_slug(self):
+        self.assertEqual(logfiles.posting_slug("Acme, Inc."), "acme-inc")
+        self.assertEqual(logfiles.posting_slug("日本"), "posting")
+
+    def test_start_record(self):
+        text = logfiles.start_record_text("outputs/resumes/backend.tex", "backend", "1")
+        self.assertEqual(text, "from: outputs/resumes/backend.tex\nfamily: backend\ntier: 1\n")
+        self.assertEqual(logfiles.start_record_lacks(logfiles.parse_start_record(text)), [])
+        self.assertEqual(logfiles.start_record_lacks(logfiles.parse_start_record("from: x\n")), ["family:", "tier:"])
+
+    def test_plural(self):
+        self.assertEqual([logfiles.plural(n, "commit") for n in (0, 1, 2)], ["0 commits", "1 commit", "2 commits"])
+
+
+class RunFolder(unittest.TestCase):
+    """A posting run's folder, key and live marker, as scan.py writes them and check.py reads them (#662)."""
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp)
+
+    def marker(self, root, key, ago=0):
+        path = os.path.join(root, *logfiles.run_folder(key).split("/"), logfiles.LIVE)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        logfiles.write_live(path, datetime.datetime.now().astimezone().isoformat(timespec="seconds"), None)
+        os.utime(path, (time.time() - ago,) * 2)
+        return path
+
+    def test_run_key_and_folder(self):
+        self.assertEqual(logfiles.run_key("2026-10-22", "041500"), "2026-10-22-041500")
+        self.assertEqual(logfiles.run_key("2026-10-22", "041500", 3), "2026-10-22-041500-3")
+        m = logfiles.RUN_KEY.match("2026-10-22-041500-3")
+        self.assertEqual(m.group("date", "hh", "mm", "ss", "n"), ("2026-10-22", "04", "15", "00", "3"))
+        for bad in ("2026-10-22", "2026-10-22-0415", "notes", "2026-10-22-041500-"):
+            self.assertIsNone(logfiles.RUN_KEY.match(bad), bad)
+        self.assertEqual(logfiles.run_folder("2026-10-22-041500"), ".build/runs/2026-10-22-041500")
+
+    def test_live_runs_in_a_root_with_glob_characters(self):
+        root = os.path.join(self.tmp, "log [1]")
+        self.marker(root, "2026-10-22-041500")
+        self.assertEqual([k for _, k in logfiles.live_runs(root)], ["2026-10-22-041500"])
+
+    def test_a_folder_named_as_no_run_key_holds_no_live_run(self):
+        root = os.path.join(self.tmp, "log")
+        self.marker(root, "notes")
+        self.marker(root, "2026-10-22-041500")
+        self.assertEqual([k for _, k in logfiles.live_runs(root)], ["2026-10-22-041500"])
+
+    def test_an_expired_or_unreadable_marker_is_no_live_run(self):
+        root = os.path.join(self.tmp, "log")
+        old = self.marker(root, "2026-10-22-041500", ago=logfiles.LIVE_HOURS * 3600 + 60)
+        self.assertIsNone(logfiles.read_live(old))
+        bad = self.marker(root, "2026-10-22-051500")
+        logfiles.write_text(bad, "not json\n")
+        self.assertIsNone(logfiles.read_live(bad))
+        self.assertEqual(logfiles.live_runs(root), [])
 
 
 if __name__ == "__main__":

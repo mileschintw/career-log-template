@@ -241,7 +241,7 @@ class CheckTest(Log):
         self.write("entries/2031-03-gear.md", entry(title="Gear Cutter | v2", period="2031-03 – 2031-04"))
         self.readme()
         self.assertEqual(self.check(), (0, ["OK: 3 entries, no findings"]))
-        fix = "run python3 -I <root>/tools/entries.py readme --root <root>"
+        fix = "run %s -I <root>/tools/entries.py readme --root <root>" % ("py -3" if os.name == "nt" else "python3")
         # #574: check regenerates the table and compares; a hand edit is a finding naming the command
         self.write("README.md", self.read_file("README.md").replace("[Widget Sorter](", "[Widget Sorter (old)]("))
         code, lines = self.check()
@@ -537,6 +537,15 @@ class ShapeEdgeTest(Log):
             "check: output citation: %s:19: 見outputs/resumes/x.tex，來自claude-code-2031-01-05-x U9，見sources/gone/*" % W_PATH])
         _, lines = self.run_tool("check", "--root", self.root, "--today", TODAY, "--consolidated", W_PATH)
         self.assertIn("contribution category missing: %s I did:" % W_PATH, lines)
+
+    def test_a_cited_glob_in_a_root_with_glob_characters(self):
+        """#671: a cited glob path resolves in a Log root whose name holds glob characters."""
+        root = os.path.join(self.root, "log [1]")
+        os.makedirs(os.path.join(root, "sources", "notes"))
+        with open(os.path.join(root, "sources", "notes", "a.md"), "w", encoding="utf-8") as f:
+            f.write("x")
+        self.assertEqual(entries.unresolved_keys(root, "B (sources/notes/*)"), [])
+        self.assertEqual(entries.unresolved_keys(root, "B (sources/gone/*)"), ["sources/gone/* (no such file)"])
 
     def test_root_forms(self):
         self.write(W_PATH, entry())
@@ -1086,6 +1095,12 @@ class StoryLeadsTest(Log):
         self.assertEqual(rest[:-1], self.candidates("Leading a team"))
         self.assertTrue(rest[-1].startswith("next: now, show the user each question's proposed type"), rest[-1])
         self.assertIn("then end your turn", rest[-1])
+        # the three Lead: forms --check reads, so interview step 3 need not spell them (#651 D13)
+        self.assertTrue(rest[-1].endswith(
+            "; each question's one Lead: line is `Lead: <the Story's key, as this command printed it> (user, <the date"
+            " of their answer>)` for a lead the user picked, `Lead: set aside (user, <that date>)`, or `Lead: <the"
+            " Story's key> (<the Talking points file>, confirmed <the date on its talking points: line>)` for a lead"
+            " taken from confirmed Talking points the user did not change"), rest[-1])
 
     def leads(self, pack):
         self.write("outputs/applications/a/interview-screen.md", pack)
@@ -1111,8 +1126,19 @@ class StoryLeadsTest(Log):
         lines = self.leads("# Pack\n\n## Likely questions\n- x\n")[1]
         self.assertEqual(lines[0], "FAIL: no ## Stories section: outputs/applications/a/interview-screen.md")
         self.assertTrue(lines[1].startswith("next: write the pack's ## Stories"), lines)
-        self.assertEqual(self.leads("## Stories\n\nNone predicted.\n"), (0, ["leads: none predicted"]))
+        self.assertEqual(self.leads("## Stories\n\nNone predicted.\n"), (0, ["leads: ok, none predicted"]))
         self.assertEqual(self.leads("## Stories\n\nSome text.\n")[0], 1)
+
+    def test_check_reads_a_pack_from_the_current_folder(self):
+        """#651 C8: a pack path is read against --root, then the current folder, as an entry's is."""
+        self.leads("## Stories\n\nNone predicted.\n")
+        saved = os.getcwd()
+        try:
+            os.chdir(os.path.join(self.root, "outputs", "applications"))
+            self.assertEqual(self.run_tool("story-leads", "--check", "a/interview-screen.md", "--root", self.root),
+                             (0, ["leads: ok, none predicted"]))
+        finally:
+            os.chdir(saved)
 
     def test_check_passes_a_lead_taken_from_confirmed_talking_points(self):
         self.write("stories/debugging.md", talking("Debugging", "2031-06-01 13:00", W + "#dead-ends", P))
@@ -2090,6 +2116,29 @@ class ReadmeTest(WriteLog):
             self.assertEqual(self.read("README.md"), after % table.replace("\n", eol), before)
             self.assertEqual(self.tool("readme"), (0, ["readme unchanged: README.md:3-5: 1 rows"]), before)
 
+    def test_readme_section_reads_as_logfiles_reads_one(self):
+        """#651 C1: a `#` line in an HTML comment ends no Entries section, and the heading may have
+        two spaces, as config.py and upgrade.py read it."""
+        self.new()
+        note = "<!--\n# the table below is generated\n-->\n"
+        self.write("README.md", "# Log\n\n##  Entries\n\n%sEntries appear here as you log them.\n\n## Upstream\n" % note)
+        self.assertEqual(self.tool("readme")[0], 0)
+        self.assertEqual(self.read("README.md"), "# Log\n\n##  Entries\n\n%s\n%s\n\n## Upstream\n"
+                         % (note, "\n".join(entries.readme_table(entries.readme_rows(entries.load(self.root))))))
+        # a tab after the marks: the table under it is the Entries table, not an earlier one with an Entry column
+        other = "## Other\n\n| Entry | Note |\n|---|---|\n\n"
+        self.write("README.md", other + "##\tEntries\n\n| Period | Entry | Type | Status |\n|---|---|---|---|\n")
+        self.assertEqual(self.tool("readme")[0], 0)
+        self.assertTrue(self.read("README.md").startswith(other + "##\tEntries\n\n| Period |"), self.read("README.md"))
+        self.assertEqual(len(self.rows()), 1)
+
+    def test_readme_lines_are_the_templates(self):
+        """#651 C3: the header, rule and placeholder line are the Template's README.md's."""
+        with open(os.path.join(HERE, "..", "template", "README.md"), encoding="utf-8") as f:
+            section = entries.logfiles.section(f.read(), "Entries")
+        self.assertIn("\n%s\n%s\n" % (entries.logfiles.md_row(entries.README_HEADER), entries.README_RULE), section)
+        self.assertEqual(section.strip().splitlines()[0], entries.README_PLACEHOLDER)
+
     def test_readme_adds_the_table_under_its_heading(self):
         self.new()
         for before, after in [("# Log\n\n## Entries\n\nSome words.\n\n## Upstream\n",
@@ -2684,6 +2733,26 @@ class ConsolidateHelpersTest(WriteLog):
         self.assertEqual([lines[k - 1][:1] for k, l in enumerate(lines) if l == "\\ No newline at end of file"],
                          ["-", "+"])   # each mark after the line it is about
 
+    def test_diff_in_a_log_below_the_git_top(self):
+        """#651 C9: in a Log one folder below the git top level, the change list names root-relative
+        paths and reads each line's section from the Log's own files."""
+        top = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, top, True)
+        shutil.copytree(self.root, os.path.join(top, "log"), ignore=shutil.ignore_patterns(".git"))
+        with open(os.path.join(top, "README.md"), "w") as f:
+            f.write("# Another project\n")
+        self.root = os.path.join(top, "log")
+        subprocess.run(["git", "-C", top, "init", "-q"], check=True, capture_output=True)
+        self.commit("import")
+        self.write(BIG, self.read(BIG).replace("GAP:\n", "Sorted widgets.\n", 1))
+        self.write("entries/2031-01-new.md", "new")
+        code, lines = self.tool("diff", BIG)
+        self.assertEqual(code, 0, lines)
+        block = lines[lines.index("```changes") + 1:]
+        block = block[:block.index("```")]
+        self.assertRegex(block[0], r"^deleted: %s:\d+ \(## One line\): GAP:$" % BIG)
+        self.assertEqual(block[1:], ["other Log file: entries/2031-01-new.md", "new file: entries/2031-01-new.md"])
+
     def deletions(self, diff_file):
         """(path, old line number) of each deleted line in a full git diff file: (non-blank, blank)."""
         out, blank, path, at = set(), set(), None, 0
@@ -2702,12 +2771,17 @@ class ConsolidateHelpersTest(WriteLog):
                 at += 1
         return out, blank
 
-    def assertListsEveryDeletion(self, lines, diff_file):
-        """The change list, a run of moves included, covers every non-blank deleted line of the diff
-        file, and each line it covers is a deleted one."""
-        self.assertIn("```changes", lines)
-        self.assertTrue(lines[lines.index("```changes") - 1].startswith("paste: paste the lines below, from `"
-                                                                         "```changes` to the closing ````"), lines)
+    def assertListsEveryDeletion(self, lines, diff_file, review=False):
+        """The change list (in the review file, with review), a run of moves included, covers every
+        non-blank deleted line of the diff file, and each line it covers is a deleted one."""
+        if review:
+            self.assertNotIn("```changes", lines)
+            lines = [l.split(". ", 1)[1] for l in self.read(diff_file[:-len(".diff")] + ".review.md").split("\n")
+                     if re.match(r"### \d+\. ", l)]
+        else:
+            self.assertIn("```changes", lines)
+            self.assertTrue(lines[lines.index("```changes") - 1].startswith("paste: paste the lines below, from `"
+                                                                             "```changes` to the closing ````"), lines)
         listed = set()
         for m in (re.match(r"(deleted|changed|moved): ([^:]+):(\d+)(?:-(\d+))?", l) for l in lines):
             if m:
@@ -2774,6 +2848,17 @@ class ConsolidateHelpersTest(WriteLog):
         self.assertFalse(any("NOTES.md" in l for l in lines), lines)
         self.assertListsEveryDeletion(lines, ".build/diff/2028-01-big.diff")
         self.assertIn("+- Learning German.", self.read(".build/diff/2028-01-big.diff").split("\n"))
+        # after the block, what consolidate step 5's rules say for each kind of line (#651 D9)
+        rules = [l for l in lines if l.startswith("rule: ")]
+        self.assertEqual(lines.index(rules[0]), lines.index("```changes") + len(block) + 2, lines)
+        self.assertEqual([r.split(": ")[1] for r in rules],
+                         ["deleted and changed", "other Log file", "other Log file", "not consolidate's to change",
+                          "not consolidate's to change", "not consolidate's to change"])
+        self.assertIn("rule: other Log file: direction.md: one item says why its lines changed (in a bulk run, an entry"
+                      " an earlier step 5 showed is listed again: say so)", rules)
+        self.assertIn("rule: not consolidate's to change: stories/debugging.md: put it back as it was if this run wrote it,"
+                      " then run diff again before you show the list; a change this run did not write stays, and its"
+                      " item says it was there before the run", rules)
 
     def test_diff_after_a_split_lists_the_moves_not_the_parts(self):
         body = "".join("- Scale-up fact %d: the sorter handled %d widgets a day after the rewrite.\n" % (k, k * 100)
@@ -2788,12 +2873,15 @@ class ConsolidateHelpersTest(WriteLog):
         self.assertEqual(code, 0, lines)
         self.assertFalse(any(l.endswith("```diff") for l in lines), lines)   # a split: no block unless --paste
         self.assertFalse(any(l.startswith("+") for l in lines), lines)
-        moved = [l for l in lines if l.startswith("moved: ")]   # the 40 lines in a row, as one run
-        self.assertEqual(len(moved), 1, lines)
-        self.assertRegex(moved[0], r"^moved: %s:(\d+)-\d+ \(## [^)]*\) -> %s:\d+-\d+: 40 lines, the first: - Scale-up fact 0: "
-                         % (BIG, part))
-        self.assertListsEveryDeletion(lines, ".build/diff/2028-01-big.diff")
+        self.assertIn("review file: .build/diff/2028-01-big.review.md", lines)   # a split: the list goes to the review file
+        review = self.read(".build/diff/2028-01-big.review.md").split("\n")
+        moved = [l for l in review if l.startswith("### ") and ". moved: " in l]   # the 40 lines in a row, as one run
+        self.assertEqual(len(moved), 1, review)
+        self.assertRegex(moved[0], r"^### \d+\. moved: %s:(\d+)-\d+ \(## [^)]*\) -> %s:\d+-\d+$" % (BIG, part))
+        self.assertIn("> - Scale-up fact 39: the sorter handled 3900 widgets a day after the rewrite.", review)
+        self.assertListsEveryDeletion(lines, ".build/diff/2028-01-big.diff", review=True)
         self.assertEqual([l.split(":")[1].strip() for l in lines if l.startswith("size: ")], [BIG, part])
+        self.assertEqual([l.split(": ")[1] for l in lines if l.startswith("rule: ")], ["deleted and changed", "moved"], lines)
         self.assertIn("+- Scale-up fact 99, reworded.", self.read(".build/diff/2028-01-big.diff").split("\n"))
         code, pasted = self.tool("diff", BIG, part, "--paste")
         self.assertIn("```diff", pasted)
@@ -2801,11 +2889,134 @@ class ConsolidateHelpersTest(WriteLog):
         fact20 = "- Scale-up fact 20: the sorter handled 2000 widgets a day after the rewrite.\n"
         self.write(BIG, self.read(BIG).replace("Prototype fact.\n\n", "Prototype fact.\n\n" + fact20))
         code, lines = self.tool("diff", BIG, part)
-        moved = [l for l in lines if l.startswith("moved: ")]
-        self.assertEqual([re.search(r": (\d+) lines, ", l).group(1) for l in moved], ["20", "19"], lines)
-        self.assertListsEveryDeletion(lines, ".build/diff/2028-01-big.diff")
+        review = self.read(".build/diff/2028-01-big.review.md").split("\n")
+        moved = [l for l in review if l.startswith("### ") and ". moved: " in l]
+        self.assertEqual([int(b) - int(a) + 1 for a, b in (re.search(r"-> [^:]+:(\d+)-(\d+)$", l).groups() for l in moved)],
+                         [20, 19], review)
+        self.assertListsEveryDeletion(lines, ".build/diff/2028-01-big.diff", review=True)
         status = subprocess.run(["git", "-C", self.root, "status", "--porcelain", "--ignored"], capture_output=True, text=True).stdout
         self.assertIn("!! .build/", status.splitlines())
+
+    def long_change(self):
+        """An entry change over PASTE_WORDS: a long line rewritten, a line deleted, two added."""
+        para = " ".join("word%d" % k for k in range(400))
+        self.write(BIG, self.read(BIG).replace("GAP:\n", "%s\n\nOld line to delete.\n" % para, 1))
+        self.commit("long line")
+        self.write(BIG, self.read(BIG).replace(para, para.replace("word200 ", "word200 CHANGED "))
+                   .replace("Old line to delete.\n", "") + "\nAn added fact.\n\nAnother added fact.\n")
+        return para
+
+    def sections(self, review):
+        """{header: (old/new lines, Rule: line)} of each change in a review file."""
+        res, head = {}, None
+        for line in review.split("\n"):
+            if line.startswith("### "):
+                head = line[4:]
+                res[head] = ([], None)
+            elif head and line.startswith("Rule:"):
+                res[head] = (res[head][0], line)
+            elif head and line.startswith(">"):
+                res[head][0].append(line)
+        return res
+
+    def fill_rules(self, rules):
+        """Write rules[k] on the Rule: line of each change whose header holds k."""
+        path = ".build/diff/2028-01-big.review.md"
+        out, head = [], ""
+        for line in self.read(path).split("\n"):
+            head = line if line.startswith("### ") else head
+            hit = [r for k, r in rules.items() if k in head]
+            out.append("Rule: " + hit[0] if line.startswith("Rule:") and hit else line)
+        self.write(path, "\n".join(out))
+
+    def test_diff_writes_a_long_change_to_a_review_file(self):
+        """#667: over PASTE_WORDS, the change list goes to a review file with every change in full,
+        added lines too, and no list is printed to paste."""
+        para = self.long_change()
+        code, lines = self.tool("diff", BIG)
+        self.assertEqual(code, 0, lines)
+        self.assertNotIn("```changes", lines)
+        self.assertFalse(any(l.startswith(("paste:", "deleted:", "changed:")) for l in lines), lines)
+        self.assertIn("review file: .build/diff/2028-01-big.review.md", lines)
+        nxt = [l for l in lines if l.startswith("next: ")]
+        self.assertEqual(len(nxt), 1, lines)
+        self.assertIn("diff --review", nxt[0])
+        self.assertIn("rule: deleted and changed: " + entries.DIFF_RULES[0], lines)
+        self.assertIn("diff file: .build/diff/2028-01-big.diff", lines)
+        review = self.read(".build/diff/2028-01-big.review.md")
+        sections = self.sections(review)
+        self.assertEqual([h.split(": ")[0].split(". ")[1] for h in sections], ["changed", "deleted", "added", "added"])
+        changed = next(v for h, v in sections.items() if ". changed: %s:" % BIG in h)
+        self.assertIn("> " + para, changed[0])   # in full: nothing cut
+        self.assertIn("> " + para.replace("word200 ", "word200 CHANGED "), changed[0])
+        self.assertEqual(changed[1], "Rule:")
+        self.assertRegex(review, r"\nShort: \[… 193 words unchanged …\] word193 .* => .*word200 CHANGED word201 .*\n")
+        self.assertIn(("> Old line to delete.",), [tuple(v[0]) for h, v in sections.items() if ". deleted: " in h])
+        added = [v[0] for h, v in sections.items() if ". added: " in h]
+        self.assertEqual(added, [["> An added fact."], ["> Another added fact."]])
+        self.assertRegex(review, r"(?m)^diff: [0-9a-f]{16}$")
+        self.assertListsEveryDeletion(lines, ".build/diff/2028-01-big.diff", review=True)
+
+    def test_diff_review_prints_the_counts_and_the_locations(self):
+        """#667: diff --review checks the review file is current and every deleted and changed line of
+        the usual files has a rule, then prints counts per kind and each deleted and merged line's
+        place and rule, with no text."""
+        self.long_change()
+        self.assertEqual(self.tool("diff", BIG, "--review")[0], 2)   # no review file yet
+        self.tool("diff", BIG)
+        code, lines = self.tool("diff", BIG, "--review")
+        self.assertEqual(code, 2, lines)
+        self.assertEqual(len([l for l in lines if l.startswith("FAIL no rule: ")]), 2, lines)   # changed and deleted; added needs none
+        self.fill_rules({"deleted: ": "duplicate of ## Context", "changed: ": "merge: with the deleted line"})
+        code, lines = self.tool("diff", BIG, "--review")
+        self.assertEqual(code, 0, lines)
+        block = lines[lines.index("```review") + 1:]
+        block = block[:block.index("```")]
+        self.assertTrue(lines[lines.index("```review") - 1].startswith("paste: "), lines)
+        self.assertEqual(block[0], "changes: 1 changed, 1 deleted, 2 added")
+        # in file order: the rewritten line comes first
+        self.assertRegex(block[1], r"^merged: %s:21 \(## One line\): merge: with the deleted line$" % BIG)
+        self.assertRegex(block[2], r"^deleted: %s:23 \(## One line\): duplicate of ## Context$" % BIG)
+        self.assertEqual(len(block), 3, block)
+        self.assertFalse(any("word" in l or "Old line" in l for l in block), block)
+        self.assertIn("review file: .build/diff/2028-01-big.review.md", lines)
+        self.assertIn("diff file: .build/diff/2028-01-big.diff", lines)
+        # an edit after diff: stale until diff runs again, which keeps the rules of changes still there
+        self.write(BIG, self.read(BIG).replace("Another added fact.\n", "Another added fact, reworded.\n"))
+        code, lines = self.tool("diff", BIG, "--review")
+        self.assertEqual(code, 2, lines)
+        self.assertTrue(any(l.startswith("FAIL stale: ") for l in lines), lines)
+        self.tool("diff", BIG)
+        code, lines = self.tool("diff", BIG, "--review")
+        self.assertEqual(code, 0, lines)
+        self.assertIn("changes: 1 changed, 1 deleted, 2 added", lines)
+        # a new excerpt is in no diff: an edit to it makes the review stale too
+        self.write("sources/notes/2031-04-20-chat.md", "An excerpt.\n")
+        self.tool("diff", BIG)
+        self.assertEqual(self.tool("diff", BIG, "--review")[0], 0)
+        self.write("sources/notes/2031-04-20-chat.md", "An excerpt, edited.\n")
+        code, lines = self.tool("diff", BIG, "--review")
+        self.assertEqual(code, 2, lines)
+        self.assertTrue(any(l.startswith("FAIL stale: ") for l in lines), lines)
+        code, lines = self.tool("diff", BIG, "entries/2029-06-solo.md", "--review")   # not the entries diff wrote it for
+        self.assertEqual(code, 2, lines)
+        self.assertEqual([l.split(":")[0] for l in lines], ["FAIL other entries", "next"])
+        self.assertEqual(self.tool("diff", BIG, "--review", "--paste")[0], 2)
+
+    def test_diff_small_change_writes_no_review_file(self):
+        """#667: a change the list can hold in chat keeps today's paste, and removes a review file an
+        earlier, longer diff wrote."""
+        self.long_change()
+        self.tool("diff", BIG)
+        review = os.path.join(self.root, ".build", "diff", "2028-01-big.review.md")
+        self.assertTrue(os.path.isfile(review))
+        self.commit("long change")
+        self.write(BIG, self.read(BIG).replace("An added fact.\n", "An added fact, now shorter.\n"))
+        code, lines = self.tool("diff", BIG)
+        self.assertIn("```changes", lines)
+        self.assertFalse(any(l.startswith("review file:") for l in lines), lines)
+        self.assertFalse(os.path.exists(review))
+        self.assertEqual(self.tool("diff", BIG, "--review")[0], 2)
 
     def test_undo_a_split(self):
         # the draft extended the period before the split: undo keeps the draft's, from the parts' span
@@ -3010,6 +3221,36 @@ class ConsolidateHelpersTest(WriteLog):
         self.assertEqual(code, 0)
         self.assertEqual(self.names(), ["2029-06-solo", "2028-01-big"])
         self.assertEqual(self.check()[0], 0)
+
+
+class EntryChanges(unittest.TestCase):
+    """The per-entry git log application.py stale and story-stale share (#661)."""
+    def test_changes_uncommitted_and_gone(self):
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, onerror=lambda f, p, e: (os.chmod(p, 0o700), f(p)))
+        git = lambda *a: subprocess.run(["git", "-C", root, "-c", "user.name=t", "-c", "user.email=t@example.com"]
+                                        + list(a), check=True, capture_output=True, encoding="utf-8").stdout
+        git("init", "-q")
+        os.makedirs(os.path.join(root, "entries"))
+        path = os.path.join(root, "entries", "2025-01-a.md")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("# A\n")
+        git("add", "-A")
+        git("commit", "-qm", "log(a): start | first")
+        base = git("rev-parse", "HEAD").strip()
+        self.assertEqual(entries.entry_changes(root, "entries/2025-01-a.md", ["%s..HEAD" % base]), ([], False))
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("More.\n")
+        git("commit", "-qam", "log(a): more")
+        commits, dirty = entries.entry_changes(root, "entries/2025-01-a.md", ["%s..HEAD" % base])
+        self.assertEqual([c[2] for c in commits], ["log(a): more"])
+        self.assertFalse(dirty)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("Edit.\n")
+        self.assertTrue(entries.entry_changes(root, "entries/2025-01-a.md", [])[1])
+        self.assertEqual(entries.entry_changes(root, "entries/2025-01-a.md", [])[0][-1][2], "log(a): start | first")
+        self.assertIsNone(entries.entry_changes(root, "entries/2025-02-gone.md", []))
+
 
 if __name__ == "__main__":
     unittest.main()

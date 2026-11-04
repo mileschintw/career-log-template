@@ -21,7 +21,9 @@ in a scratch dir, and the PDF copied next to the .tex. The default dir is
 its full path, so drafts that share a name (every draft is resume.tex) each build in their own and
 never read each other's PDF or log. With --install-missing, packages reported missing are installed
 with tlmgr and the build is retried; each one installed that tools/tex-packages.txt does not list
-prints `add to tools/tex-packages.txt: <package>` (an Engine change, so the next machine gets it).
+prints `add to tools/tex-packages.txt: <package>` (an Engine change, so the next machine gets it),
+and a file no package provides stops it with `tlmgr found no package providing <file>: ...` (its
+two causes, for the user to check).
 --same-layout <start.tex> also fails, with one `FAIL: layout ...` line each, on a preamble line or a
 spacing, font or geometry command (\setlength, \setlist, \linespread, \fontsize, \geometry,
 \titleformat, \titlespacing and the like) that differs from the version the draft started from;
@@ -51,11 +53,12 @@ difference shown, or when either has no text layer.
 
 Stale: each <target>.tex in <folder> (outputs/resumes/) is copied to <root>/.build/audit/<target>/,
 with the files beside it that it \input's or \include's, built there and compared with the <target>.pdf beside it, as --same-text does: one
-`<target>: same text (<n> words)` or `FAIL: <target>: <why>` line each (a folder with no .tex: one
-`note:` line; a .tex with no .pdf that another one there \input's or \include's: a `note:` line
-saying it is part of that one). A build that stops on a file not found, with no such file beside the .tex, prints
-`FAIL: <target>: this machine lacks <file>, so <target>.tex was not compared: <the command that
-installs it>` in place of `does not build`. Audit uses it to catch a committed PDF built from something else.
+`<target>: same text (<n> words)` or `FAIL: <target>: <why>; report: <what audit reports>` line
+each (a folder with no .tex: one `note:` line; a .tex with no .pdf that another one there
+\input's or \include's: a `note:` line saying it is part of that one). A build that stops on a
+file not found, with no such file beside the .tex, prints `FAIL: <target>: this machine lacks
+<file>, so <target>.tex was not compared: <the command that installs it> installs it and builds
+the copy; report: ...` in place of `does not build`. Audit uses it to catch a committed PDF built from something else.
 
 Baseline: builds the example resume (skills/career-log/examples/resume.tex) in <root>/.build/verify/,
 checks it, and compares its page with the one SETUP.md step 6 expects (bullets, text block, bottom
@@ -238,23 +241,6 @@ def page_limit(root, pages=None):
 
 # ---- The source ----
 
-def comment_at(line):
-    """Where the line's comment starts: the first % after an even number of backslashes (\\\\% is a
-    line break, then a comment) and outside an \\href or \\url address, or None."""
-    addresses = [m.span() for m in ADDRESS.finditer(line)]
-    for m in re.finditer("%", line):
-        run = len(line[:m.start()]) - len(line[:m.start()].rstrip("\\"))
-        if run % 2 == 0 and not any(a <= m.start() < b for a, b in addresses):
-            return m.start()
-    return None
-
-
-def uncomment(line):
-    at = comment_at(line)
-    return line if at is None else line[:at]
-
-
-ADDRESS = re.compile(r"\\(href|url)\{[^}]*\}")
 TABULAR = re.compile(r"\\(begin|end)\{(tabular\*?|tabularx|array|align\*?)\}")
 # The body's commands that set spacing, font or geometry; \vspace is not one
 LAYOUT = re.compile(r"\\(setlength|addtolength|setlist|linespread|fontsize|selectfont|geometry|newgeometry|"
@@ -286,31 +272,23 @@ LAYOUT_PACKAGES = {
 }
 
 
-def body(text):
-    """(line number, the line with its comment dropped, the raw line) of each line after
-    \\begin{document}; the whole file when it has none."""
-    lines = text.splitlines()
-    start = next((i + 1 for i, l in enumerate(lines) if "\\begin{document}" in uncomment(l)), 0)
-    return [(n + 1, uncomment(lines[n]), lines[n]) for n in range(start, len(lines))]
-
-
 def scan_source(text):
     """`source line <n>: ...` for each placeholder, unescaped special character or Unicode dash in
     the document body."""
     out, table = [], 0
-    for n, code, raw in body(text):
+    for n, code, raw in logfiles.tex_body(text):
         marks = [m.group(1) for m in TABULAR.finditer(code)]
         in_table = table > 0 or "begin" in marks   # & is a column break there
         table += marks.count("begin") - marks.count("end")
         for m in re.finditer(r"(?<!\w)(?<!::)<[A-Za-z][^<>]*>", code):   # not std::vector<int>, parse::<T>
             out.append(f"source line {n}: placeholder {m.group(0)} left; replace it with a fact from an entry")
-        bare = ADDRESS.sub("", raw)
-        at = comment_at(bare)
+        bare = logfiles.TEX_ADDRESS.sub("", raw)
+        at = logfiles.tex_comment_at(bare)
         if at and bare[at - 1].isdigit():
             out.append(f"source line {n}: {bare[max(0, at - 8):at + 1].strip()} starts a comment, so the "
                        "% and the rest of the line are dropped; write \\% for a percentage")
         # math holds a command, ^ or _, or no space ($\sim$, $10^6$, $>$); "$2M to $1M" is two dollar signs
-        text_only = re.sub(r"(?<!\\)\$(?:[^$]*[\\^_][^$]*|[^$\s]+)(?<!\\)\$", "", ADDRESS.sub("", code))
+        text_only = re.sub(r"(?<!\\)\$(?:[^$]*[\\^_][^$]*|[^$\s]+)(?<!\\)\$", "", logfiles.TEX_ADDRESS.sub("", code))
         if re.search(r"(?<!\\)\$(?=\d)", text_only):
             out.append(f"source line {n}: unescaped $ before a number; write \\$")
         for ch in "#_" + ("" if in_table else "&"):
@@ -330,23 +308,19 @@ def plain(tex):
     return " ".join(tex.replace("{", "").replace("}", "").split())
 
 
-# A \\ line break (\\*, \\[2pt]) or a \newline inside a source line
-LINE_BREAK = re.compile(r"\\\\\*?(?:\s*\[[^\]]*\])?|\\newline(?![A-Za-z])")
-
-
 def skills_of(text):
     """(the Skills heading, each Skills line's label, every section heading) from the .tex, or None
-    when no section's title holds "skill". A label starts the source line or follows a \\\\ or a
-    \\newline on it."""
+    when no section is the Skills section (logfiles.is_skills: `Experience and Skills` is none). A
+    label starts the source line or follows a \\\\ or a \\newline on it (logfiles.TEX_LINE_BREAK)."""
     headings, title, labels, inside = [], None, [], False
-    for _, code, _ in body(text):
+    for _, code, _ in logfiles.tex_body(text):
         m = re.search(r"\\section\*?\{([^}]*)\}", code)
         if m:
             headings.append(plain(m.group(1)))
-            inside = "skill" in m.group(1).lower() and title is None
+            inside = logfiles.is_skills(m.group(1)) and title is None
             title = headings[-1] if inside else title
             continue
-        for part in LINE_BREAK.split(code) if inside else ():   # several Skills lines on one source line
+        for part in logfiles.TEX_LINE_BREAK.split(code) if inside else ():   # several Skills lines on one source line
             label = re.match(r"\s*(?:\\item\s*)?([^,]*?)\\textbf\{([^{}]*)\}", part)
             if label and not re.search(r"\w", plain(label.group(1))):   # a mark before it: \checkmark\
                 labels.append(plain(label.group(2)))
@@ -358,7 +332,7 @@ def layout_lines(text):
     and the body's spacing, font and geometry commands."""
     out, in_body = {}, False
     for n, raw in enumerate(text.splitlines(), 1):
-        code = " ".join(uncomment(raw).split())
+        code = " ".join(logfiles.tex_uncomment(raw).split())
         if "\\begin{document}" in code:
             in_body = True
             continue
@@ -426,7 +400,8 @@ def build(tex, outdir, install_missing):
         pkg = next((l.rstrip(":") for l in hit.splitlines()
                     if l and not l.startswith(("tlmgr", " ", "\t"))), None)
         if not pkg:
-            print(f"tlmgr found no package providing {missing.group(1)}")
+            print(f"tlmgr found no package providing {missing.group(1)}: the .tex names a package no TeX has"
+                  " (a broken .tex), or tlmgr could not reach its repository; check which")
             break
         print(f"installing {pkg} for {missing.group(1)}")
         inst = subprocess.run([tlmgr, "install", pkg], capture_output=True, text=True,
@@ -708,7 +683,7 @@ def local_inputs(tex):
             text = logfiles.read_text(todo.pop())
         except (OSError, UnicodeDecodeError):
             continue
-        text = re.sub(r"(?<!\\)((?:\\\\)*)%.*", r"\1", text)   # a commented-out \input is not read; \% is no comment
+        text = "\n".join(map(logfiles.tex_uncomment, text.split("\n")))   # a commented-out \input is not read
         for name in INPUT.findall(text):
             for cand in (name.strip(), name.strip() + ".tex"):
                 if os.path.isabs(cand) or os.path.splitdrive(cand)[0]:
@@ -737,7 +712,7 @@ def stale(folder, root):
             continue
         pdf = os.path.splitext(tex)[0] + ".pdf"
         if not os.path.isfile(pdf):
-            print(f"FAIL: {target}: no {target}.pdf beside its .tex")
+            print(f"FAIL: {target}: no {target}.pdf beside its .tex; report: a target never built")
             ok = False
             continue
         copy = os.path.join(root, ".build", "audit", target, target + ".tex")
@@ -753,16 +728,25 @@ def stale(folder, root):
             # a file the .tex names that is not beside it is a package this machine lacks
             if e.missing and not os.path.exists(os.path.join(folder, e.missing)):
                 print(f"FAIL: {target}: this machine lacks {e.missing}, so {target}.tex was not compared: "
-                      f"python3 -I \"{os.path.join(HERE, 'resume.py')}\" \"{copy}\" --install-missing --root \"{root}\" "
-                      "installs it")
+                      f"{install_command(copy, root)} installs it and builds the copy; report: a LaTeX package"
+                      " missing on this machine, not a fault of the resume: give the user that command, then run"
+                      " this --stale again")
             else:
-                print(f"FAIL: {target}: {target}.tex does not build (the lines above say why)")
+                print(f"FAIL: {target}: {target}.tex does not build (the lines above say why); report: a broken .tex")
             ok = False
             continue
         same, said = compare_text(built, pdf)
-        print(f"{target}: {said}" if same else f"FAIL: {target}: {said}; {target}.pdf is not the one its .tex builds")
+        print(f"{target}: {said}" if same else f"FAIL: {target}: {said}; {target}.pdf is not the one its .tex builds;"
+              " report: its committed .pdf was built from something else, so a sent-version hash would point at"
+              " the wrong PDF")
         ok = ok and same
     return ok
+
+
+def install_command(tex, root):
+    """The command that builds tex with --install-missing, for this platform's shell."""
+    return " ".join([logfiles.python_cmd(), "-I", logfiles.shell_arg(os.path.join(HERE, "resume.py")),
+                     logfiles.shell_arg(tex), "--install-missing", "--root", logfiles.shell_arg(root)])
 
 
 def baseline(root):

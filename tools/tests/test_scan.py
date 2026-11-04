@@ -37,10 +37,12 @@ def git(root, *args):
 
 
 class ScanTest(unittest.TestCase):
+    ROOT = "log"   # the Log root's folder name
+
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(lambda: shutil.rmtree(self.tmp, ignore_errors=True))
-        self.root = os.path.join(self.tmp, "log")
+        self.root = os.path.join(self.tmp, self.ROOT)
         self.remote = os.path.join(self.tmp, "remote.git")
         subprocess.run(["git", "init", "-q", "--bare", "-b", "main", self.remote], check=True)
         subprocess.run(["git", "init", "-q", "-b", "main", self.root], check=True)
@@ -51,6 +53,20 @@ class ScanTest(unittest.TestCase):
         self.commit("seed")
         git(self.root, "remote", "add", "origin", self.remote)
         git(self.root, "push", "-q", "-u", "origin", "main")
+
+    def test_committed_text_in_a_log_below_the_git_top(self):
+        """#663: HEAD's copy of a file is read from the Log's root, a folder below the git top level."""
+        top = os.path.join(self.tmp, "top")
+        subprocess.run(["git", "init", "-q", top], check=True)
+        for rel, text in (("README.md", "top\n"), ("log/README.md", "log\n")):
+            os.makedirs(os.path.dirname(os.path.join(top, rel)), exist_ok=True)
+            with open(os.path.join(top, rel), "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
+        git(top, "add", "-A")
+        git(top, "-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "x")
+        log = os.path.join(top, "log")
+        self.assertEqual(scan.committed_text(log, os.path.join(log, "README.md")), "log\n")
+        self.assertIsNone(scan.committed_text(log, os.path.join(log, "none.md")))
 
     # ---- helpers ----
 
@@ -418,7 +434,7 @@ class ScanTest(unittest.TestCase):
         listed = self.lines(os.path.join(d, "screen-list.jsonl"))
         self.assertEqual([p["folder"] for p in listed][:1], ["2026-10-22-c0-swe"])
         with open(os.path.join(d, "screen", "batch-1.todo"), encoding="utf-8") as f:
-            self.assertEqual(len(f.read().split()), 5)
+            self.assertEqual(len(f.read().splitlines()), 5)   # one capture path a line; a path may hold a space
         for p in self.lines(os.path.join(d, "screen-list.jsonl"))[:4]:   # c4's page could not be read
             self.write(p["capture"], "URL: %s\n\ntext\n" % p["url"])
         code, lines = self.run_tool("screen", d, "--screen-budget", "5", "--fit-budget", "2", "--sort")
@@ -1235,6 +1251,7 @@ class ScanTest(unittest.TestCase):
                                                 "run: 2026-10-22-041500-4"])
         self.assertEqual(runs[1][1:], ["folder: .build/runs/2026-10-22-041500-2",
                                        "capture: .build/runs/2026-10-22-041500-2/posting.md",
+                                       "paste: .build/runs/2026-10-22-041500-2/pasted.md",
                                        "sessions: posting-2026-10-22-041500-2, company-lookup-2026-10-22-041500-2, "
                                        "lca-2026-10-22-041500-2", "live: .build/runs/2026-10-22-041500-2/live"])
         a, b = (r[2].split(": ", 1)[1] for r in runs[:2])
@@ -1263,9 +1280,15 @@ class ScanTest(unittest.TestCase):
         code, lines = self.run_tool("run")   # today is 2026-10-22: a week back is 2026-10-15
         self.assertEqual(code, 0, lines)
         self.assertEqual(lines[0], "run: 2026-10-22-041500")
-        self.assertEqual(lines[5:], ["deleted: .build/runs/2026-10-14-235959/ (older than 7 days)"])
+        self.assertEqual(lines[6:], ["deleted: .build/runs/2026-10-14-235959/ (older than 7 days)"])
         self.assertEqual(sorted(os.listdir(os.path.join(self.root, ".build/runs"))),
                          ["2026-10-15-000000-2", "2026-10-21-120000", "2026-10-22-041500", "notes"])
+
+    def test_run_help_states_the_constants(self):
+        """#662 (B4): the help's days and hours are the ones the code uses."""
+        self.assertIn("(older than %d days)" % scan.RUN_KEEP_DAYS, scan.__doc__)
+        self.assertIn("live for %d more hours" % scan.logfiles.LIVE_HOURS, scan.__doc__)
+        self.assertIn("`<folder>/%s`" % scan.RUN_PASTE, scan.__doc__)
 
     # ---- a run's live marker: another session's Trigger check leaves its files alone (#609) ----
 
@@ -1277,7 +1300,7 @@ class ScanTest(unittest.TestCase):
         code, lines = self.run_tool("run", "--mode", "write")
         self.assertEqual(code, 0, lines)
         key = lines[0].split(": ", 1)[1]
-        self.assertEqual(lines[4], "live: .build/runs/%s/live" % key)
+        self.assertEqual(lines[5], "live: .build/runs/%s/live" % key)
         marker = json.loads(self.read(".build/runs/%s/live" % key))
         self.assertEqual(marker["mode"], "write")
         start = datetime.datetime.fromisoformat(marker["start"])
@@ -2167,6 +2190,23 @@ class ScanTest(unittest.TestCase):
 
     def test_bad_date(self):
         self.assertEqual(self.run_tool("name", date="22-10-2026")[0], 2)
+
+
+class GlobRootTest(ScanTest):
+    """#671: the tests below, which read through each of scan.py's globs, rerun on a Log root whose name
+    holds glob characters; the other ScanTest tests do not rerun here."""
+    ROOT = "log [1]"
+    TESTS = ("test_name_first_and_next",                                 # reports
+             "test_name_sees_another_clones_push",                       # next_name's run folders
+             "test_explore_again_reuses_captures_and_screen_results",    # cmd_explore, explore_results
+             "test_screen_prepare_sort_and_report",                      # earlier_captures, screen_prepare, screen_sort
+             "test_drafts_opens_the_branch_and_copies_capture_and_map",  # fit_results
+             "test_cleanup_deletes_decided_run_folders")                 # cmd_cleanup's run folders
+
+
+assert all(callable(getattr(ScanTest, n, None)) for n in GlobRootTest.TESTS), "GlobRootTest names a test ScanTest lacks"
+for _name in [n for n in dir(ScanTest) if n.startswith("test_") and n not in GlobRootTest.TESTS]:
+    setattr(GlobRootTest, _name, None)   # the loader skips a test name that is not callable
 
 
 if __name__ == "__main__":

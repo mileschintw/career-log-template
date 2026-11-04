@@ -1022,9 +1022,9 @@ class CheckTest(unittest.TestCase):
         lines, _, _, _ = self.poppler_lines()
         self.assertTrue(any(l.startswith("pdftotext: ok (%s; the user's own install" % own) for l in lines), lines)
 
-    def log_repo(self):
+    def log_repo(self, name="log"):
         """A Log repo with one committed entry, one Engine file and an ignored inbox."""
-        root = os.path.join(self.home, "log")
+        root = os.path.join(self.home, name)
         os.makedirs(os.path.join(root, "entries"))
         os.makedirs(os.path.join(root, "tools"))
         os.makedirs(os.path.join(root, "sources", "inbox"))
@@ -1153,7 +1153,7 @@ class CheckTest(unittest.TestCase):
 
     def test_a_file_under_an_expired_marker_is_offered_as_today(self):
         root = self.log_repo()
-        self.live_marker(root, "2031-01-02-100000", started_ago=4 * 3600, touched_ago=check.LIVE_HOURS * 3600 + 60)
+        self.live_marker(root, "2031-01-02-100000", started_ago=4 * 3600, touched_ago=check.logfiles.LIVE_HOURS * 3600 + 60)
         self.aged(root, "entries/2024-01-a.md", "a crashed run's\n", ago=3 * 3600)
         lines, nexts, _ = self.uncommitted(root)
         self.assertEqual(lines, ["log changes: uncommitted (1 file(s))", "log change: M entries/2024-01-a.md"])
@@ -1167,6 +1167,22 @@ class CheckTest(unittest.TestCase):
         os.makedirs(os.path.dirname(bad))
         self.write(root, ".build/runs/2031-01-02-110000/live", "not json\n")
         self.write(root, "profile.md", "p\n")
+        lines, _, _ = self.uncommitted(root)
+        self.assertEqual(lines, ["log changes: uncommitted (1 file(s))", "log change: ?? profile.md"])
+
+    def test_a_live_run_in_a_root_with_glob_characters(self):
+        """#662 (B1): the marker is found in a Log root whose path holds `[`."""
+        root = self.log_repo("log [1]")
+        self.live_marker(root, "2031-01-02-100000", started_ago=600)
+        self.aged(root, "profile.md", "p\n", ago=0)
+        lines, _, _ = self.uncommitted(root)
+        self.assertEqual(lines[1:],["log change (live run 2031-01-02-100000): ?? profile.md"])
+
+    def test_a_marker_in_a_folder_named_as_no_run_key_is_no_live_run(self):
+        """#662 (B1): only a folder `scan.py run` could have made holds a live run."""
+        root = self.log_repo()
+        self.live_marker(root, "notes", started_ago=600)
+        self.aged(root, "profile.md", "p\n", ago=0)
         lines, _, _ = self.uncommitted(root)
         self.assertEqual(lines, ["log changes: uncommitted (1 file(s))", "log change: ?? profile.md"])
 
@@ -2127,11 +2143,13 @@ class SessionTest(unittest.TestCase):
     SWAP_BULLET = "Cut checkout API p95 latency from 820 ms to 210 ms with a Redis rate cache"
 
     def posting_save(self, roles=("Backend engineer",), targets=("backend",), start=None, bullets=(NEW_BULLET,),
-                     archived=False, accept=False):
+                     archived=False, accept=False, record=None, quotes='""', then_reference=False):
         """A Log with these Target roles and Target versions; then this run: a posting run whose draft
         recorded `start` (from, family, tier; None: no start.txt), saved with `bullets` added to an
-        entry's Past phrasings. Returns done write's Next lines. `accept`: the run is a scan accept, its
-        start.txt in the scan's draft folder, which `scan.py draft` copies (#626)."""
+        entry's Past phrasings, each between `quotes`. Returns done write's Next and Not read lines.
+        `accept`: the run is a scan accept, its start.txt in the scan's draft folder, which `scan.py
+        draft` copies (#626). `record`: start.txt's text as written, in place of `start`'s.
+        `then_reference`: the save is Archived, then set to Reference in the same run (#661)."""
         self.write("direction.md", "# Direction\n\n## Target roles, ranked\n"
                    + "".join("%d. %s (user, 2032-01-01)\n" % (i, r) for i, r in enumerate(roles, 1)))
         for t in targets:
@@ -2154,16 +2172,40 @@ class SessionTest(unittest.TestCase):
             self.assertTrue(os.path.isfile(os.path.join(self.root, ".build/drafts", self.APP, "start.txt")))
         elif start:
             self.write(".build/drafts/%s/start.txt" % self.APP, "from: %s\nfamily: %s\ntier: %s\n" % start)
+        if record is not None:
+            self.write(".build/drafts/%s/start.txt" % self.APP, record)
         folder = "outputs/applications/" + self.APP
         self.write(folder + "/resume.tex", self.TARGET_TEX)
         self.write(folder + "/provenance.md", "# Provenance\n")
-        if archived:
+        if archived or then_reference:
             self.write(folder + "/archived.md", "Archived (user, 2032-05-01)\n")
         self.write("entries/2031-01-widget.md", entry % "".join(
-            '- **backend:** "%s" (%s)\n' % (b, folder) for b in bullets))
+            '- **backend:** %s%s%s (%s)\n' % (quotes[0], b, quotes[1], folder) for b in bullets))
         self.git("add", "-A")
         self.git("commit", "-qm", "write(acme): Product Manager")
-        return [l for l in self.done("write", "--since", since)[1] if l.startswith("Next:")]
+        if then_reference:
+            self.git("rm", "-q", folder + "/archived.md")
+            self.git("commit", "-qm", "write(acme): Product Manager to Reference")
+        return [l for l in self.done("write", "--since", since)[1] if l.startswith(("Next:", "Not read:"))]
+
+    # ---- #661: the start record, the subject and the Past phrasings line as application.py reads them ----
+
+    def test_a_record_lacking_a_line_says_so(self):
+        nexts = self.posting_save(record="from: outputs/resumes/backend.tex\nfamily: backend\n")
+        self.assertEqual(nexts, ["Not read: .build/drafts/%s/start.txt lacks tier: (application.py start --family"
+                                 " --tier writes it), so outputs/applications/%s gets no Target version or Direction"
+                                 " offer." % (self.APP, self.APP)])
+
+    def test_the_role_leaves_out_a_level_change(self):
+        nexts = self.posting_save(start=("outputs/resumes/backend.tex", "backend", "none"), bullets=(),
+                                  then_reference=True)
+        self.assertEqual(len(nexts), 1, nexts)
+        self.assertTrue(nexts[0].startswith('Next: `setup` (say "add Product Manager to my target roles").'), nexts)
+
+    def test_a_wording_in_corner_brackets_is_read_as_its_words(self):
+        nexts = self.posting_save(start=("outputs/resumes/backend.tex", "backend", "1"), quotes="「」")
+        self.assertEqual(len(nexts), 1, nexts)
+        self.assertIn('Past phrasings: "%s" (Widget' % self.NEW_BULLET, nexts[0])
 
     def test_update_names_the_target_version_and_the_bullets(self):
         nexts = self.posting_save(start=("outputs/resumes/backend.tex", "backend", "1"),

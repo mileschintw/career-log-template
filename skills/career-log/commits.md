@@ -4,7 +4,7 @@ The parts of [SKILL.md › Commits](SKILL.md#rules-for-every-mode) that only som
 
 ## Bulk data changes
 
-The working tree is the staging area: write every file of the change and leave them uncommitted until the user's yes. Show the user what `python3 -I <root>/tools/sync.py status` prints and a short summary naming each entry created or changed, and ask them to read the full diff in their editor. If they ask for changes, apply them and show the status again. Then:
+The working tree is the staging area: write every file of the change and leave them uncommitted until the user's yes. Show the user what `python3 -I <root>/tools/sync.py status` prints and a short summary naming each entry created or changed, and give them the full diff to read: for a consolidate, the `diff file:` and any `review file:` the last entry's step 5 gave them (each `diff` writes the diff of every Log file), sent as files as that step says; otherwise ask them to read it in their editor. If they ask for changes, apply them and show the status again. Then:
 - **Yes:** `python3 -I <root>/tools/sync.py settle commit --subject "<the mode's message>"`.
 - **No:** first move each original that [import](modes/import.md) step 1 moved out of `sources/inbox/` back into it, under its old name (the inbox is ignored, so it holds the user's only copy); then `python3 -I <root>/tools/sync.py settle discard --sources-checked`.
 

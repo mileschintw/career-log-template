@@ -180,7 +180,7 @@ every other byte of the file as it was, its byte order mark and line ends includ
       [--distinct | --replace <n>] <wording>
   python3 -I tools/entries.py split <entry> --phase <phase> --cut [<end>..]<start>:<part>:<phase>...
   python3 -I tools/entries.py split --undo <entry> <part>...
-  python3 -I tools/entries.py diff <entry> [<part>...] [--paste]
+  python3 -I tools/entries.py diff <entry> [<part>...] [--paste|--review]
   python3 -I tools/entries.py drop <entry> --reason <reason>
 
 A text or wording that starts with `-` goes after `--`, with every flag before the `--`.
@@ -300,8 +300,16 @@ A text or wording that starts with `-` goes after `--`, with every flag before t
 - `diff <entry> [<part>...] [--paste]` (consolidate step 5): `git add -N` for each one not in the
   index (so a new part shows), then `git diff` of every Log file (logfiles.LOG_PATHS) against
   the index, and `git ls-files --others` of them for new files. Prints, in this order:
-  - a `paste:` line naming the block below it, then the change list, in a `changes` code fence
-    (as the diff block below), to be pasted as printed. First the usual files: the entry, its
+  - a small change (one entry, at most PASTE_WORDS words on its changed lines): a `paste:` line
+    naming the block below it, then the change list, in a `changes` code fence
+    (as the diff block below), to be pasted as printed. Any other change: `review file:
+    .build/diff/<entry's file name>.review.md` and a `next:` line instead, the file holding each
+    line of the list as a `### <n>. <kind>: <where>` section (kind deleted, changed, moved, with
+    ` -> <to>`, added or new file) with its whole old and new lines quoted (`> `), a changed line's list text as
+    `Short:`, and an empty `Rule:` line for the agent; also each line added in a usual file, which
+    the list leaves out; grouped under `## <file>`, or the file's heading line below. A rerun keeps
+    each `Rule:` written for a change of the same kind, file and text. A small change, or none,
+    deletes the review file. First the usual files: the entry, its
     parts, README.md, stories.md, profile.md and a new file in `sources/` (an excerpt). Then each
     other changed Log file under its own heading line, `other Log file: <file>` (`direction.md`,
     another entry), and last each file consolidate leaves as it is, under `not consolidate's to
@@ -321,6 +329,10 @@ A text or wording that starts with `-` goes after `--`, with every flag before t
     usual ones, each non-blank added line no `changed:` line covers is also `added: <file>:<new
     line number> (<section>): <text>`, after its file's other lines. A diff that only adds lines
     to the usual files prints `(no line deleted: lines were added only)` in the fence;
+  - a `rule:` line for each kind of line the change list holds, saying what consolidate step 5's
+    rules give it (DIFF_RULES): `rule: deleted and changed: ...` when a usual file has a deleted:
+    or changed: line, `rule: moved: ...` when there is a moved: line, and one `rule: other Log
+    file: <file>: ...` or `rule: not consolidate's to change: <file>: ...` per such heading;
   - `size: <file>: <N> tokens, <K> KB` for each entry and part named (tokens as `list` counts them);
   - `diff file: .build/diff/<entry's file name>.diff`, the full diff, nothing cut (rewritten on
     each run), and `open: <command>`, a command that opens it in an editor (notepad, `open -t`,
@@ -335,6 +347,17 @@ A text or wording that starts with `-` goes after `--`, with every flag before t
     the mark. Every added and deleted word is printed, and a line added or deleted whole is
     printed in full.
   `no change: <entry> [<part>...]` when no Log file changed. Exit 0.
+- `diff <entry> [<part>...] --review` (consolidate step 5, a change with a review file): reads the
+  review file the last `diff` on these entries wrote. Prints `FAIL other entries: ...` when it was
+  written for other entries, `FAIL stale: ...` when the Log's diff changed since, and `FAIL no
+  rule: <kind>: <where>` for each `deleted:` or `changed:` section with text, outside the `other
+  Log file:` and `not consolidate's to change:` headings, whose `Rule:` is empty, then a `next:`
+  line; exit 2. Else a `paste:` line and, in a `review` code fence: `changes: <N> <kind>, ...`
+  (each kind with any, a move counting its lines), `deleted: <where>: <rule>` for each deleted
+  line and `merged: <where>: <rule>` for each changed line whose rule starts with `merge`, in
+  the file's order, and `<heading less its why>: <counts>` for each file under a heading (`other
+  Log file: <file>`, `not consolidate's to change: <file>`); then `review file:`
+  and `diff file:` with their paths. Exit 2 with `no review file: ...` when there is none.
 - `drop <entry> --reason <reason>` (SKILL.md › Dropped experiences, on the user's word): deletes
   each Story index item that links it
   (`story removed: <question type>: <item>`) and its file (`deleted: <entry>`; out of the index
@@ -514,7 +537,8 @@ In the output below, `-` stands for an empty field, a list of question types is 
 - `story-leads --type <question type>...` (interview step 3): for each `--type`, one predicted
   question each, a `question <n>: <question type>` line, then story-candidates' lines for that type; then one
   `next: now, ...` line: show them, ask the user to confirm each type and pick each lead that
-  confirmed Talking points do not give, and end the turn. Exit 0.
+  confirmed Talking points do not give, and end the turn; it ends with the three forms of a pack's
+  Lead: line that `--check` reads. Exit 0.
 - `story-leads --check <pack>`: the interview pack's `## Stories` section, one `### <question>`
   heading per question, each with a `Type: <question type>` line and one Lead: line (a leading `- `
   and bold labels are read too): `Lead: <the Story, or set aside> (user, YYYY-MM-DD)` for the user's
@@ -529,7 +553,7 @@ In the output below, `-` stands for an empty field, a list of question types is 
   is confirmed <its date>` (its `confirmed:` day is another: the file was confirmed again, with the
   key still in it), and a `next:` line, exit 1: it says to rewrite the two taken-lead kinds in the
   form, keeping the key, and to ask the user about the rest; or `leads: ok, <n> question(s)`,
-  exit 0. A `## Stories` with no `### ` but a `None predicted.` line prints `leads: none
+  exit 0. A `## Stories` with no `### ` but a `None predicted.` line prints `leads: ok, none
   predicted`, exit 0; no `## Stories` section, or neither, is a FAIL, with its own `next:` line.
 - `story-stale <stories/<slug>.md>`: the changes, since the file was confirmed, to the entries it
   points at. First `since: <commit> <subject>`, the last commit that wrote the file's current
@@ -631,6 +655,7 @@ Standard library only, Python 3.11+.
 import datetime
 import difflib
 import glob
+import hashlib
 import os
 import posixpath
 import re
@@ -1107,8 +1132,12 @@ def unresolved_keys(root, line):
             continue
         if p.rstrip("/") == logfiles.INBOX or p.startswith(logfiles.INBOX + "/") or p == "sources/":
             continue
-        full = os.path.join(root, *p.rstrip("/").split("/"))
-        if not (glob.glob(full) if "*" in p else os.path.exists(full)):
+        parts = p.rstrip("/").split("/")
+        if "*" in p:
+            found = glob.glob(os.path.join(glob.escape(root), *parts))
+        else:
+            found = os.path.exists(os.path.join(root, *parts))
+        if not found:
             out.append("%s (no such file)" % p)
     for m in SESSION_KEY.finditer(line):
         agent, date, slug = m.group(1), m.group(2), m.group(3)
@@ -1159,16 +1188,21 @@ def source_folder_findings(root):
     return out
 
 
+def rel_entry(root, full):
+    """full's /-separated path relative to root when it is an entry file of root, else None."""
+    try:
+        rel = os.path.relpath(full, os.path.abspath(root)).replace(os.sep, "/")
+    except ValueError:   # another drive (Windows)
+        return None
+    return rel if os.path.isfile(full) and ENTRY_PATH.fullmatch(rel) else None
+
+
 def entry_arg(root, arg):
-    """The entry's /-separated path relative to root, from a path relative to root or the cwd."""
-    for base in (root, os.getcwd()):
-        full = os.path.abspath(os.path.join(base, arg))
-        try:
-            rel = os.path.relpath(full, os.path.abspath(root)).replace(os.sep, "/")
-        except ValueError:   # another drive (Windows)
-            continue
-        if os.path.isfile(full) and ENTRY_PATH.fullmatch(rel):
-            return rel
+    """The entry's /-separated path relative to root, from a path relative to root or the cwd
+    (logfiles.arg_path)."""
+    full = logfiles.arg_path(root, arg, lambda full: rel_entry(root, full))
+    if full:
+        return rel_entry(root, full)
     raise Error("not an entry of %s: %s (an entry is entries/<name>.md, not _template.md)" % (root, arg))
 
 
@@ -1242,7 +1276,8 @@ def cmd_links_since(root, path):
     text = read(os.path.join(root, path))
     now = links(logfiles.strip_comments(text))
     if sha:
-        before = set(links(logfiles.strip_comments(git(root, "show", "%s:./%s" % (sha, path)))))
+        blob = logfiles.git_blob(root, sha, path) or b""
+        before = set(links(logfiles.strip_comments(blob.decode("utf-8", "replace"))))
         print("since: %s %s" % (sha[:12], subject))
     else:
         before = set()
@@ -1325,7 +1360,7 @@ def plain(text, tex=False):
     apostrophes straight, each run of
     hyphens, dashes and spaces one space, and no space between a number and its unit."""
     if tex:
-        text = re.sub(r"(?<!\\)%.*$", "", text, flags=re.M)
+        text = "\n".join(logfiles.tex_uncomment(line) for line in text.split("\n"))
         text = re.sub(r"\\[,;:! ]", " ", text)
         text = re.sub(r"\\([%&$#_{}])", r"\1", text)
         text = re.sub(r"\\[a-zA-Z]+\*?(?:\[[^\]]*\])?", " ", text).replace("{", "").replace("}", "").replace("~", " ")
@@ -1797,7 +1832,10 @@ def cmd_story_leads(root, types):
           " recommend for this posting. Ask them to confirm each type and pick each of those other leads"
           " (one of these, another story, talk it through, or set the question aside), then end your turn:"
           " the pack's Lead: lines are their answers and the leads taken, and `story-leads --check <pack>`"
-          " runs before its commit")
+          " runs before its commit; each question's one Lead: line is `Lead: <the Story's key, as this command"
+          " printed it> (user, <the date of their answer>)` for a lead the user picked, `Lead: set aside (user,"
+          " <that date>)`, or `Lead: <the Story's key> (<the Talking points file>, confirmed <the date on its"
+          " talking points: line>)` for a lead taken from confirmed Talking points the user did not change")
     return 0
 
 
@@ -1823,12 +1861,12 @@ def talking_pick_problem(root, m, types):
 def cmd_story_leads_check(root, path):
     """The pack's ## Stories: each `### <question>` has a Type: line and one Lead: line, the user's pick or
     a Story of the confirmed Talking points file it names."""
-    full = path if os.path.isabs(path) else os.path.join(root, path)
+    full = logfiles.arg_path(root, path) or os.path.join(root, path)
     text = logfiles.read_text(full)
     body = logfiles.section(text, "Stories")
     blocks = re.split(r"(?m)^### +", body)[1:] if body is not None else []
     if not blocks and body is not None and NONE_PREDICTED.search(body):
-        print("leads: none predicted")
+        print("leads: ok, none predicted")
         return 0
     if not blocks:
         print("FAIL: %s: %s" % ("no ## Stories section" if body is None else "no ### question under ## Stories", path))
@@ -1887,6 +1925,16 @@ def talking_points_arg(root, arg):
     raise Error("not a Talking points file of %s: %s (one is stories/<slug>.md)" % (root, arg))
 
 
+def entry_changes(root, path, span):
+    """([(short hash, date, subject)] for each commit of span (git log's revision arguments) that
+    touched the entry at path, newest first; whether it has uncommitted changes), or None when the
+    entry is gone. application.py stale and story-stale read an entry's changes by it."""
+    if not os.path.isfile(os.path.join(root, *path.split("/"))):
+        return None
+    log = git(root, "log", "--format=%h|%cd|%s", "--date=short", *span, "--", path).splitlines()
+    return [tuple(c.split("|", 2)) for c in log if c], bool(git(root, "status", "--porcelain", "--", path).strip())
+
+
 def cmd_story_stale(root, path):
     tp = TalkingPoints(root, path)
     if not tp.day:
@@ -1907,12 +1955,12 @@ def cmd_story_stale(root, path):
         span = ["--since=%s:00" % since]
     out = []
     for entry in tp.entries:
-        if not os.path.isfile(os.path.join(root, entry)):
+        changes = entry_changes(root, entry, span)
+        if changes is None:
             out.append("missing entry: %s" % entry)
             continue
-        for line in git(root, "log", "--format=%h %cd %s", "--date=short", *span, "--", entry).splitlines():
-            out.append("changed: %s %s" % (entry, line))
-        if git(root, "status", "--porcelain", "--", entry).strip():
+        out += ["changed: %s %s" % (entry, " ".join(c)) for c in changes[0]]
+        if changes[1]:
             out.append("uncommitted: %s" % entry)
     for line in out:
         print(line)
@@ -2635,14 +2683,9 @@ def set_field(lines, key, value, comment=None):
 
 
 def section_bounds(lines, heading):
-    """(index of the `## <heading>` line, index after its last line) in raw lines, or None; the
-    section runs to the next `# ` or `## ` heading outside comments."""
-    bare = [line for _, line in lines_of("".join(lines))]
-    start = next((i for i, line in enumerate(bare) if re.fullmatch(r"## %s[ \t]*" % re.escape(heading), line)), None)
-    if start is None:
-        return None
-    end = next((i for i in range(start + 1, len(bare)) if re.match(r"#{1,2}[ \t]", bare[i])), len(lines))
-    return start, end
+    """(index of the `## <heading>` line, index after its last line) in raw lines, or None: the
+    section logfiles.section() reads, to the next `## ` heading outside comments."""
+    return logfiles.section_lines(lines, heading)
 
 
 def append_in_section(lines, bounds, new):
@@ -2660,17 +2703,14 @@ def append_in_section(lines, bounds, new):
 
 README_HEADER = ("Period", "Entry", "Type", "Status")
 README_RULE = "|---|---|---|---|"
-README_COMMAND = "python3 -I <root>/tools/entries.py readme --root <root>"
+README_COMMAND = "%s -I <root>/tools/entries.py readme --root <root>" % logfiles.python_cmd()
 README_PLACEHOLDER = "Entries appear here as you log them."   # the Template's line for an empty Log
 
 
 def entries_section(lines):
-    """(heading, end): the `## Entries` heading's index in lines and the index of the next heading (or
-    len(lines)); None without the heading."""
-    heading = next((k for k, line in enumerate(lines) if re.fullmatch(r"##\s+Entries", line.strip())), None)
-    if heading is None:
-        return None
-    return heading, next((k for k in range(heading + 1, len(lines)) if lines[k].startswith("#")), len(lines))
+    """(heading, end): the `## Entries` heading's index in lines and the index after its section
+    (section_bounds); None without the heading."""
+    return section_bounds(lines, "Entries")
 
 
 def readme_span(root):
@@ -2681,19 +2721,8 @@ def readme_span(root):
     if not os.path.isfile(path):
         raise Error("no README.md in %s" % root)
     bom, lines = read_lines(path)
-    tables, section, i = [], None, 0
-    while i < len(lines):
-        if lines[i].startswith("## "):
-            section = lines[i][3:].strip()
-        if not lines[i].strip().startswith("|"):
-            i += 1
-            continue
-        j = i + 1
-        while j < len(lines) and lines[j].strip().startswith("|"):
-            j += 1
-        if "entry" in [c.strip("*` ").lower() for c in logfiles.md_cells(lines[i])]:
-            tables.append((section != "Entries", i, j))
-        i = j
+    tables = [(t.section != "Entries", t.line - 1, t.end) for t in logfiles.md_tables("".join(lines))
+              if "entry" in t.header]
     if tables:
         _, start, end = min(tables)
         return bom, lines, start, end
@@ -3177,7 +3206,6 @@ DIFF_CONTEXT = 8   # words diff keeps on each side of a change in a long line
 WORD_TOKENS = re.compile(r"\s+|\S+")   # whitespace runs are tokens too, so a whitespace change shows
 HUNK = re.compile(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 MD_HEADING = re.compile(r"#{1,6}[ \t]")
-MD_FENCE = re.compile(r"[ \t]*(`{3,}|~{3,})")
 
 
 def unchanged_mark(n):
@@ -3235,16 +3263,10 @@ def pair_lines(dels, adds):
 def section_of(lines, n):
     """The last Markdown heading at or above line n (1-based) of a file's lines, front matter and
     fenced code left out."""
-    start = next((k + 1 for k in range(1, len(lines)) if lines[k] == "---"), 0) if lines[:1] == ["---"] else 0
-    heading, fence = "", None
-    for line in lines[start:n]:
-        m = MD_FENCE.match(line)
-        if fence:
-            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not line.strip(" \t`~"):
-                fence = None
-        elif m:
-            fence = m.group(1)
-        elif MD_HEADING.match(line):
+    start = logfiles.split_front_matter("\n".join(lines), closed=True)[1]
+    heading = ""
+    for _, line in logfiles.outside_code(lines[start:n]):
+        if MD_HEADING.match(line):
             heading = line.rstrip()
     return heading
 
@@ -3359,12 +3381,14 @@ def diff_blocks(out):
 
 
 def change_list(root, out, usual):
-    """The change list of git diff output, as (path, line), covering each non-blank deleted line:
-    `changed:` with the added line that rewrites it (pair_lines, trim_pair), `moved:` when a line
-    added elsewhere in the usual paths is the same text (a run of them in a row, to one file in the
-    same order, as one line), else `deleted:`; each `<path>:<old line>[-<last>] (<section>)`. A path
-    outside usual also gets `added: <path>:<new line> (<section>): <text>` for each non-blank line
-    added with no deleted line it rewrites."""
+    """The change list of git diff output, as (path, line, change), covering each non-blank deleted
+    line: `changed:` with the added line that rewrites it (pair_lines, trim_pair), `moved:` when a
+    line added elsewhere in the usual paths is the same text (a run of them in a row, to one file in
+    the same order, as one line), else `deleted:`; each `<path>:<old line>[-<last>] (<section>)`. A
+    path outside usual also gets `added: <path>:<new line> (<section>): <text>` for each non-blank
+    line added with no deleted line it rewrites; in a usual path that line's `line` is None (the
+    list leaves it out). change is the review file's (cmd_diff): {"kind", "where", "old", "new"},
+    old and new lists of whole lines, a move's "to" and a rewrite's "short" (its line's text)."""
     blocks, olds, news = diff_blocks(out), {}, {}
     def where(path, n, end=None, rev=""):
         seen = olds if rev == "" else news
@@ -3372,6 +3396,9 @@ def change_list(root, out, usual):
             seen[path] = file_lines(root, path, rev)
         name = section_of(seen[path], n)
         return "%s:%d%s%s" % (path, n, "-%d" % end if end else "", " (%s)" % name if name else "")
+    def change(kind, place, old=(), new=()):
+        return {"kind": kind, "where": place, "old": list(old), "new": list(new)}
+    # items: (path, n, line, change), a move's change ((dest path, n), text) until fold
     items, gone, pending = [], [], []   # gone: (path, n, text) deleted with no rewrite; pending: added, unpaired
     for old, new, dels, adds in blocks:
         paired = set()
@@ -3379,7 +3406,10 @@ def change_list(root, out, usual):
             if i is not None and j is not None:
                 was, now, _ = trim_pair(dels[i][1], adds[j][1])
                 if was.strip():   # two blank lines pair too
-                    items.append((old, dels[i][0], "changed: %s: %s => %s" % (where(old, dels[i][0]), was, now)))
+                    place = where(old, dels[i][0])
+                    rewrite = change("changed", place, [dels[i][1]], [adds[j][1]])
+                    rewrite["short"] = "%s => %s" % (was, now)
+                    items.append((old, dels[i][0], "changed: %s: %s" % (place, rewrite["short"]), rewrite))
                 paired.add(j)
             elif i is not None:
                 gone.append((old or new, dels[i][0], dels[i][1]))
@@ -3387,42 +3417,54 @@ def change_list(root, out, usual):
         if new in usual:
             pending += [(new, n, t) for n, t in unpaired]
         else:
-            items += [(old or new, n, "added: %s: %s" % (where(new, n, rev=None), t)) for n, t in unpaired if t.strip()]
+            for n, t in unpaired:
+                if t.strip():
+                    place = where(new, n, rev=None)
+                    items.append((old or new, n, "added: %s: %s" % (place, t), change("added", place, new=[t])))
     added = {}
     for path, n, text in pending:
         added.setdefault(text.strip(), []).append((path, n))
     # a run of moves may span blank lines deleted and added between them, never a line that stayed
     blank_gone = {(path, n) for path, n, text in gone if not text.strip()}
     blank_added = {(path, n) for path, n, text in pending if not text.strip()}
+    moved_to = set()
     for path, n, text in gone:
         if not text.strip():
             continue
         to = added.get(text.strip())
         if to:
-            items.append((path, n, (to.pop(0), text)))   # a move, folded into runs below
+            moved_to.add(to[0])
+            items.append((path, n, None, (to.pop(0), text)))   # a move, folded into runs below
         else:
-            items.append((path, n, "deleted: %s: %s" % (where(path, n), text)))
+            place = where(path, n)
+            items.append((path, n, "deleted: %s: %s" % (place, text), change("deleted", place, [text])))
+    for path, n, text in pending:
+        if text.strip() and (path, n) not in moved_to:
+            items.append((path, n, None, change("added", where(path, n, rev=None), new=[text])))
     order = {p: k for k, p in enumerate(dict.fromkeys(b[0] or b[1] for b in blocks))}
     out, run = [], []   # run: the moves in a row, from one file to one file, in the same order
     def fold():
         if run:
-            (path, a, (dest, text)), (_, b, (last, _)) = run[0], run[-1]
+            (path, a, _, (dest, text)), (_, b, _, (last, _)) = run[0], run[-1]
             kept, _ = trim_run(WORD_TOKENS.findall(text), DIFF_CONTEXT, 0)
+            to = "%s:%d%s" % (dest[0], dest[1], "-%d" % last[1] if a != b else "")
             if a == b:
-                out.append((path, "moved: %s -> %s:%d: %s" % (where(path, a), dest[0], dest[1], "".join(kept))))
+                line = "moved: %s -> %s: %s" % (where(path, a), to, "".join(kept))
             else:
-                out.append((path, "moved: %s -> %s:%d-%d: %d lines, the first: %s"
-                            % (where(path, a, b), dest[0], dest[1], last[1], len(run), "".join(kept))))
+                line = "moved: %s -> %s: %d lines, the first: %s" % (where(path, a, b), to, len(run), "".join(kept))
+            moved = change("moved", where(path, a, b if a != b else None), [r[3][1] for r in run])
+            moved["to"] = to
+            out.append((path, line, moved))
             run.clear()
     # an added line sorts after the deleted ones of its file: its number is in the new file
-    for item in sorted(items, key=lambda x: (order.get(x[0], 0), isinstance(x[2], str) and x[2].startswith("added: "), x[1])):
-        if isinstance(item[2], str):
+    for item in sorted(items, key=lambda x: (order.get(x[0], 0), isinstance(x[3], dict) and x[3]["kind"] == "added", x[1])):
+        if isinstance(item[3], dict):
             fold()
-            out.append((item[0], item[2]))
+            out.append((item[0], item[2], item[3]))
             continue
         if run:
-            (path, a, ((dest, c), _)), (_, b, ((_, d), _)) = run[-1], item
-            if not (path == item[0] and dest == item[2][0][0] and all((path, k) in blank_gone for k in range(a + 1, b))
+            (path, a, _, ((dest, c), _)), (_, b, _, ((_, d), _)) = run[-1], item
+            if not (path == item[0] and dest == item[3][0][0] and all((path, k) in blank_gone for k in range(a + 1, b))
                     and all((dest, k) in blank_added for k in range(c + 1, d)) and c < d):
                 fold()
         run.append(item)
@@ -3444,6 +3486,21 @@ UNTOUCHED = (("outputs/", "an output, frozen"), ("sources/", "a source, historic
              ("scan-sources.md", "another mode's file"), ("config.toml", "the Log's settings"))
 
 
+# What consolidate step 5's rules say for each kind of change-list line: the usual files' deleted:
+# and changed: lines (rank 0), moved: lines, and each file under a heading (rank 1, 2)
+DIFF_RULES = {
+    0: "for each, by its <file>:<line>, the Condense rule it follows (lines that follow one rule may share an"
+       " item); a detail moved into an excerpt names the excerpt, and the lines of one merge say they were merged",
+    "moved": "each names its part; a fact, ## Past phrasings line or ## Conflicts line reworded on its way to a"
+             " part is a deleted: line, so its item names the part it went to",
+    1: ("other Log file", "one item says why its lines changed (in a bulk run, an entry an earlier step 5 showed"
+                          " is listed again: say so)"),
+    2: ("not consolidate's to change", "put it back as it was if this run wrote it, then run diff again before you"
+                                       " show the list; a change this run did not write stays, and its item says"
+                                       " it was there before the run"),
+}
+
+
 def diff_heading(path, usual, new):
     """(rank, heading line) for path's change-list lines: (0, None) for a usual file (a new file in
     sources/, an excerpt, among them), (2, `not consolidate's to change: ...`) for an UNTOUCHED one,
@@ -3456,52 +3513,232 @@ def diff_heading(path, usual, new):
     return 1, "other Log file: %s" % path
 
 
+def log_diff(root):
+    """(git diff of every Log file against the index, the Log's untracked files, its changed files,
+    a hash of the first two): what diff shows, and what diff --review checks is unchanged."""
+    out = git(root, "-c", "diff.suppressBlankEmpty=false", "-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--relative", "--src-prefix=a/",
+              "--dst-prefix=b/", "--no-renames", "-U3", "--", *logfiles.LOG_PATHS).rstrip("\r\n")
+    changed = [p for p in git(root, "diff", "--name-only", "--relative", "--no-renames", "--", *logfiles.LOG_PATHS).splitlines() if p]
+    others = [p for p in git(root, "ls-files", "--others", "--exclude-standard", "--", *logfiles.LOG_PATHS).splitlines() if p]
+    h = hashlib.sha256(out.encode("utf-8"))
+    for p in others:   # a new excerpt is in no diff: its name and its bytes
+        h.update(b"\0" + p.encode("utf-8") + b"\0")
+        with open(os.path.join(root, p), "rb") as fh:
+            h.update(fh.read())
+    return out, others, changed, h.hexdigest()[:16]
+
+
+def review_paths(root, paths):
+    """(diff file, review file) of a diff run on paths: root-relative, and their full paths."""
+    stem = ".build/diff/%s" % posixpath.splitext(posixpath.basename(paths[0]))[0]
+    rels = (stem + ".diff", stem + ".review.md")
+    return rels, tuple(os.path.join(root, *r.split("/")) for r in rels)
+
+
+REVIEW_HEAD = """# Change review: {names}
+
+`entries.py diff` wrote this file with `{diff}`: every change that diff makes, one section
+each (a `changed:` one with its `Short:` line, the changed words and {context} words beside each, then the
+whole old and new lines). It rewrites the file on each run, keeping a `Rule:` line you wrote while
+its change is still there.
+
+On the `Rule:` line of each `deleted:` and `changed:` change under the entry's own headings (the
+entry, its parts, README.md, stories.md, profile.md and a new excerpt), write the *Condense* rule
+(consolidate step 2) it follows; for each line of one merge, start it with `merge:` and name the
+other lines. A `moved:` change names its part already; an `added:` change, or one under an `other
+Log file:` or `not consolidate's to change:` heading, needs no rule (that heading's `rule:` line
+says what to tell the user). Then run `entries.py diff --review` with the same entries.
+
+entries: {entries}
+diff: {digest}
+"""
+
+
+def review_quote(lines):
+    return ["> " + t if t else ">" for t in lines]
+
+
+def read_review(text):
+    """The sections of a review file: (heading of its file group, kind, where, old, new, rule),
+    and its `entries:` and `diff:` values."""
+    sections, meta, group, cur, part = [], {}, None, None, None
+    for line in text.split("\n"):
+        m = re.match(r"### \d+\. (%s): (.*)$" % "|".join(REVIEW_KINDS), line)
+        if m:
+            cur = {"group": group, "kind": m.group(1), "where": m.group(2), "old": [], "new": [], "rule": ""}
+            sections.append(cur)
+            part = None
+        elif line.startswith("## "):
+            group, cur = line[3:], None
+        elif cur is None and re.match(r"(entries|diff): ", line):
+            meta[line.split(": ", 1)[0]] = line.split(": ", 1)[1]
+        elif cur is not None and line in ("Old:", "New:"):
+            part = line[:-1].lower()
+        elif cur is not None and part and line.startswith(">"):
+            cur[part].append(line[2:])
+        elif cur is not None and line.startswith("Rule:"):
+            cur["rule"], part = line[5:].strip(), None
+    return sections, meta
+
+
+def review_key(s):
+    """What keeps a rule across diff runs: the change, its file, its text, never its line number."""
+    return (s["kind"], re.match(r"(.*?)(:\d|$)", s["where"]).group(1), tuple(s["old"]), tuple(s["new"]))
+
+
+def write_review(root, paths, groups, digest):
+    """Write the review file: groups is [(heading, path, rule, [change])], heading None for a usual file."""
+    (diff_rel, _), (_, full) = review_paths(root, paths)
+    kept = {}
+    if os.path.isfile(full):
+        with open(full, encoding="utf-8") as fh:
+            kept = {review_key(s): s["rule"] for s in read_review(fh.read())[0] if s["rule"]}
+    out, k = [REVIEW_HEAD.format(names=", ".join(paths), diff=diff_rel, entries=" ".join(paths), digest=digest,
+                              context=DIFF_CONTEXT)], 0
+    for heading, path, rule, changes in groups:
+        out.append("## %s\n" % (heading or path))
+        if rule:
+            out.append("%s\n" % rule)
+        for c in changes:
+            k += 1
+            text = ["### %d. %s: %s%s" % (k, c["kind"], c["where"], " -> " + c["to"] if c.get("to") else ""), ""]
+            if c.get("short"):   # the change list's text: each change, with DIFF_CONTEXT words beside it
+                text += ["Short: " + c["short"], ""]
+            for name in ("old", "new"):
+                if c[name]:
+                    text += [name.title() + ":"] + review_quote(c[name])
+            rule_text = kept.get(review_key(c), "")
+            text += ["", ("Rule: " + rule_text) if rule_text else "Rule:", ""]
+            out.append("\n".join(text))
+    with open(full, "w", encoding="utf-8", newline="") as fh:
+        fh.write("\n".join(out))
+
+
+REVIEW_KINDS = ("changed", "deleted", "moved", "added", "new file")
+HEADINGS = ("other Log file: ", "not consolidate's to change: ")   # diff_heading's, for a file outside the usual ones
+
+
+def review_counts(sections):
+    """`<N> <kind>` per kind, comma-separated; a move counts its lines."""
+    n = {k: 0 for k in REVIEW_KINDS}
+    for s in sections:
+        n[s["kind"]] += len(s["old"]) if s["kind"] == "moved" else 1
+    return ", ".join("%d %s" % (n[k], k) for k in REVIEW_KINDS if n[k])
+
+
+def cmd_diff_review(root, paths):
+    (diff_rel, rel), (_, full) = review_paths(root, paths)
+    if not os.path.isfile(full):
+        print("no review file: %s: run diff first; a change small enough to paste has none (show its changes block)" % rel)
+        return 2
+    with open(full, encoding="utf-8") as fh:
+        sections, meta = read_review(fh.read())
+    fails = []
+    if meta.get("entries", "").split() != paths:
+        fails.append("FAIL other entries: %s is the review of %s: run diff again with these entries" % (rel, meta.get("entries")))
+    elif meta.get("diff") != log_diff(root)[3]:
+        fails.append("FAIL stale: the Log changed after diff wrote %s: run diff again (it keeps each rule whose change"
+                     " is still there)" % rel)
+    usual = [s for s in sections if not (s["group"] or "").startswith(HEADINGS)]
+    for s in usual if not fails else ():   # another run's file, or a stale one: its rules are not this diff's
+        if s["kind"] in ("deleted", "changed") and (s["old"] or s["new"]) and not s["rule"]:   # a binary has no text
+            fails.append("FAIL no rule: %s: %s" % (s["kind"], s["where"]))
+    if fails:
+        print("\n".join(fails))
+        if fails[0].startswith("FAIL no rule"):
+            print("next: write each missing rule on its change's Rule: line in %s, then run diff --review again" % rel)
+        else:
+            print("next: run diff, write any rule it leaves missing, then run diff --review again")
+        return 2
+    block = ["changes: " + review_counts(sections)]
+    for s in usual:
+        if s["kind"] == "deleted":
+            block.append("deleted: %s: %s" % (s["where"], s["rule"]))
+        elif s["kind"] == "changed" and s["rule"].lower().startswith("merge"):
+            block.append("merged: %s: %s" % (s["where"], s["rule"]))
+    for g in dict.fromkeys(s["group"] for s in sections if (s["group"] or "").startswith(HEADINGS)):
+        name = ": ".join(g.split(": ")[:2])   # the heading less its `: <why>`
+        block.append("%s: %s" % (name, review_counts([s for s in sections if s["group"] == g])))
+    text = "\n".join(block)
+    f = fence(text)
+    print("paste: paste the lines below, from `%sreview` to the closing `%s`, into your reply whole, as printed,"
+          " then give the user the review file and the diff file below" % (f, f))
+    print("%sreview\n%s\n%s" % (f, text, f))
+    print("review file: %s" % rel)
+    print("diff file: %s" % diff_rel)
+    return 0
+
+
 def cmd_diff(root, paths, paste):
     tracked = set(git(root, "ls-files", "--", *paths).splitlines())
     new = [p for p in paths if p not in tracked]
     if new:
         git(root, "add", "-N", "--", *new)
-    out = git(root, "-c", "diff.suppressBlankEmpty=false", "-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--no-relative", "--src-prefix=a/",
-              "--dst-prefix=b/", "--no-renames", "-U3", "--", *logfiles.LOG_PATHS)
-    changed = [p for p in git(root, "diff", "--name-only", "--no-renames", "--", *logfiles.LOG_PATHS).splitlines() if p]
-    others = [p for p in git(root, "ls-files", "--others", "--exclude-standard", "--", *logfiles.LOG_PATHS).splitlines() if p]
+    out, others, changed, digest = log_diff(root)
+    (rel, review_rel), (full, review_full) = review_paths(root, paths)
     if not changed and not others:
+        if os.path.isfile(review_full):
+            os.remove(review_full)
         print("no change: %s" % " ".join(paths))
         return 0
-    out = out.rstrip("\r\n")
     usual = set(paths) | set(USUAL)
     files = {p: [] for p in changed}   # each changed file's change-list lines, in the diff's order, then the untracked
-    for path, line in change_list(root, out, usual):
-        files[path].append(line)
+    reviews = {p: [] for p in changed}   # and its review file's changes
+    for path, line, change in change_list(root, out, usual):
+        if line:
+            files[path].append(line)
+        reviews[path].append(change)
     with_lines = {p for b in diff_blocks(out) for p in b[:2]}
     for path in changed:
         if path not in with_lines:
             files[path].append("changed: %s: no line to list (a binary file, or its mode)" % path)
+            reviews[path].append({"kind": "changed", "where": "%s (no line to list: a binary file, or its mode)" % path,
+                                  "old": [], "new": []})
     for path in others:
         files[path] = ["new file: %s" % path]
+        reviews[path] = [{"kind": "new file", "where": path, "old": [], "new": []}]
     # the usual files' lines first, then each other file under its heading, the untouched ones last
-    lines = []
+    lines, rules, groups = [], [], []
     for path in sorted(files, key=lambda p: diff_heading(p, usual, p in others)[0]):   # stable: the diff's order within a rank
-        heading = diff_heading(path, usual, path in others)[1]
+        rank, heading = diff_heading(path, usual, path in others)
         lines += ([heading] if heading else []) + files[path]
-    changes = "\n".join(lines) or "(no line deleted: lines were added only)"
-    f = fence(changes)
-    print("paste: paste the lines below, from `%schanges` to the closing `%s`, into your reply whole, as"
-          " printed, every line, before the rules" % (f, f))
-    print("%schanges\n%s\n%s" % (f, changes, f))
+        rule = None
+        if rank:
+            rule = "rule: %s: %s: %s" % (DIFF_RULES[rank][0], path, DIFF_RULES[rank][1])
+            rules.append(rule)
+        elif any(re.match(r"(deleted|changed): \S+:\d", l) for l in files[path]):
+            rules.append("rule: deleted and changed: " + DIFF_RULES[0])
+        groups.append((heading, path, rule, reviews[path]))
+    if any(l.startswith("moved: ") for l in lines):
+        rules.append("rule: moved: " + DIFF_RULES["moved"])
+    words = sum(len(t.split()) for _, _, dels, adds in diff_blocks(out) for _, t in dels + adds)
+    small = len(paths) == 1 and words <= PASTE_WORDS
+    if small:
+        if os.path.isfile(review_full):
+            os.remove(review_full)
+        changes = "\n".join(lines) or "(no line deleted: lines were added only)"
+        f = fence(changes)
+        print("paste: paste the lines below, from `%schanges` to the closing `%s`, into your reply whole, as"
+              " printed, every line, before the rules" % (f, f))
+        print("%schanges\n%s\n%s" % (f, changes, f))
+    else:
+        os.makedirs(os.path.dirname(review_full), exist_ok=True)
+        write_review(root, paths, groups, digest)
+        print("review file: %s" % review_rel)
+        print("next: too long to paste: write the Condense rule of each deleted: and changed: change on its"
+              " Rule: line in the review file, then run diff --review with the same entries and show what it prints")
+    for rule in dict.fromkeys(rules):
+        print(rule)
     for p in paths:
         text = "\n".join(file_lines(root, p, None))
         print("size: %s: %d tokens, %.1f KB" % (p, tokens(text), len(text.encode("utf-8")) / 1024))
-    rel = ".build/diff/%s.diff" % posixpath.splitext(posixpath.basename(paths[0]))[0]
-    full = os.path.join(root, *rel.split("/"))
     os.makedirs(os.path.dirname(full), exist_ok=True)
     with open(full, "w", encoding="utf-8", newline="") as fh:
         fh.write(out + "\n")
     print("diff file: %s" % rel)
     print("open: %s" % open_command(os.path.abspath(full)))
     block, cut = word_diff(root, out)
-    words = sum(len(t.split()) for _, _, dels, adds in diff_blocks(out) for _, t in dels + adds)
-    if out and (paste or (len(paths) == 1 and words <= PASTE_WORDS)):   # none when only new files changed
+    if out and (paste or small):   # none when only new files changed
         if cut:
             block = "# [… N words unchanged …]: N unchanged words this diff leaves out; it shows every added and deleted word\n" + block
         f = fence(block)
@@ -3570,8 +3807,8 @@ def cmd_drop(root, path, reason, today):
     for line in folded:
         print(line)
     if core and parts:
-        print("next: core went with it; the experience has parts left: python3 -I <root>/tools/entries.py story-core"
-              " <part> on --root <root>, on the user's word")
+        print("next: core went with it; the experience has parts left: %s -I <root>/tools/entries.py story-core"
+              " <part> on --root <root>, on the user's word" % logfiles.python_cmd())
     if left:
         print("next: take the entry out of each line below, or delete a line that says nothing else")
     for rel, n, text in left:
@@ -3923,7 +4160,7 @@ VALUE_FLAGS = ("--series", "--today", "--type", "--month", "--status", "--field"
                "--source", "--replace", "--cover", "--date", "--window", "--marker", "--label", "--summary", "--scope",
                "--phase", "--cut", "--reason")
 SWITCHES = ("--consolidated", "--check", "--distinct", "--ongoing", "--course-work", "--remove", "--talking-points",
-            "--application-questions", "--undo", "--paste")
+            "--application-questions", "--undo", "--paste", "--review")
 REPEATED = ("--type", "--field", "--field-source", "--marker", "--cut")
 FLAGS = {   # each subcommand's flags; --root is every one's
     "list": {"--series", "--date", "--window", "--course-work", "--today"}, "check": {"--consolidated", "--today"},
@@ -3934,7 +4171,7 @@ FLAGS = {   # each subcommand's flags; --root is every one's
     "new": {"--month", "--status", "--field", "--field-source", "--visibility-source", "--today"},
     "state": {"--today"}, "pending-add": {"--today"}, "period": {"--cover", "--ongoing"},
     "set-visibility": {"--source", "--today"}, "phrasing-add": {"--angle", "--source", "--distinct", "--replace"},
-    "split": {"--phase", "--cut", "--undo", "--today"}, "diff": {"--paste"}, "drop": {"--reason", "--today"}}
+    "split": {"--phase", "--cut", "--undo", "--today"}, "diff": {"--paste", "--review"}, "drop": {"--reason", "--today"}}
 TAKES = {"list": 0, "rulings-hits": 0, "story-coverage": 0, "story-wordings": 0, "readme": 0, "refs": 1,
          "links-since": 1, "story-candidates": 1, "story-stale": 1, "story-finish": 1, "new": 1, "set-status": 2,
          "period": 1, "story-wording-add": 2, "phrasing-add": 2, "pending-add": 2, "set-visibility": 2,
@@ -4016,8 +4253,8 @@ def main(argv):
              " answer-row-add <question type> --scope shared|per-angle|per-company |"
              " answer-set <question type> [--angle <angle>] [--remove] <path> |"
              " split <entry> --phase <phase> --cut [<end>..]<start>:<part>:<phase>... | split --undo <entry> <part>... |"
-             " diff <entry> [<part>...] [--paste] | drop <entry> --reason <reason>"
-             % ("py -3" if os.name == "nt" else "python3"))
+             " diff <entry> [<part>...] [--paste|--review] | drop <entry> --reason <reason>"
+             % logfiles.python_cmd())
     try:
         root, argv = logfiles.split_root(argv, __file__)
     except logfiles.LogError as e:
@@ -4163,6 +4400,10 @@ def main(argv):
         if cmd == "state":
             return cmd_state(root, [entry_arg(root, a) for a in rest], today)
         if cmd == "diff":
+            if "--review" in opts:
+                if "--paste" in opts:
+                    return bad("diff takes --review or --paste, not both")
+                return cmd_diff_review(root, [entry_arg(root, a) for a in rest])
             return cmd_diff(root, [entry_arg(root, a) for a in rest], "--paste" in opts)
         if cmd == "split":
             paths = [entry_arg(root, a) for a in rest]

@@ -57,10 +57,16 @@ check, the notes, and the map as a table with the headers of COLUMNS. Required c
 `<covered>/<required>`: the rows of kind required or duty, and of them the `covered` ones; when no
 row has one of those kinds (a map from before kinds were kept), every row counts.
 
-- `name`: prints `map file: .build/fit/<YYYY-MM-DD>-<company>-<role>.jsonl`, the path to write the
-  map file to, company and role as ASCII names (lowercase letters and digits, `-` between words; a
-  name that holds a character outside ASCII, or no letter or digit, ends in the first 8 hex digits
-  of its SHA-256).
+- `name <company> <role>`: prints `map file: .build/fit/<YYYY-MM-DD>-<company>-<role>.jsonl`, the
+  path to write the map file to, company and role as ASCII names (lowercase letters and digits, `-`
+  between words; a name that holds a character outside ASCII, or no letter or digit, ends in the
+  first 8 hex digits of its SHA-256).
+  `name --scope <words>` prints `report: outputs/reports/<YYYY-MM-DD>-fit-<scope>.md` (a
+  several-postings report, fit-several-postings.md step 7), `name --project <name>` prints `brief:
+  outputs/projects/<name>.md` (a project brief), each name an ASCII name as above. It refuses a scope
+  whose name starts with `posting-`, the one-posting plans' (`save:` below). A scope with no ASCII
+  letter or digit, whose name is only a hash, adds a `hint:` line: ASCII words (a romanization, or
+  the companies' English names) give a name that reads.
 - `map`: checks each map file and prints, per file:
   - `Course work: <the course_work file names, or none> (<n> entries listed)`, <n> the number of
     lines `tools/entries.py list` prints that start with `entries/`;
@@ -681,7 +687,7 @@ def heatmap_rows(results, last):
                 share += weights[i] * (2 if any(r["kind"] != "preferred" for r in short) else 1)
         share /= total
         priority = "-" if weakest == "covered" else next(p for at, p in PRIORITIES if share >= at)
-        which = ", ".join("#%d" % (i + 1) for i in sorted(s["per"]))
+        which = ", ".join(legend_number(i) for i in sorted(s["per"]))
         touched = sum(1 for rows in rough if any(e.strip() for r in rows for e in r["entries"] if isinstance(e, str)))
         out.append(((["critical", "high", "medium", "low", "-"].index(priority), -share, -len(s["per"]),
                      skill_key(s["name"])),
@@ -694,10 +700,7 @@ def ranks(root):
     """The tier of each line of direction.md's Target roles, in order: its place in the list, from 1,
     `GAP:` lines counted (the place a reader sees), mapped to whether the line is a `GAP:` one;
     {} when the roles are empty, as config.py's show reads them."""
-    if not config.target_roles(root):
-        return {}
-    _, _, found = config.item_lines(config.direction_text(root), "target roles")
-    return {n: config.is_gap(t) for n, (_, t) in enumerate(found, 1)}
+    return {n: gap for n, (_, gap) in config.tiers(root).items()}
 
 
 def last_rank(tiers):
@@ -707,7 +710,8 @@ def last_rank(tiers):
 
 def tier_problem(t, tiers):
     """What is wrong with a tier `t` against ranks()'s map, the text after "tier", or None when it is
-    null or a target role's place; scan.py's prefilter and Screen result check and heatmap share it."""
+    null or a target role's place; scan.py's prefilter and Screen result check, heatmap and
+    application.py start's --tier share it."""
     if t is None:
         return None
     last = last_rank(tiers)
@@ -724,18 +728,25 @@ def tier_problem(t, tiers):
     return None
 
 
-def legend_line(n, result):
-    """The heatmap legend's line for the posting numbered `n` (from 1: the map files in the order
-    given, then the screened postings)."""
-    return "- #%d %s, %s%s" % (n, result["company"].strip(), result["role"].strip(), " (rough)" if result.get("rough") else "")
+def legend_number(i):
+    """The heatmap legend's number of the posting at index `i` of its results (the map files in the
+    order given, then the screened postings): `#<i + 1>`, as the legend and the Which cells write it."""
+    return "#%d" % (i + 1)
+
+
+def legend_line(i, result):
+    """The heatmap legend's line for the posting at index `i` of its results."""
+    return "- %s %s, %s%s" % (legend_number(i), result["company"].strip(), result["role"].strip(),
+                              " (rough)" if result.get("rough") else "")
 
 
 def screen_list(path):
     """The run's screen-list.jsonl of a Screen results file (in the run folder's `screen/`), or None
     when the file is not one."""
+    import scan   # scan.py imports this module, so not at the top
     folder = os.path.dirname(os.path.abspath(path))
-    listed = os.path.join(os.path.dirname(folder), "screen-list.jsonl")
-    return listed if os.path.basename(folder) == "screen" and os.path.isfile(listed) else None
+    listed = os.path.join(os.path.dirname(folder), scan.SCREEN_LIST)
+    return listed if os.path.basename(folder) == scan.SCREEN_DIR and os.path.isfile(listed) else None
 
 
 def screened_postings(root, paths, tiers, mapped):
@@ -841,12 +852,28 @@ def cmd_heatmap(root, paths):
     sample, skew = sample_lines(results)
     flags = [l for l in lines if l.startswith("flag: ")] + rough_flags
     out = ["Heatmap: %d skills, %d gaps; weights: %s; %s; flagged: %d of %d" % (len(rows), gaps, "tiers" if any(r.get("tier") is not None for r in results) else "every posting the same", sample, len(flags), len(results))]
-    out += skew + [""] + [legend_line(n, r) for n, r in enumerate(results, 1)] + ["", "| " + " | ".join(HEATMAP) + " |", "|" + "---|" * len(HEATMAP)]
+    out += skew + [""] + [legend_line(i, r) for i, r in enumerate(results)] + ["", "| " + " | ".join(HEATMAP) + " |", "|" + "---|" * len(HEATMAP)]
     return 0, out + [logfiles.md_row(r) for r in rows] + [""] + flags + ["heatmap: ok"]
 
 
-def cmd_name(company, role, today=None):
+def cmd_name(company, role, today=None, scope=None, project=None):
     day = today or datetime.date.today().isoformat()
+    if scope is not None:
+        name = slug(scope)
+        if not scope.strip():
+            raise FitError("name --scope: give the words the postings are named by")
+        if name.startswith("posting-"):
+            raise FitError("name --scope: %r makes %r: give the words the postings are named by, not one that starts"
+                           " with `posting-` (a one-posting plan's name)" % (scope, name))
+        out = ["report: outputs/reports/%s-fit-%s.md" % (day, name)]
+        if not logfiles.ascii_slug(unicodedata.normalize("NFC", scope.strip())):
+            out.append("hint: %r has no ASCII letter or digit, so the name is only a hash; run name --scope again with"
+                       " ASCII words (a romanization, or the companies' English names) for a name that reads" % scope)
+        return 0, out
+    if project is not None:
+        if not project.strip():
+            raise FitError("name --project: give the project's name")
+        return 0, ["brief: outputs/projects/%s.md" % slug(project)]
     return 0, ["map file: .build/fit/%s-%s-%s.jsonl" % (day, slug(company), slug(role))]
 
 
@@ -874,13 +901,17 @@ def main(argv):
     sp.add_argument("--today", type=date_arg)
     sp = sub.add_parser("heatmap")
     sp.add_argument("files", nargs="+")
-    sp = sub.add_parser("name")
-    sp.add_argument("company")
-    sp.add_argument("role")
+    sp = name_parser = sub.add_parser("name")
+    sp.add_argument("company", nargs="?")
+    sp.add_argument("role", nargs="?")
+    sp.add_argument("--scope")
+    sp.add_argument("--project")
     sp.add_argument("--today", type=date_arg)
     try:
         root, argv = logfiles.split_root(argv, __file__)
         a = ap.parse_args(argv)
+        if a.cmd == "name" and ([a.company, a.scope, a.project].count(None) != 2 or (a.company is None) != (a.role is None)):
+            name_parser.error("give <company> <role>, or --scope <words>, or --project <name>")
     except logfiles.LogError as e:
         print("fit: %s" % e)
         return 2
@@ -895,7 +926,7 @@ def main(argv):
         elif a.cmd == "heatmap":
             code, lines = cmd_heatmap(root, a.files)
         else:
-            code, lines = cmd_name(a.company, a.role, a.today)
+            code, lines = cmd_name(a.company, a.role, a.today, a.scope, a.project)
     except (FitError, logfiles.LogError, OSError, UnicodeDecodeError) as e:
         print("fit: %s" % e)
         return 1

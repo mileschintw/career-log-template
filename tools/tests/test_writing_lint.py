@@ -205,7 +205,7 @@ class WritingLint(unittest.TestCase):
 
     def test_skills_line_break_forms(self):
         posting = self.write("posting.md", "We use Python, Go, PostgreSQL and Redis.\n")
-        for end in (r"\\", r"\\*", r"\\[2pt]", r"\\ \vspace{2pt}", r"\newline", "\\"):
+        for end in (r"\\", r"\\*", r"\\[2pt]", r"\\ [2pt]", r"\\ \vspace{2pt}", r"\newline", "\\"):   # #651 C6
             with self.subTest(end=end):
                 code, out = self.run_tool(self.resume(r"Go, Python \\", "Python, Go " + end), "--posting", posting)
                 self.assertEqual(self.lines_of("check", out), [], "\n".join(out))

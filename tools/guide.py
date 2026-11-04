@@ -32,6 +32,10 @@ only, Python 3.11+.
 import importlib.util, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)   # -I leaves this folder off sys.path
+sys.dont_write_bytecode = True   # no tools/__pycache__ left in the Log
+import logfiles
+
 GUIDE = "docs/guide.md"
 SKILL_MD = "skills/career-log/SKILL.md"
 DIRECTION_MD = "tools/template/direction.md"
@@ -61,24 +65,16 @@ def module(root, name):
     return mod
 
 
-def cells(line):
-    return [c.strip() for c in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
-
-
 def table(text, heading):
-    """The rows (lists of cells) of the first table under `## <heading>`, header and rule left out."""
-    m = re.search(r"^## %s\n(.*?)(?=^## |\Z)" % re.escape(heading), text, re.M | re.S)
-    if not m:
+    """(header, rows) of the first table under `## <heading>` (logfiles.section), each row its cells
+    (logfiles.md_cells), the rule row left out."""
+    body = logfiles.section(text, heading)
+    if body is None:
         raise GuideError("no `## %s` section" % heading)
-    rows = []
-    for line in m.group(1).splitlines():
-        if line.startswith("|"):
-            rows.append(cells(line))
-        elif rows:
-            break
-    if len(rows) < 2:
+    tables = logfiles.md_tables(body)
+    if not tables:
         raise GuideError("no table under `## %s`" % heading)
-    return rows[0], rows[2:]
+    return tables[0].head, [cells for _, cells in tables[0].rows]
 
 
 def rebase(text, src_dir, root):
@@ -95,8 +91,8 @@ def rebase(text, src_dir, root):
 
 
 def render(header, rows):
-    out = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
-    out += ["| " + " | ".join(r) + " |" for r in rows]
+    out = [logfiles.md_row(header), "|" + "---|" * len(header)]
+    out += [logfiles.md_row(r) for r in rows]
     return "\n".join(out)
 
 
@@ -122,7 +118,7 @@ def files_block(root):
             path = os.path.join(here, name)
             if name.endswith(".md") and folder + "/" + name != SKILL_MD and os.path.isfile(path):
                 text = read(path)
-                if re.search(r"^## Files$", text, re.M):
+                if logfiles.section(text, "Files") is not None:
                     out += [[r[0], rebase(r[1], folder, root)] for r in table(text, "Files")[1]]
     return render(["Path", "What"], out)
 
@@ -241,7 +237,7 @@ def flows(root, text=None):
             return rows
         if not line.startswith("|"):
             continue
-        c = cells(line)
+        c = logfiles.md_cells(line)
         if header is None:
             header = [h.lower() for h in c]
             if header != ["flow", "mode", "next", "why", "session"]:

@@ -1,21 +1,29 @@
 """The helpers the Log's tools share: reading and writing its files, front matter, Markdown tables
 and sections, heading anchors, slugs, dated names, git, the Log's root and its own files, the
-applications it records, the URLs in a text, and Claude Code's project folder for a checkout.
+applications it records, the Target versions and the start record, a posting run's folder and live
+marker (and the uncommitted Log files a live run wrote), the URLs in a text, and Claude
+Code's project folder for a checkout.
 
 A library, with no command line. A tool beside it imports it with
   sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I leaves this folder off sys.path
   sys.dont_write_bytecode = True   # no tools/__pycache__ left in the Log
   import logfiles
 
-What an entry is (ENTRY_PATH, entry_paths, Entry, the Story model) stays in entries.py.
+What an entry is (ENTRY_PATH, entry_paths, Entry, the Story model) stays in entries.py. One helper
+reaches a tool: targets() imports tools/resume.py when it runs, for what a part of a resume is.
 Standard library only. It imports on any Python 3 (tools/check.py imports it before it says that
 the Log needs 3.11+), so nothing here needs a newer one at import time.
 """
+import bisect
+import datetime
 import glob
+import itertools
+import json
 import os
 import re
 import subprocess
 import sys
+import time
 
 
 class LogError(Exception):
@@ -98,6 +106,16 @@ def split_root(args, script):
         else:
             rest.append(a)
     return (root or default_root(script)), rest
+
+
+def arg_path(root, arg, fits=os.path.isfile):
+    """The absolute path a path argument names: arg as it is when absolute, else relative to root
+    and then to the current folder, the first that fits (a file, by default); None when none does."""
+    for base in ((None,) if os.path.isabs(arg) else (root, os.getcwd())):
+        full = os.path.abspath(arg if base is None else os.path.join(base, arg))
+        if fits(full):
+            return full
+    return None
 
 
 def add_root(parser, script):
@@ -252,10 +270,11 @@ def is_rule(cells):
 class Table:
     """A Markdown table: head (its header cells as written), header (the same, lowercased, without
     `*` and backticks), rows [(line number, cells)] (the rule row left out), line (the header's line
-    number, from 1) and section (the last `## ` heading's text above it, or None)."""
+    number, from 1), end (its last line's number) and section (the last `## ` heading's text above
+    it, heading_re's form, or None)."""
 
     def __init__(self, line, section, head):
-        self.line, self.section, self.head, self.rows = line, section, head, []
+        self.line, self.section, self.head, self.rows, self.end = line, section, head, [], line
         self.header = [h.strip("*` ").lower() for h in head]
 
     def dicts(self):
@@ -268,8 +287,9 @@ def md_tables(text):
     row the header."""
     tables, current, section = [], None, None
     for n, line in enumerate(text.lstrip("\ufeff").splitlines(), 1):
-        if line.startswith("## "):
-            section = line[3:].strip()
+        h = re.match(r"##[ \t]+(.*)", line)   # heading_re's form
+        if h:
+            section = h.group(1).strip()
         if not line.strip().startswith("|"):
             current = None
             continue
@@ -279,6 +299,7 @@ def md_tables(text):
             tables.append(current)
         elif not is_rule(cells):
             current.rows.append((n, cells))
+        current.end = n
     return tables
 
 
@@ -287,11 +308,23 @@ def strip_comments(text):
     return re.sub(r"<!--.*?-->", "", text, flags=re.S)
 
 
+def heading_re(heading, level=2):
+    """The pattern of a `## <heading>` line (with level 2): spaces or tabs after the marks and at the
+    end, and a CRLF line end, allowed; re.M, so search() finds it on any line."""
+    return re.compile(r"^%s[ \t]+%s[ \t]*\r?$" % ("#" * level, re.escape(heading)), re.M)
+
+
+def blank_comments(text):
+    """The text with each HTML comment's characters as spaces, its line ends kept: every offset and
+    line number holds."""
+    return re.sub(r"<!--.*?-->", lambda m: re.sub(r"[^\r\n]", " ", m.group(0)), text, flags=re.S)
+
+
 def section(text, heading, level=2):
-    """The body of the first `## <heading>` (with level 2) heading in the text, up to the next heading
-    of that level or a higher one other than `# ` (`### ` ends at `## ` or `### `), or the end; None
-    when there is no such heading. The heading may be the text's last line. A `# ` line does not end
-    it: in a code block it is a comment."""
+    """The body of the first `## <heading>` (with level 2, heading_re()) in the text, up to the next
+    heading of that level or a higher one other than `# ` (`### ` ends at `## ` or `### `), or the
+    end; None when there is no such heading. The heading may be the text's last line. A `# ` line
+    does not end it: in a code block it is a comment. A heading inside an HTML comment is none."""
     span = section_span(text, heading, level)
     return text[span[0]:span[1]] if span else None
 
@@ -299,10 +332,20 @@ def section(text, heading, level=2):
 def section_span(text, heading, level=2):
     """(start, end) of the body section() returns, as offsets into the text; None when there is no
     such heading. A tool that rewrites a section's lines splices them in here."""
-    marks = "#" * level
-    m = re.search(r"^%s %s[ \t]*$\n?(.*?)(?=^#{2,%d} |\Z)" % (marks, re.escape(heading), max(level, 2)),
-                  text, re.M | re.S)
+    m = re.search(r"%s\n?(.*?)(?=^#{2,%d}[ \t]|\Z)" % (heading_re(heading, level).pattern, max(level, 2)),
+                  blank_comments(text), re.M | re.S)
     return m.span(1) if m else None
+
+
+def section_lines(lines, heading, level=2):
+    """(the heading's index, the index after the section's last line) in lines, each with its line
+    end (splitlines(keepends=True)), by section()'s rule; None without the heading."""
+    span = section_span("".join(lines), heading, level)
+    if span is None:
+        return None
+    ends = list(itertools.accumulate(len(line) for line in lines))   # each line's end offset
+    at = bisect.bisect_right(ends, span[0] - 1)   # the heading's line ends just before its body
+    return at, (bisect.bisect_right(ends, span[1] - 1) + 1 if span[1] > span[0] else at + 1)
 
 
 def bullets(text):
@@ -323,11 +366,16 @@ def heading_anchors(text):
     return set(heading_names(text))
 
 
-def heading_names(text):
-    """{anchor: heading text} for the headings heading_anchors() reads."""
-    out, seen, fence = {}, {}, None
-    for line in strip_comments(text).splitlines():
-        m = re.match(r"[ \t]*(`{3,}|~{3,})", line)
+FENCE = re.compile(r"[ \t]*(`{3,}|~{3,})")
+
+
+def outside_code(lines):
+    """(index, line) of each of the lines outside fenced code, the fence lines left out: a fence of
+    three or more backticks or tildes closes at a line of only the same mark, at least as long; an
+    unclosed one runs to the end."""
+    fence = None
+    for k, line in enumerate(lines):
+        m = FENCE.match(line)
         if fence:
             if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not line.strip(" \t`~"):
                 fence = None
@@ -335,6 +383,13 @@ def heading_names(text):
         if m:
             fence = m.group(1)
             continue
+        yield k, line
+
+
+def heading_names(text):
+    """{anchor: heading text} for the headings heading_anchors() reads."""
+    out, seen = {}, {}
+    for _, line in outside_code(strip_comments(text).splitlines()):
         h = re.match(r"(#{1,6})[ \t]+(.+?)[ \t#]*$", line)
         if not h:
             continue
@@ -374,6 +429,23 @@ def split_dated(name):
     return (m.group(1), m.group(2)) if m else (None, name)
 
 
+def is_target_name(text):
+    """Whether text is a target name (a Target version's, a role family's): a non-empty ascii_slug of
+    itself."""
+    return bool(text) and ascii_slug(text) == text
+
+
+def posting_slug(text):
+    """A company or role as a draft folder or application folder name has it: ascii_slug, or
+    `posting` for a name with no ASCII letter or digit."""
+    return ascii_slug(text) or "posting"
+
+
+def plural(n, word):
+    """`1 commit`, `2 commits`."""
+    return "%d %s%s" % (n, word, "" if n == 1 else "s")
+
+
 # ---- Links ----
 
 REPO_URL = re.compile(r"https?://(?:www\.)?(?:github\.com|gitlab\.[^/\s]+)/([^\s,\]#?]+)")
@@ -410,13 +482,71 @@ def provenance_rows(text):
     return rows
 
 
+# ---- LaTeX ----
+
+TEX_ADDRESS = re.compile(r"\\(href|url)\{[^}]*\}")
+# A \\ line break (\\*, \\[2pt], \\ [2pt]) or a \newline inside a source line
+TEX_LINE_BREAK = re.compile(r"\\\\\*?(?:\s*\[[^\]]*\])?|\\newline(?![A-Za-z])")
+
+
+def tex_comment_at(line):
+    """Where a .tex line's comment starts: the first % after an even number of backslashes (\\\\% is
+    a line break, then a comment) and outside an \\href or \\url address, or None."""
+    addresses = [m.span() for m in TEX_ADDRESS.finditer(line)]
+    for m in re.finditer("%", line):
+        run = len(line[:m.start()]) - len(line[:m.start()].rstrip("\\"))
+        if run % 2 == 0 and not any(a <= m.start() < b for a, b in addresses):
+            return m.start()
+    return None
+
+
+def tex_uncomment(line):
+    """A .tex line without its comment (tex_comment_at)."""
+    at = tex_comment_at(line)
+    return line if at is None else line[:at]
+
+
+def tex_body(text):
+    """(line number, the line with its comment dropped, the raw line) of each line after
+    \\begin{document}; the whole file when it has none."""
+    lines = text.splitlines()
+    start = next((i + 1 for i, l in enumerate(lines) if "\\begin{document}" in tex_uncomment(l)), 0)
+    return [(n + 1, tex_uncomment(lines[n]), lines[n]) for n in range(start, len(lines))]
+
+
+def tex_sections(text):
+    """(line number, title as written) of each `\\section{...}` in the body (tex_body)."""
+    out = []
+    for n, code, _ in tex_body(text):
+        m = re.search(r"\\section\*?\{([^}]*)\}", code)
+        if m:
+            out.append((n, m.group(1)))
+    return out
+
+
+NO_BULLETS = ("education", "skill")   # the resume skeleton's sections whose items are no bullet
+BULLETS = ("experience", "project")
+
+
+def has_bullets(title):
+    """Whether a `\\section` title's items are bullets: it holds "experience" or "project", or neither
+    "education" nor "skill" (`Experience and Skills` has bullets)."""
+    title = title.lower()
+    return any(w in title for w in BULLETS) or not any(w in title for w in NO_BULLETS)
+
+
+def is_skills(title):
+    """Whether a `\\section` title is the Skills section: it holds "skill" and has no bullets."""
+    return "skill" in title.lower() and not has_bullets(title)
+
+
 def tex_items(text):
     """(line number, text) of each `\\item` in a .tex file, comments dropped: the text after it (and
     its optional `[...]`) up to the next `\\item`, `\\begin`, `\\end` or an empty line, whitespace
     collapsed, LaTeX left as written."""
     out, current = [], None
     for n, raw in enumerate(text.splitlines(), 1):
-        line = re.sub(r"(?<!\\)%.*$", "", raw)
+        line = tex_uncomment(raw)
         if current is not None and not raw.strip():   # a comment-only line is not a paragraph break
             current = None
             continue
@@ -433,25 +563,15 @@ def tex_items(text):
     return [(n, " ".join(" ".join(chunks).split())) for n, chunks in out]
 
 
-NO_BULLETS = ("education", "skill")   # the resume skeleton's sections whose items are no bullet
-BULLETS = ("experience", "project")
-
-
 def tex_bullets(text):
-    """tex_items less the items under a `\\section` whose title holds "education" or "skill" (a
-    coursework line, a Skills row) and neither "experience" nor "project" (`Experience and Skills`
-    keeps its bullets): an experience or project bullet, under any other heading, is what feeds
-    Past phrasings. A bold label is no sign: `\\textbf{Topic:} Built ...` starts many a bullet."""
-    sections = []
-    for n, raw in enumerate(text.splitlines(), 1):
-        m = re.search(r"\\section\*?\{([^}]*)\}", re.sub(r"(?<!\\)%.*$", "", raw))
-        if m:
-            sections.append((n, m.group(1).lower()))
+    """tex_items less the items under a body `\\section` (tex_sections) whose items are no bullets
+    (has_bullets: a coursework line, a Skills row): an experience or project bullet, under any other
+    heading, is what feeds Past phrasings. A bold label is no sign: `\\textbf{Topic:} Built ...`
+    starts many a bullet."""
+    sections = tex_sections(text)
     def heading(n):
         return next((title for at, title in reversed(sections) if at <= n), "")
-    def kept(title):
-        return any(w in title for w in BULLETS) or not any(w in title for w in NO_BULLETS)
-    return [(n, item) for n, item in tex_items(text) if kept(heading(n))]
+    return [(n, item) for n, item in tex_items(text) if has_bullets(heading(n))]
 
 
 # ---- git ----
@@ -478,8 +598,10 @@ def git(root, *args, timeout=60):
 
 
 def git_blob(root, rev, path, timeout=60):
-    """The bytes of path at rev (`git show <rev>:<path>`), or None when rev has no such file;
-    LogError when git cannot start or gives no answer in time."""
+    """The bytes of path, relative to root, at rev (`git show <rev>:./<path>`; rev "" is the index),
+    or None when rev has no such file; LogError when git cannot start or gives no answer in time.
+    The `./` reads path from root, not from the git top level, for a Log in a folder below it."""
+    path = path if path.startswith("./") else "./" + path
     try:
         p = subprocess.run(["git", "-C", root, "show", "%s:%s" % (rev, path)], capture_output=True,
                            env=dict(os.environ, GIT_TERMINAL_PROMPT="0"), timeout=timeout)
@@ -530,6 +652,20 @@ def norm(text):
     return " " + " ".join(re.sub(r"[^0-9a-z]+", " ", (text or "").lower()).split()) + " "
 
 
+def is_archived_folder(root, rel):
+    """Whether the application folder rel (from root) holds archived.md, the name in that exact case on
+    every OS: write › Save levels' Archived marker."""
+    path = os.path.join(root, *rel.split("/"))
+    return os.path.isdir(path) and "archived.md" in os.listdir(path)
+
+
+def archived_misnamed(root, rel):
+    """The files of the application folder rel named archived.md in another case (`Archived.md`): no
+    marker, which is_archived_folder does not count."""
+    path = os.path.join(root, *rel.split("/"))
+    return [f for f in (os.listdir(path) if os.path.isdir(path) else []) if f.lower() == "archived.md" and f != "archived.md"]
+
+
 def application_records(root):
     """[(text, match, where)] for each `outputs/applications/*/` folder and each `applications.md`
     line: text is the folder's `posting.md` (or '') or the line, and match(company, role, city), on
@@ -538,7 +674,7 @@ def application_records(root):
     the city (when given); an applications.md table row when a cell equals the company and one the
     role."""
     out = []
-    for d in sorted(glob.glob(os.path.join(root, "outputs", "applications", "*"))):
+    for d in sorted(glob.glob(os.path.join(glob.escape(os.path.join(root, "outputs", "applications")), "*"))):
         if not os.path.isdir(d):
             continue
         posting = os.path.join(d, "posting.md")
@@ -556,6 +692,126 @@ def application_records(root):
             def match(company, role, city, row=row):
                 return company in row and role in row
             out.append((line, match, "applications.md:%d" % i))
+    return out
+
+
+# ---- Target versions and the start record ----
+
+RESUMES = "outputs/resumes"
+START_RECORD = ".build/drafts/%s/start.txt"   # what `application.py start --family --tier` wrote, by draft name
+START_KEYS = ("from", "family", "tier")
+
+
+def targets(root):
+    """The Target versions: the name of each outputs/resumes/<target>.tex, sorted, less a part (a .tex
+    another one there \\input's or \\include's, with no .pdf beside it), as tools/resume.py --stale
+    reads them."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)   # -I leaves this folder off sys.path
+    import resume   # tools/resume.py, beside this file, owns what a part is; it imports this module
+    folder = os.path.join(root, *RESUMES.split("/"))
+    texs = sorted(glob.glob(os.path.join(glob.escape(folder), "*.tex")))
+    parts = {os.path.normcase(os.path.join(folder, rel)) for tex in texs for rel in resume.local_inputs(tex)}
+    return [os.path.basename(t)[:-4] for t in texs
+            if os.path.normcase(t) not in parts or os.path.isfile(t[:-4] + ".pdf")]
+
+
+def start_record_text(source, family, tier):
+    """A start record's text: one `key: value` line per START_KEYS key."""
+    return "".join("%s: %s\n" % kv for kv in zip(START_KEYS, (source, family, tier)))
+
+
+def parse_start_record(text):
+    """{key: value} for each `key: value` line of a start record."""
+    pairs = (l.partition(":") for l in text.splitlines())
+    return {k.strip(): v.strip() for k, sep, v in pairs if sep}
+
+
+def start_record(root, name):
+    """The draft <name>'s start record as parse_start_record reads it, or None when it has none."""
+    path = os.path.join(root, *(START_RECORD % name).split("/"))
+    return parse_start_record(read_text(path)) if os.path.isfile(path) else None
+
+
+def start_record_lacks(record):
+    """The `key:` lines START_KEYS names that a parsed start record lacks."""
+    return [k + ":" for k in START_KEYS if k not in record]
+
+
+# ---- A posting run's folder ----
+
+RUNS = ".build/runs"   # one folder per posting run, named by its key (tools/scan.py run makes it)
+RUN_KEY = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})-(?P<hh>\d{2})(?P<mm>\d{2})(?P<ss>\d{2})(?:-(?P<n>\d+))?$")
+LIVE = "live"   # a run's live marker, in its folder: {"start", "mode"}
+LIVE_HOURS = 2   # a live marker untouched this long has expired (scan.py run --touch refreshes it)
+
+
+def run_key(date, clock, n=1):
+    """A run's key: `<date>-<clock>`, then `-<n>` from 2 on (the second run started that second)."""
+    return "%s-%s" % (date, clock) + ("-%d" % n if n > 1 else "")
+
+
+def run_folder(key):
+    """A run's folder, relative to the Log root."""
+    return "%s/%s" % (RUNS, key)
+
+
+def write_live(path, start, mode):
+    """Write a live marker: `start` the run's start time (ISO 8601), `mode` its mode or None."""
+    write_text(path, json.dumps({"start": start, "mode": mode}) + "\n")
+
+
+def read_live(path):
+    """A live marker's start, in seconds since the epoch, while it was touched in the last LIVE_HOURS
+    hours; None when it has expired, is gone or does not parse."""
+    try:
+        if time.time() - os.path.getmtime(path) > LIVE_HOURS * 3600:
+            return None
+        return datetime.datetime.fromisoformat(json.loads(read_text(path))["start"]).timestamp()
+    except (OSError, UnicodeError, ValueError, KeyError, TypeError):
+        return None
+
+
+def live_runs(root):
+    """[(start, key)] of the runs still going, oldest first: each <RUNS>/<key>/live that read_live
+    reads, in a folder named as a run key."""
+    runs = []
+    for path in glob.glob(os.path.join(glob.escape(os.path.join(root, *RUNS.split("/"))), "*", LIVE)):
+        key = os.path.basename(os.path.dirname(path))
+        start = read_live(path) if RUN_KEY.match(key) else None
+        if start is not None:
+            runs.append((start, key))
+    return sorted(runs)
+
+
+def live_run(root, path, runs):
+    """The key of the latest-started of runs (live_runs) that started at or before the time on disk of
+    path (relative to the root), or None."""
+    try:
+        mtime = os.path.getmtime(os.path.join(root, path))
+    except OSError:   # a deleted file has no time: an earlier session's
+        return None
+    keys = [key for start, key in runs if int(start) <= mtime]
+    return keys[-1] if keys else None
+
+
+def uncommitted(root):
+    """[(status, path, old path or None, live run key or None)] of the Log's own files (LOG_PATHS) that
+    git shows as changed or new, each with the live run whose file it is (live_run); None when git
+    fails."""
+    try:
+        p = git_run(root, "status", "--porcelain", "-z", "--untracked-files=all", "--", *LOG_PATHS, timeout=30)
+    except LogError:
+        return None
+    if p.returncode != 0:
+        return None
+    out, entries, runs = [], iter(p.stdout.split("\0")), live_runs(root)
+    for entry in entries:
+        if len(entry) > 3:
+            status, path = entry[:2], entry[3:]
+            old = next(entries, "?") if "R" in status or "C" in status else None   # a rename's -z entry is followed by its old path
+            out.append((status.strip(), path, old, live_run(root, path, runs) if runs else None))
     return out
 
 

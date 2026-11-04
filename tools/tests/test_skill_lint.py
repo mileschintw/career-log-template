@@ -150,6 +150,43 @@ class SkillLint(unittest.TestCase):
         problems = self.lint("", dict(tree, **{"tools/check.py": check_py % ("", ', "log": [("playwright-cli", "soft")]')}))
         self.assertTrue(any("['log'] only in NEEDS" in m for _, m in problems), problems)
 
+    # Printed lines: a `x:` line a mode says a tool prints is a literal in the tool's source
+    PRINTS = ('"""Prints `leads: ok` and `gone: <x>`."""\nimport helper\n'
+              'def run(n, kind, x):\n    """Prints `ghost: <x>`."""\n'
+              '    print("leads: ok, %d question(s)" % n)\n    print("readme %s: README.md:%d" % (kind, n))\n'
+              '    print(f"cite: {x} (entry)")\n    tag = "sent before"\n    print("%s: %s" % (tag, x))\n    print("entries: ok")\n')
+    TOOLS = {"tools/entries.py": PRINTS, "tools/other.py": "from helper import x\n",
+             "tools/helper.py": 'print("similar: %s" % 1)\nprint("rate: 5%%s" % 1)\n',
+             "tools/check.py": 'MODES = ["log", "fit"]\nNEEDS = {}\nprint("next: go on with the mode")\n'}
+
+    def test_printed_line_found_in_the_tool(self):
+        """A literal, one with a placeholder in it (%-format or f-string), a tag the tool formats
+        into a label, and a line from a tool it imports all count; so do a tool named earlier on
+        the line, a `<alias>` a skill file defines, and a label that names its tool."""
+        self.assertEqual(self.lint(
+            "Run `python3 -I <root>/tools/entries.py story-leads` until it prints `leads: ok`.\n"
+            "`entries.py readme` printed `readme written:`; it then prints a `cite: <x> (entry)` line.\n"
+            "It prints `sent before: <x>` lines. When it prints `similar:` lines, read them.\n"
+            "`other.py x` prints `similar:` lines and `rate: 5%`.\n"
+            "Run `check.py log`. On this line it printed `next: go on with the mode`.\n"
+            "`<ent>` is `python3 -I <root>/tools/entries.py`. `<ent> x` prints `leads: ok, <n> question(s)`.\n"
+            "Then `sync.py commit` prints `entries: ok`.\n", self.TOOLS), [])
+
+    def test_printed_line_missing_from_the_tool(self):
+        """D1 of #651: a mode waited for a line the tool never prints. A docstring is not output."""
+        problems = self.lint("Run `entries.py story-leads` until it prints `leads: none predicted`.\n"
+                             "`entries.py x` prints `gone: <x>` and `ghost:` lines.\n", self.TOOLS)
+        self.assertEqual(problems, [(4, "prints `leads: none predicted`: not in tools/entries.py"),
+                                    (5, "prints `gone: <x>`: not in tools/entries.py"),
+                                    (5, "prints `ghost:`: not in tools/entries.py")])
+
+    def test_printed_line_needs_a_print_verb_and_a_tool(self):
+        """A file's line, a commit subject or a line far from the verb is not a printed line, and a
+        line naming no tool has none to check."""
+        self.assertEqual(self.lint(
+            "Run `entries.py x`. Write the `Lead: none` line, then the `missing: x` line; the entry keeps its"
+            " `Type: x` line, and git prints nothing.\nThe check prints `missing: x`.\n", self.TOOLS), [])
+
     def test_repo_skill_passes(self):
         """The skill in this repo passes the lint as committed."""
         p = subprocess.run([sys.executable, "-I", TOOL], capture_output=True, text=True, encoding="utf-8")

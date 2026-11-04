@@ -16,6 +16,9 @@ TOOL = os.path.join(TOOLS, "upgrade.py")
 spec = importlib.util.spec_from_file_location("upgrade", TOOL)
 upgrade = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(upgrade)
+spec = importlib.util.spec_from_file_location("logfiles", os.path.join(TOOLS, "logfiles.py"))
+logfiles = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(logfiles)
 
 ALLOW = 'ALLOW="skills tools AGENTS.md .gitignore"\n'
 OLD_SHA = "e6a5565a4807db1ab30b0eb70f8c2fd1421ac4df"
@@ -108,6 +111,15 @@ class Upgrade(unittest.TestCase):
 
     def plan(self, log, *more):
         return self.run_tool("plan", log, "--url", self.url, *more)
+
+    def test_split_page_reads_the_heading_as_entries_py_reads_it(self):
+        """#651 C1: spaces after the marks and a CRLF page."""
+        self.assertEqual(upgrade.split_page(b"# Log\r\n\r\n##  Entries \r\nrow\r\n", "Entries"),
+                         ("# Log\n\n", "##  Entries \nrow\n"))
+        self.assertIsNone(upgrade.split_page(b"# Log\n### Entries\n", "Entries"))
+        self.assertEqual(upgrade.HEADING % "x", logfiles.heading_re("x").pattern)
+        with open(os.path.join(TOOLS, "upgrade.py"), encoding="utf-8") as f:   # it runs with no logfiles.py beside it
+            self.assertNotRegex(f.read(), r"(?m)^\s*(import|from) (logfiles|entries|config)\b")
 
     def test_plan_steps_and_engine_changes(self):
         log = self.log(edits={"skills/career-log/SKILL.md": "intro\nrule one, mine\nrule two\nrule three\nend\n",

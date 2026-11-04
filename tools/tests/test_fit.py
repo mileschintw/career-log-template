@@ -278,6 +278,36 @@ class FitTest(unittest.TestCase):
         self.assertNotEqual(a, b)
         self.assertRegex(a, r"^map file: \.build/fit/2026-10-24-[0-9a-f]{8}-[0-9a-f]{8}\.jsonl$")
 
+    def test_name_scope_and_project_print_the_report_and_brief_paths(self):
+        """#662 (D3): a scope or project name in other letters still gets a name, never an empty one."""
+        self.assertEqual(self.run_tool("name", "--scope", "Acme Globex", "--today", "2026-10-24"),
+                         (0, ["report: outputs/reports/2026-10-24-fit-acme-globex.md"]))
+        code, lines = self.run_tool("name", "--scope", "台積電", "--today", "2026-10-24")
+        self.assertEqual(code, 0)
+        self.assertRegex(lines[0], r"^report: outputs/reports/2026-10-24-fit-[0-9a-f]{8}\.md$")
+        self.assertNotEqual(lines, self.run_tool("name", "--scope", "聯發科", "--today", "2026-10-24")[1])
+        self.assertEqual(self.run_tool("name", "--project", "Tiny KV store"), (0, ["brief: outputs/projects/tiny-kv-store.md"]))
+        self.assertRegex(self.run_tool("name", "--project", "推薦系統")[1][0], r"^brief: outputs/projects/[0-9a-f]{8}\.md$")
+        code, lines = self.run_tool("name", "--scope", "Posting X")
+        self.assertEqual(code, 1)
+        self.assertIn("posting-", lines[0])
+        self.assertEqual(self.run_tool("name", "--scope", "  "), (1, ["fit: name --scope: give the words the postings are named by"]))
+        for args in (["Acme"], ["Acme", "Eng", "--scope", "x"], ["--scope", "x", "--project", "y"], []):
+            self.assertEqual(self.run_tool("name", *args)[0], 2, args)
+
+    def test_name_scope_with_no_ascii_slug_hints_at_an_ascii_one(self):
+        """#673: a scope that names only by its hash says so, and that an ASCII scope reads better."""
+        code, lines = self.run_tool("name", "--scope", "星河 藍橋", "--today", "2026-10-24")
+        self.assertEqual(code, 0)
+        self.assertEqual(len(lines), 2)
+        self.assertRegex(lines[0], r"^report: outputs/reports/2026-10-24-fit-[0-9a-f]{8}\.md$")
+        self.assertTrue(lines[1].startswith("hint: "), lines[1])
+        self.assertIn("hash", lines[1])
+        self.assertIn("ASCII", lines[1])
+        # an ASCII scope, or one with some ASCII words, already reads: no hint
+        for scope in ("Xinghe Lanqiao", "星河 Inc"):
+            self.assertEqual(len(self.run_tool("name", "--scope", scope, "--today", "2026-10-24")[1]), 1, scope)
+
     def test_names_with_some_other_letters_differ(self):
         a = self.run_tool("name", "後端 Inc", "工程師 (Go)", "--today", "2026-10-24")[1][0]
         b = self.run_tool("name", "前端 Inc", "工程師 (Go)", "--today", "2026-10-24")[1][0]

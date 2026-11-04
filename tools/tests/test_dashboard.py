@@ -121,6 +121,12 @@ class DashboardTest(unittest.TestCase):
         self.assertIn("No scan report yet.", page)
         self.assertIn("None pending.", page)
 
+    def test_applications_in_a_root_with_glob_characters(self):
+        """#671: a Log root whose name holds glob characters still lists its application folders."""
+        root = os.path.join(self.tmp, "log [1]")
+        os.makedirs(os.path.join(root, "outputs", "applications", "2026-09-01-acme-swe"))
+        self.assertEqual([r[:2] for r in dashboard.applications(root)], [["2026-09-01", "acme-swe"]])
+
     def test_sections_from_the_log(self):
         self.write("direction.md", DIRECTION)
         self.report("2026-10-20", company="Oldco", top="Board skipped: sign-in expired.")

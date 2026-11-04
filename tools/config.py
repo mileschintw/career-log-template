@@ -72,7 +72,7 @@ tools/config.default.toml cannot be read, direction.md or the item's section is 
 set), or a name or value is not allowed, 2 on a bad argument. Standard library only, Python 3.11+
 (tomllib).
 """
-import datetime, glob, os, re, sys
+import datetime, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -154,7 +154,7 @@ SOURCE = re.compile(r"[ \t]*\([^()]*\d{4}-\d{2}-\d{2}[^()]*\)[ \t]*$")   # a lin
 # The front page setup trims to: README.md above `## Entries` becomes these lines.
 TRIMMED = ("# career-log\n\nRaw records of my past work, projects and achievements, and the resumes and"
            " answers derived from them.\n\nHow to use it: [docs/guide.md](docs/guide.md).\n\n")
-ENTRIES = re.compile(r"^## Entries[ \t]*$", re.M)
+ENTRIES = logfiles.heading_re("Entries")
 # Said with a change, on its --dry-run: (field, value) -> the line.
 NOTICES = {("interviewer_profiles", "always"):
            "tell the user: the site may show each interviewer the visit unless the user's account browses"
@@ -483,6 +483,21 @@ def target_roles(root):
     return [t for _, t in found if not is_gap(t)]
 
 
+def tiers(root):
+    """{tier: (the line's text, whether it is a `GAP:` line)} for each line of the target roles, its
+    tier its place in the list from 1, `GAP:` lines counted (the place a reader sees); {} when
+    target_roles() is empty. fit.py, scan.py, application.py and check.py number the roles by it."""
+    if not target_roles(root):
+        return {}
+    _, _, found = item_lines(direction_text(root), "target roles")
+    return {n: (t, is_gap(t)) for n, (_, t) in enumerate(found, 1)}
+
+
+def top_role(root):
+    """The top target role's line, the lowest tier that is no `GAP:` line; None with none."""
+    return next((t for _, (t, gap) in sorted(tiers(root).items()) if not gap), None)
+
+
 def visa_value(text):
     """The visa sponsorship line's value as it is written (`H-1B; OPT`, `none`), the lookups it asks for
     and the student statuses it names (OPT, CPT), each in VISAS order; ConfigError for a value outside VISAS."""
@@ -661,8 +676,7 @@ def target_changes(root, item, target, old, now):
     item's [(list line, its indented lines)] before and after."""
     if item not in ("target roles", "what to emphasise"):
         return []
-    # the Target versions application.py's targets() lists: outputs/resumes/<target>.tex
-    versions = sorted(os.path.basename(p)[:-4] for p in glob.glob(os.path.join(glob.escape(root), "outputs", "resumes", "*.tex")))
+    versions = logfiles.targets(root)
     if not versions:
         return []
     out = ["target versions: %s" % ", ".join(versions)]

@@ -50,6 +50,9 @@ SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 GUIDE = "docs/upgrades/upgrade-%s.%s"
 # The front pages, with the heading of their entries section (tools/config.py reads above it)
 PAGES = {"README.md": "Entries", "README.zh-TW.md": "條目"}
+# logfiles.heading_re's pattern, copied: the mode runs this file alone from .build/upgrade/tools/,
+# with no logfiles.py beside it (tests/test_upgrade.py holds the two the same)
+HEADING = r"^##[ \t]+%s[ \t]*\r?$"
 
 
 class UpgradeError(Exception):
@@ -120,7 +123,7 @@ def split_page(data, heading):
     if data is None:
         return None
     text = data.decode("utf-8", "replace").lstrip("\ufeff").replace("\r\n", "\n")
-    m = re.search(r"^## %s[ \t]*$" % re.escape(heading), text, re.M)
+    m = re.search(HEADING % re.escape(heading), text, re.M)
     return (text[:m.start()], text[m.start():]) if m else None
 
 

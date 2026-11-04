@@ -175,25 +175,29 @@ key is the current one.
   URL on its first line) and none for another posting. `check: ok` lines, else exit 1 with one
   `bad:`, `missing:`, `extra:` or `repeated:` line per problem.
 - `run`: makes a posting run's own folder (fit.md › Capture a posting), so two runs in one Log, in
-  two agent sessions, never share a working file: `.build/runs/<key>/`, `<key>` --date and the time
+  two agent sessions, never share a working file: `%(runs)s/<key>/`, `<key>` --date and the time
   now (`<YYYY-MM-DD>-<HHMMSS>`), with `-<n>` from 2 on when that folder exists. It prints `run:
-  <key>`, `folder:`, `capture:` (`<folder>/posting.md`, the run's capture path) and `sessions:
-  posting-<key>, company-lookup-<key>, lca-<key>` (its Browser sessions' names). It also writes the
-  run's live marker, `<folder>/live`: `{"start", "mode"}`, `start` the time now (ISO 8601 with its
-  UTC offset, to the second) and `mode` the --mode given (write, fit) or null, and prints `live:
-  <folder>/live`; with --mode write, its last line is a `next: now, first:` line with the line to
-  tell the user (write.md step 1: the first draft's wait, and that another session in this folder
-  can take the next posting). While the marker was touched in the last 2 hours, tools/check.py counts each
-  uncommitted Log file changed since `start` as this run's (a run in another session) and offers
-  none of them for settle. It deletes each
-  earlier run's folder whose key's date is more than 7 days before --date (no run lasts that long,
-  and the folder holds page text): one `deleted: .build/runs/<key>/ (older than 7 days)` line each.
+  <key>`, `folder:`, `capture:` (`<folder>/%(capture)s`, the run's capture path), `paste:`
+  (`<folder>/%(paste)s`, where posting text the user pasted is saved before `capture --pasted`
+  reads it) and `sessions: posting-<key>, company-lookup-<key>, lca-<key>` (its Browser sessions'
+  names). It also writes the run's live marker, `<folder>/%(live)s`: `{"start", "mode"}`, `start`
+  the time now (ISO 8601 with its UTC offset, to the second) and `mode` the --mode given (write,
+  fit) or null, and prints `live: <folder>/%(live)s`; with --mode write, its last line is a `next:
+  now, first:` line with the line to tell the user (write.md step 1: the first draft's wait, and
+  that another session in this folder can take the next posting). While the marker was touched in
+  the last %(hours)d hours, tools/check.py counts each uncommitted Log file changed since `start` as
+  this run's (a run in another session) and offers none of them for settle. It deletes each earlier
+  run's folder whose key's date is more than %(keep)d days before --date (no run lasts that long,
+  and the folder holds page text): one `deleted: %(runs)s/<key>/ (older than %(keep)d days)` line
+  each.
 - `run --touch <key>`: the run's heartbeat: sets its live marker's time to now, so the run stays
-  live for 2 more hours; it prints `live: <folder>/live (touched)`. A run whose marker is gone (ended
-  by hand) gets it back, its `start` the time in its key: `live: <folder>/live (made again)`.
-- `end <key>`: ends the run: deletes its live marker, `live: <folder>/live (deleted)`, or `live: none
-  (<key> has no live marker)`. The run's folder stays (the 7-day rule above deletes it). It is the
-  last step of a run that saved its work, and clears the marker of a session that ended without one.
+  live for %(hours)d more hours; it prints `live: <folder>/%(live)s (touched)`. A run whose marker is
+  gone (ended by hand) gets it back, its `start` the time in its key: `live: <folder>/%(live)s (made
+  again)`.
+- `end <key>`: ends the run: deletes its live marker, `live: <folder>/%(live)s (deleted)`, or `live:
+  none (<key> has no live marker)`. The run's folder stays (the %(keep)d-day rule above deletes it).
+  It is the last step of a run that saved its work, and clears the marker of a session that ended
+  without one.
 - `fetch`: the plain fetch of a posting's own page (browser.md › Fallback order item 1, for scan's
   captures): a GET of <url>, its HTML read as the text a reader sees (no script, style or template).
   It refuses a posting API or JSON endpoint (an `api.` host, an `/api/` path, Workday's `/wday/cxs/`,
@@ -361,7 +365,12 @@ REPORT_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2})-scan(?:-(\d+))?\.md$")
 BRANCH_NAME = re.compile(r"^scan/(\d{4}-\d{2}-\d{2})(?:-(\d+))?$")
 PRUNE_DAYS = 90
 RUN_KEEP_DAYS = 7   # a posting run's folder older than this belongs to no live run (`run` deletes it)
-RUN_KEY = re.compile(r"^(\d{4}-\d{2}-\d{2})-\d{6}(?:-\d+)?$")
+RUN_CAPTURE = "posting.md"   # a run's capture, in its folder (fit.md › Capture a posting)
+RUN_PASTE = "pasted.md"   # the posting text the user pasted, in its folder, before it is captured
+SCREEN_LIST = "screen-list.jsonl"   # a scan run folder's Screen list (`screen`), beside SCREEN_DIR
+SCREEN_DIR = "screen"   # its batch files and Screen results
+__doc__ = __doc__ % {"runs": logfiles.RUNS, "live": logfiles.LIVE, "hours": logfiles.LIVE_HOURS,
+                     "keep": RUN_KEEP_DAYS, "capture": RUN_CAPTURE, "paste": RUN_PASTE}
 PENDING_COLUMNS = [("URL", "url"), ("Company", "company"), ("Role", "role"), ("Status", "status"),
                    ("Draft", "draft"), ("Fit map commit", "fit_commit")]
 STATUSES = ("draft to review", "undecided", "accepted", "declined")
@@ -453,7 +462,7 @@ read = logfiles.read_text
 def reports(root):
     """[(date, n, path)] of the scan reports, oldest first."""
     out = []
-    for p in glob.glob(os.path.join(root, REPORTS, "*-scan*.md")):
+    for p in glob.glob(os.path.join(glob.escape(os.path.join(root, REPORTS)), "*-scan*.md")):
         m = REPORT_NAME.match(os.path.basename(p))
         if m:
             out.append((m.group(1), int(m.group(2) or 1), p))
@@ -584,7 +593,7 @@ def next_name(root, date):
     for b in scan_branches(root):
         m = BRANCH_NAME.match(b)
         taken.add((m.group(1), int(m.group(2) or 1)))
-    for d in glob.glob(os.path.join(root, ".build", "scan", "*")):
+    for d in glob.glob(os.path.join(glob.escape(os.path.join(root, ".build", "scan")), "*")):
         m = BRANCH_NAME.match("scan/" + os.path.basename(d))
         if m and os.path.isdir(d):
             taken.add((m.group(1), int(m.group(2) or 1)))
@@ -661,15 +670,24 @@ def source_slugs(names):
             for n, s in slugs.items()}
 
 
+def no_source(root):
+    """Why read_sources found no source: `no scan-sources.md` or `no ## section`."""
+    return "no %s" % SOURCES if not os.path.exists(os.path.join(root, SOURCES)) else "no ## section"
+
+
+def is_gap(value):
+    """Whether a scan-sources.md field is unset: missing, empty, or a line that starts with `GAP`."""
+    return not value or value.startswith("GAP")
+
+
 def cmd_sources(root):
     found = read_sources(root)
     if not found:
-        why = "no %s" % SOURCES if not os.path.exists(os.path.join(root, SOURCES)) else "no ## section"
-        return ["sources: none (%s)" % why]
+        return ["sources: none (%s)" % no_source(root)]
     slugs = source_slugs([name for name, _ in found])
 
     def state(v):
-        return "GAP" if not v or v.startswith("GAP") else "set"
+        return "GAP" if is_gap(v) else "set"
     out = []
     for name, f in found:
         kind = "GAP" if state(f.get("Kind")) == "GAP" else f["Kind"]
@@ -707,6 +725,11 @@ def explore_query(d):
         raise ScanError("%s does not parse: %s" % (p, e))
 
 
+def is_explore(d):
+    """Whether `d` is an exploratory run's folder (explore_query)."""
+    return explore_query(d) is not None
+
+
 def refuse_explore(d, what):
     """A ScanError when `d` is an exploratory run's folder: `what` writes scan's records."""
     q = explore_query(d)
@@ -721,13 +744,12 @@ def cmd_explore(root, query):
         raise ScanError("explore: give the query, the words to search each source with")
     found = read_sources(root)
     if not found:
-        raise ScanError("explore: no source to read (%s)" % ("no %s" % SOURCES if not os.path.exists(os.path.join(root, SOURCES))
-                                                              else "no ## section"))
+        raise ScanError("explore: no source to read (%s)" % no_source(root))
     words = " ".join(query.split())
     lines, read_n = [], 0
     for name, f in found:
         form = f.get("Query") or ""
-        if not form or form.startswith("GAP"):
+        if is_gap(form):
             lines.append("skip: %s (no Query: line)" % name)
         elif QUERY_SLOT not in form:
             lines.append("skip: %s (its Query: line has no %s)" % (name, QUERY_SLOT))
@@ -739,8 +761,8 @@ def cmd_explore(root, query):
         raise ScanError("explore: no source has a Query: line with %s; nothing written\n%s" % (QUERY_SLOT, "\n".join(lines)))
     name = explore_name(query)
     d = os.path.join(root, ".build", "scan", name)
-    captures = len(glob.glob(os.path.join(d, "postings", "*.md")))
-    found_results = explore_results(d, screen_key(root)) if os.path.exists(os.path.join(d, "screen", "key")) else {}
+    captures = len(glob.glob(os.path.join(glob.escape(os.path.join(d, "postings")), "*.md")))
+    found_results = explore_results(d, screen_key(root)) if os.path.exists(os.path.join(d, SCREEN_DIR, "key")) else {}
     results = len({id(r) for r in found_results.values()})   # a result is found by each of its URL's keys
     os.makedirs(d, exist_ok=True)
     with open(os.path.join(d, EXPLORE), "w", encoding="utf-8", newline="\n") as f:
@@ -755,11 +777,11 @@ def cmd_explore(root, query):
 def explore_results(d, key):
     """{key: result} of the Screen results an earlier `screen` left in an exploratory run's folder, while
     its key is the current one."""
-    kfile = os.path.join(d, "screen", "key")
+    kfile = os.path.join(d, SCREEN_DIR, "key")
     if not os.path.exists(kfile) or read(kfile).strip() != key:
         return {}
     out = {}
-    for path in sorted(glob.glob(os.path.join(d, "screen", "*.jsonl"))):
+    for path in sorted(glob.glob(os.path.join(glob.escape(os.path.join(d, SCREEN_DIR)), "*.jsonl"))):
         for _, r, _ in jsonl_lines(path):
             if r and urls(str(r.get("url") or "")):
                 r = dict(r, url=urls(str(r["url"]))[0])
@@ -866,7 +888,7 @@ def cmd_dedup(root, src, dst, date=None, window=None):
             except json.JSONDecodeError as e:
                 raise ScanError("%s line %d does not parse: %s" % (src, i, e))
     # applied and declined postings still describe the domain
-    explore = any(explore_query(os.path.dirname(p)) is not None for p in (src, dst))
+    explore = any(is_explore(os.path.dirname(p)) for p in (src, dst))
     applied = [] if explore else applied_records(root)
     declined = {}
     for item in [] if explore else read_declined(root):
@@ -1159,8 +1181,7 @@ def report_screens(root):
     return out
 
 
-def slug(text):
-    return logfiles.ascii_slug(text) or "posting"
+slug = logfiles.posting_slug
 
 
 def capture_url(path):
@@ -1177,7 +1198,7 @@ def capture_url(path):
 def earlier_captures(root, here):
     """{key: path} of the captures other runs left in .build/scan/*/postings/."""
     out = {}
-    for p in sorted(glob.glob(os.path.join(root, ".build", "scan", "*", "postings", "*.md"))):
+    for p in sorted(glob.glob(os.path.join(glob.escape(os.path.join(root, ".build", "scan")), "*", "postings", "*.md"))):
         if os.path.dirname(os.path.dirname(os.path.abspath(p))) == os.path.abspath(here):
             continue
         u = capture_url(p)
@@ -1279,7 +1300,7 @@ def cmd_screen_check(root, results, batch=None):
 def screen_prepare(root, date, d, budget):
     postings = read_jsonl(os.path.join(d, "prefiltered.jsonl"))
     key = screen_key(root)
-    explore = explore_query(d) is not None   # a repeat run of the query reuses its own folder's captures and results
+    explore = is_explore(d)   # a repeat run of the query reuses its own folder's captures and results
     earlier = earlier_captures(root, d)
     explore_earlier = explore_results(d, key) if explore else {}
     stored = report_screens(root)
@@ -1294,11 +1315,11 @@ def screen_prepare(root, date, d, budget):
         folders.add(folder)
         listed.append(dict(p, order=i + 1, folder=folder,
                            capture=os.path.join(d, "postings", folder + ".md").replace(os.sep, "/")))
-    write_jsonl(os.path.join(d, "screen-list.jsonl"), listed)
+    write_jsonl(os.path.join(d, SCREEN_LIST), listed)
     write_jsonl(os.path.join(d, "not-screened.jsonl"), postings[budget:])
-    sdir = os.path.join(d, "screen")
+    sdir = os.path.join(d, SCREEN_DIR)
     os.makedirs(sdir, exist_ok=True)
-    for old in glob.glob(os.path.join(sdir, "*.todo")) + glob.glob(os.path.join(sdir, "*.jsonl")):
+    for old in glob.glob(os.path.join(glob.escape(sdir), "*.todo")) + glob.glob(os.path.join(glob.escape(sdir), "*.jsonl")):
         os.remove(old)   # results of an earlier prepare may have another key
     with open(os.path.join(sdir, "key"), "w", encoding="utf-8", newline="\n") as f:
         f.write(key + "\n")
@@ -1346,14 +1367,14 @@ def screen_prepare(root, date, d, budget):
 
 
 def screen_sort(root, date, d, budget, give_up=False):
-    listed = read_jsonl(os.path.join(d, "screen-list.jsonl"))
+    listed = read_jsonl(os.path.join(d, SCREEN_LIST))
     key = screen_key(root)
-    kfile = os.path.join(d, "screen", "key")
+    kfile = os.path.join(d, SCREEN_DIR, "key")
     if not os.path.exists(kfile) or read(kfile).strip() != key:
         raise ScanError("the entry list or direction.md changed since `screen` without --sort ran (key %s):"
                         " run it again, then screen the batches it prints" % key)
     results, tiers = {}, fit.ranks(root)
-    for path in sorted(glob.glob(os.path.join(d, "screen", "*.jsonl"))):
+    for path in sorted(glob.glob(os.path.join(glob.escape(os.path.join(d, SCREEN_DIR)), "*.jsonl"))):
         for r in read_jsonl(path):
             check_result(r, os.path.basename(path), tiers)
             for k in keys(str(r.get("url") or "")):
@@ -1530,64 +1551,59 @@ def clock():
     return datetime.datetime.now().strftime("%H%M%S")
 
 
-LIVE = "live"   # a run's live marker, in its folder (tools/check.py reads it)
-
-
-def write_live(path, start, mode):
-    logfiles.write_text(path, json.dumps({"start": start, "mode": mode}) + "\n")
-
-
-def run_folder(root, key):
-    if not RUN_KEY.match(key or ""):
+def run_dir(root, key):
+    if not logfiles.RUN_KEY.match(key or ""):
         raise ScanError("%s is not a run key (<YYYY-MM-DD>-<HHMMSS>[-<n>], the `run:` line of scan.py run)" % key)
-    return os.path.join(root, ".build", "runs", key), ".build/runs/%s" % key
+    folder = logfiles.run_folder(key)
+    return os.path.join(root, *folder.split("/")), folder
 
 
 def cmd_touch(root, key):
-    path, folder = run_folder(root, key)
-    live = os.path.join(path, LIVE)
+    path, folder = run_dir(root, key)
+    live = os.path.join(path, logfiles.LIVE)
     if os.path.isfile(live):
         os.utime(live)
-        return ["live: %s/%s (touched)" % (folder, LIVE)]
+        return ["live: %s/%s (touched)" % (folder, logfiles.LIVE)]
     if not os.path.isdir(path):
         raise ScanError("run --touch: no run folder %s/" % folder)
-    m = re.match(r"^(\d{4}-\d{2}-\d{2})-(\d{2})(\d{2})(\d{2})", key)
-    start = datetime.datetime.fromisoformat("%sT%s:%s:%s" % m.groups()).astimezone().isoformat()
-    write_live(live, start, None)
-    return ["live: %s/%s (made again)" % (folder, LIVE)]
+    m = logfiles.RUN_KEY.match(key)
+    start = datetime.datetime.fromisoformat("%sT%s:%s:%s" % m.group("date", "hh", "mm", "ss")).astimezone().isoformat()
+    logfiles.write_live(live, start, None)
+    return ["live: %s/%s (made again)" % (folder, logfiles.LIVE)]
 
 
 def cmd_end(root, key):
-    path, folder = run_folder(root, key)
+    path, folder = run_dir(root, key)
     try:
-        os.remove(os.path.join(path, LIVE))
+        os.remove(os.path.join(path, logfiles.LIVE))
     except FileNotFoundError:
         return ["live: none (%s has no live marker)" % key]
-    return ["live: %s/%s (deleted)" % (folder, LIVE)]
+    return ["live: %s/%s (deleted)" % (folder, logfiles.LIVE)]
 
 
 def cmd_run(root, date, mode=None):
-    base = "%s-%s" % (date, clock())
-    parent = os.path.join(root, ".build", "runs")
+    parent = os.path.join(root, *logfiles.RUNS.split("/"))
     os.makedirs(parent, exist_ok=True)
-    n = 1
+    now, n = clock(), 1
     while True:   # mkdir makes the folder or fails, so two runs started the same second never share one
-        key = base if n == 1 else "%s-%d" % (base, n)
+        key = logfiles.run_key(date, now, n)
         try:
             os.mkdir(os.path.join(parent, key))
             break
         except FileExistsError:
             n += 1
-    folder = ".build/runs/%s" % key
-    write_live(os.path.join(parent, key, LIVE), datetime.datetime.now().astimezone().isoformat(timespec="seconds"), mode)
-    out = ["run: %s" % key, "folder: %s" % folder, "capture: %s/posting.md" % folder,
-           "sessions: posting-%s, company-lookup-%s, lca-%s" % (key, key, key), "live: %s/%s" % (folder, LIVE)]
+    folder = logfiles.run_folder(key)
+    logfiles.write_live(os.path.join(parent, key, logfiles.LIVE),
+                        datetime.datetime.now().astimezone().isoformat(timespec="seconds"), mode)
+    out = ["run: %s" % key, "folder: %s" % folder, "capture: %s/%s" % (folder, RUN_CAPTURE),
+           "paste: %s/%s" % (folder, RUN_PASTE),
+           "sessions: posting-%s, company-lookup-%s, lca-%s" % (key, key, key), "live: %s/%s" % (folder, logfiles.LIVE)]
     oldest = (datetime.date.fromisoformat(date) - datetime.timedelta(days=RUN_KEEP_DAYS)).isoformat()
     for name in sorted(os.listdir(parent)):
-        m = RUN_KEY.match(name)
-        if m and m.group(1) < oldest and os.path.isdir(os.path.join(parent, name)):
+        m = logfiles.RUN_KEY.match(name)
+        if m and m.group("date") < oldest and os.path.isdir(os.path.join(parent, name)):
             shutil.rmtree(os.path.join(parent, name))
-            out.append("deleted: .build/runs/%s/ (older than %d days)" % (name, RUN_KEEP_DAYS))
+            out.append("deleted: %s/ (older than %d days)" % (logfiles.run_folder(name), RUN_KEEP_DAYS))
     if mode == "write":
         out.append(WRITE_HINT)
     return out
@@ -1784,7 +1800,7 @@ def run_file(d, name):
 def fit_results(root, d):
     """{key: (file, result)} of the fit results in `<dir>/fit/`; ScanError listing every problem."""
     out, bad = {}, []
-    for path in sorted(glob.glob(os.path.join(d, "fit", "*.jsonl"))):
+    for path in sorted(glob.glob(os.path.join(glob.escape(os.path.join(d, "fit")), "*.jsonl"))):
         name = "fit/" + os.path.basename(path)
         try:
             r = fit.read_result(path)
@@ -1977,7 +1993,7 @@ def cmd_summary(root, d, date):
                  for p, o in zip(collected, owner) if o is None]
     report = os.path.join(root, REPORTS, "%s-scan%s.md" % (os.path.basename(d)[:10], os.path.basename(d)[10:]))
     ranked = run_file(d, "ranked.jsonl")
-    if explore_query(d) is not None:
+    if is_explore(d):
         out.append("report: none (an exploratory run writes no scan report)")
     elif not os.path.exists(report):
         findings.append("no report: %s" % os.path.relpath(report, root).replace(os.sep, "/"))
@@ -2013,7 +2029,7 @@ def family_args(root, given):
             raise ScanError("--family takes <tier>=<target name>, as 1=backend: %r" % v)
         if int(tier) not in roles:
             raise ScanError("--family %s: tier %s is no target role in direction.md" % (v, tier.strip()))
-        if not name or logfiles.ascii_slug(name) != name:
+        if not logfiles.is_target_name(name):
             raise ScanError("--family %s: a target name is lowercase letters, digits and hyphens" % v)
         out[int(tier)] = name
     return out
@@ -2022,23 +2038,19 @@ def family_args(root, given):
 def role_names(root):
     """{tier: the target role's name, its citation left out (config.role_name)}, a tier counted as
     fit.ranks counts it, `GAP:` lines left out."""
-    if not config.target_roles(root):
-        return {}
-    _, _, found = config.item_lines(config.direction_text(root), "target roles")
-    return {n: config.role_name(t) for n, (_, t) in enumerate(found, 1) if not config.is_gap(t)}
+    return {n: config.role_name(t) for n, (t, gap) in config.tiers(root).items() if not gap}
 
 
 def family_lines(root, ranked, families):
     """The report's Target version lines (#615): one per role family that at least half the postings
-    fitted (`ranked`) fall in, by their tiers, when it has no Target version (a .tex in outputs/resumes/,
-    as tools/application.py's targets lists them). `families` maps a tier to its family's target name,
+    fitted (`ranked`) fall in, by their tiers, when it has no Target version (tools/logfiles.py
+    targets). `families` maps a tier to its family's target name,
     as application.py start's --family names it, so that tiers of one family count together; while
     there is no Target version at all, none is needed and each tier is its own family. ScanError when a
     tier of a fitted posting needs one and has none."""
     roles = role_names(root)
     tiers = sorted({p.get("tier") for p in ranked} & set(roles))
-    versions = sorted(os.path.basename(p)[:-4]
-                      for p in glob.glob(os.path.join(glob.escape(root), "outputs", "resumes", "*.tex")))
+    versions = logfiles.targets(root)
     lacking = [t for t in tiers if t not in families]
     if versions and lacking:
         raise ScanError("--family <tier>=<target name> needed for tier %s: name each one's role family's Target"
@@ -2131,9 +2143,8 @@ def cmd_report(root, date, src, top, name=None, body=None, screen=None, drafting
 
 def committed_text(root, path):
     """The file as HEAD has it, or None."""
-    rel = os.path.relpath(path, root).replace(os.sep, "/")
-    p = git(root, "show", "HEAD:" + rel)
-    return p.stdout if p.returncode == 0 else None
+    blob = logfiles.git_blob(root, "HEAD", os.path.relpath(path, root).replace(os.sep, "/"))
+    return None if blob is None else blob.decode("utf-8", "replace")
 
 
 def status_subject(root, report, status):
@@ -2231,7 +2242,7 @@ def cmd_cleanup(root, dry_run):
                 out.append("kept: %s (%s)" % (branch, e))
                 continue
             out.append("deleted: %s (%s)%s" % (branch, ", ".join(done), " (dry run: nothing deleted)" if dry_run else ""))
-    for d in sorted(glob.glob(os.path.join(root, ".build", "scan", "*"))):
+    for d in sorted(glob.glob(os.path.join(glob.escape(os.path.join(root, ".build", "scan")), "*"))):
         m = BRANCH_NAME.match("scan/" + os.path.basename(d))
         if not (m and os.path.isdir(d)):
             continue
@@ -2256,7 +2267,6 @@ def cmd_cleanup(root, dry_run):
 
 DRAFT_FILES = ("posting.md", "fit.md", "resume.tex", "company.md", "decisions.md", "handoff.md", "start.txt")
 DRAFT_OPTIONAL = ("answers.md",)
-START_KEYS = ("from", "family", "tier")   # the lines of application.py start's record
 DECISIONS_HEADER = ["Decision", "Chosen", "Alternatives", "Why"]
 NEEDS_YOU = re.compile(r"^needs you:\s*\S")
 PLAYWRIGHT = ".playwright-cli"
@@ -2394,8 +2404,7 @@ def draft_file_problems(names, decisions, start=None):
             problems.append("extra: %s (a draft folder holds only %s, and answers.md for form questions)"
                             % (n, ", ".join(DRAFT_FILES)))
     if start is not None:
-        have = {l.partition(":")[0].strip() for l in start.splitlines() if ":" in l}
-        lacks = [k + ":" for k in START_KEYS if k not in have]
+        lacks = logfiles.start_record_lacks(logfiles.parse_start_record(start))
         if lacks:
             problems.append("bad: start.txt: it lacks %s (application.py start --family --tier writes it)"
                             % ", ".join(lacks))

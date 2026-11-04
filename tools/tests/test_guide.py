@@ -143,6 +143,15 @@ class Guide(unittest.TestCase):
         self.assertIn("| Target roles | `direction.md › Target roles, ranked` |", text)
         self.assertIn("`direction.md › Employer preferences`, its `**Sorting order` line", text)
 
+    def test_tables_read_as_logfiles_reads_them(self):
+        """#651 C11: a heading with a trailing space, and a `\\|` read as `|` and written back as `\\|`."""
+        self.replace("skills/career-log/SKILL.md", "## Modes\n", "## Modes \n")
+        self.replace("skills/career-log/SKILL.md", "Something happened", "Something happened \\| shipped")
+        self.assertEqual(self.run_tool("write"), (0, "wrote docs/guide.md\n"))
+        self.assertIn('| **log** | "log this" | Something happened \\| shipped |', self.get("docs/guide.md"))
+        header, rows = guide.table(self.get("skills/career-log/SKILL.md"), "Modes")
+        self.assertEqual((header[0], rows[0][1]), ("Mode", "Something happened | shipped"))
+
     def test_changed_mode_row_is_stale_until_written(self):
         self.run_tool("write")
         self.replace("skills/career-log/SKILL.md", '"log this"', '"log this to my log"')

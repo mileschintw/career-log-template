@@ -11,7 +11,15 @@ Fails (exit 1, one line per problem) when, in any .md file under skills/career-l
 - a `file.md step N` reference names a step the file does not have (`## N.` or `N. `);
 - a mode name appears that is not in SKILL.md's modes table: a retired name anywhere, or any name
   in a mode context (`X` mode, **X** mode, modes/X.md). A line that names it as old ("older upskill
-  reports") is allowed.
+  reports") is allowed;
+- a line it says a tool prints is not in the tool's source: a backticked `x: ...` within five
+  words before, or three after, a print verb (prints, printed), in a sentence that names a tool
+  or follows one on its line (`tools/x.py`, `x.py`, a `<x>` a skill file defines as `<x>` is
+  `python3 ... tools/x.py`, or the Trigger check for tools/check.py). Its text up to its first
+  `<`, `…` or `...` must read as a string literal of that tool or of a tool it imports (a
+  docstring is not one), from a word's start in the literal, with the label's colon literal
+  text and each `%s`, `{...}` or f-string field standing for any text. A label naming a tool
+  (`sync: ok`) checks that tool too, and a line naming several passes when any of them prints it.
 It also fails when tools/check.py's mode lists disagree with the skill: MODES is the modes table but
 NO_CHECK (the modes with no Trigger check), and NEEDS's modes with playwright-cli, but setup (which
 installs it) and browser (browser.md's own check), are the modes whose files link browser.md (a file
@@ -46,6 +54,13 @@ FILE_TOKEN = r"(?:\[[^\]]*\]\((?P<href>[^)\s]+)\)|(?P<open>`)?(?P<name>(?:\.\./)
 SECTION_REF = re.compile(FILE_TOKEN + r" › ")
 LINKED_SECTION = re.compile(r"\[`?(?P<name>[A-Za-z0-9_./-]+\.md)`? › (?P<rest>[^\]]+)\]\((?P<href>[^)\s]+)\)")
 STEP_REF = re.compile(FILE_TOKEN + r" step (?P<n>\d+)\b")
+# Printed lines: a tool named in the text, a `<x>` alias for one, a backticked `x: ...` label, a
+# print verb, and a literal's %-format or {...} field
+TOOL_NAME = re.compile(r"\b([a-z_][a-z0-9_]*)\.py\b|<([a-z_]+)>|(Trigger check)")
+ALIAS = re.compile(r"`<([a-z_]+)>`(?: below)? is `[^`]*\btools/([a-z_][a-z0-9_]*)\.py\b")
+PRINTED = re.compile(r"`([A-Za-z][\w'’ /.-]*:(?: [^`]*)?)`")
+PRINT_VERB = re.compile(r"\bprint(?:s|ed|ing)?\b")
+FIELD = re.compile(r"%(?:\([^)]*\))?[-#0 +]*(?:\d+|\*)?(?:\.\d+)?[sdifrxgc]")
 MODE_CONTEXT = [
     re.compile(r"(?:`|\*\*)([a-z][a-z-]*)(?:`|\*\*) modes?\b"),
     re.compile(r"\bmodes? (?:`|\*\*)([a-z][a-z-]*)(?:`|\*\*)"),
@@ -221,6 +236,8 @@ class Linter:
                 p = self.target(here, path, lineno, m)
                 if p and os.path.exists(p) and p.endswith(".md") and int(m.group("n")) not in self.doc(p).steps:
                     self.add(path, lineno, "%s step %s: no such step" % (m.group("name") or m.group("href"), m.group("n")))
+            if not fenced:
+                self.check_printed(path, lineno, line)
             # Mode names
             if OLD.search(line):
                 continue
@@ -235,6 +252,101 @@ class Linter:
             for name in sorted(seen):
                 self.add(path, lineno, "mode %s: not in SKILL.md's modes table" % name)
 
+    def check_printed(self, path, lineno, line):
+        """Each tool line `line` says a tool prints, against the tools' literals."""
+        masked = re.sub(r"`[^`]*`", lambda m: "\0" * len(m.group(0)), line)
+        start = 0
+        for end in [m.end() for m in re.finditer(r"[.;:!?](?=\s+[A-Z(`*\[])", masked)] + [len(line)]:
+            sentence, at = line[start:end], start
+            start = end
+            if not PRINT_VERB.search(masked[at:end]):
+                continue
+            named = self.tool_names(line[:end])
+            for m in PRINTED.finditer(sentence):
+                before = re.sub(r"`[^`]*`", "x", sentence[:m.start()]).split()[-5:]
+                after = re.sub(r"`[^`]*`", "x", sentence[m.end():]).split()[:3]
+                if not any(PRINT_VERB.search(w) for w in before + after):
+                    continue
+                text = m.group(1)
+                fixed = re.split(r"<|…|\.\.\.", text, maxsplit=1)[0].rstrip()
+                if ":" not in fixed or text.startswith(("python", "py ", "git ")):
+                    continue
+                tools = list(named)
+                if fixed.split(":")[0] in self.tools:   # a label naming its tool: `sync: ok`
+                    tools.append(fixed.split(":")[0])
+                if tools and not any(self.prints(t, fixed) for t in tools):
+                    self.add(path, lineno, "prints `%s`: not in %s" % (text, " or ".join("tools/%s.py" % t for t in dict.fromkeys(tools))))
+
+    def tool_names(self, text):
+        """The tools text names, in order: `x.py` for a tools/x.py, or a `<x>` alias for one."""
+        out = []
+        for m in TOOL_NAME.finditer(text):
+            t = m.group(1) or self.aliases.get(m.group(2)) or m.group(3) and "check"   # SKILL.md › Trigger check
+            if t in self.tools and t not in out:
+                out.append(t)
+        return out
+
+    def literals(self, tool):
+        """The string literals of tools/<tool>.py and of each tool it imports, each as the list of its
+        fixed parts between fields (a docstring left out)."""
+        own, imports = self.own_literals(tool)
+        return own + [p for t in imports if t != tool for p in self.own_literals(t)[0]]
+
+    def own_literals(self, tool):
+        """(tools/<tool>.py's own literals as literals() gives them, the tools it imports)."""
+        if tool not in self.tool_literals:
+            tree = ast.parse(read(os.path.join(self.root, "tools", tool + ".py")))
+            docs = {id(n.body[0].value) for n in ast.walk(tree)
+                    if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                    and n.body and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant)}
+            out, imports = [], set()
+            for n in ast.walk(tree):
+                if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs:
+                    out.append([c.replace("\0", "%") for c in FIELD.split(n.value.replace("%%", "\0"))])
+                    out.append(re.split(r"\{[^{}]*\}", n.value))
+                elif isinstance(n, ast.JoinedStr):
+                    parts = [""]
+                    for v in n.values:
+                        if isinstance(v, ast.Constant):
+                            parts[-1] += v.value
+                        else:
+                            parts.append("")
+                    out.append(parts)
+                elif isinstance(n, ast.Import):
+                    imports.update(a.name for a in n.names)
+                elif isinstance(n, ast.ImportFrom) and n.module and not n.level:
+                    imports.add(n.module)
+            self.tool_literals[tool] = (out, sorted(imports & self.tools))
+        return self.tool_literals[tool]
+
+    def prints(self, tool, fixed):
+        """Whether a literal of tool can print text starting with fixed: from a word's start in one of
+        its parts, through fixed's label colon in literal text, each field standing for any text. A
+        bare tag ("sent before") the tool formats into a label passes for that label alone."""
+        colon = fixed.index(":")
+        label = fixed[:colon]
+
+        def match(at, parts, seen):
+            """Whether fixed[at:] reads as parts (a field between each two), seen telling whether
+            the colon was literal text so far."""
+            p, part = fixed[at:], parts[0]
+            if part.startswith(p):
+                return seen or at <= colon
+            if not p.startswith(part) or len(parts) == 1:
+                return False
+            seen = seen or at <= colon < at + len(part)
+            return any(match(j, parts[1:], seen) for j in range(at + len(part), len(fixed) + 1))
+
+        for parts in self.literals(tool):
+            if len(parts) == 1 and parts[0] == label and fixed == label + ":":
+                return True
+            for i, part in enumerate(parts):
+                for k in range(len(part)):
+                    at_word = not k or not (part[k - 1].isalnum() or part[k - 1] == "_")
+                    if part[k] == fixed[0] and at_word and match(0, [part[k:]] + parts[i + 1:], False):
+                        return True
+        return False
+
     def run(self):
         """The problems in the skill under the root, as (file, line, message)."""
         skill_md = os.path.join(self.skill, "SKILL.md")
@@ -248,6 +360,14 @@ class Linter:
         # Files in modes/ that are parts of a mode (review.md, import-chats.md) may be linked
         modes_dir = os.path.join(self.skill, "modes")
         self.subfiles = {f[:-3] for f in os.listdir(modes_dir) if f.endswith(".md")} if os.path.isdir(modes_dir) else set()
+        # The tools a printed line may name, and the `<x>` aliases the skill's files define for them
+        tools_dir = os.path.join(self.root, "tools")
+        self.tools = {f[:-3] for f in os.listdir(tools_dir) if f.endswith(".py")} if os.path.isdir(tools_dir) else set()
+        self.tool_literals, self.aliases = {}, {}
+        for d, dirs, files in os.walk(self.skill):
+            for f in files:
+                if f.endswith(".md"):
+                    self.aliases.update(ALIAS.findall(read(os.path.join(d, f))))
         for d, dirs, files in os.walk(self.skill):
             dirs.sort()
             for f in sorted(files):

@@ -329,9 +329,8 @@ def entry_command(args, root):
               "  (options first; --commit writes <root>'s .export-deny only)")
         return 2
     deny = to or os.path.join(root, DENY)
-    # A relative path that is no file from the current folder is read against root, as entries.py does
-    files = [f if os.path.isabs(f) or os.path.isfile(f) or not os.path.isfile(os.path.join(root, f))
-             else os.path.join(root, f) for f in files]
+    # A relative path is read against root, then the current folder, as entries.py does
+    files = [logfiles.arg_path(root, f) or f for f in files]
     for path in [deny] + files:
         if not os.path.isfile(path):
             print(f"FAIL: no {path}")

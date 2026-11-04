@@ -3,7 +3,7 @@
 
   python3 -I tools/tests/test_check_save.py
 """
-import contextlib, importlib.util, io, os, shutil, subprocess, sys, tempfile, unittest
+import contextlib, datetime, importlib.util, io, json, os, shutil, subprocess, sys, tempfile, time, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.join(HERE, "..", "check_save.py")
@@ -330,6 +330,13 @@ class CheckSave(unittest.TestCase):
         self.failing(FOLDER, "--humanizer", "none", says="posting.md has no URL\n  fix: ")
         os.remove(os.path.join(self.root, *FOLDER.split("/"), "posting.md"))
         self.failing(FOLDER, "--humanizer", "none", says="Files (%s): no posting.md" % FOLDER)
+
+    def test_a_misnamed_archived_marker_fails(self):
+        self.app()
+        self.write(FOLDER + "/Archived.md", "Archived (user, 2026-01-01)\n")
+        self.failing(FOLDER, "--humanizer", "none", says="Files (%s): Archived.md is no Archived marker: the marker is"
+                     " archived.md, in lowercase\n  fix: rename it with `git mv %s/Archived.md %s/archived.md`"
+                     % (FOLDER, FOLDER, FOLDER))
 
     def test_resume_differs_from_the_draft(self):
         self.app()
@@ -694,6 +701,24 @@ class CheckSave(unittest.TestCase):
                       "left: profile.md: differs from HEAD, not written by this save: not committed\ncommitted: ", out)
         self.assertTrue(out.endswith("sync: ok\n"), out)
 
+    def test_left_lines_name_only_log_files_no_live_run_wrote(self):
+        """#662 (B5): an Engine file and another session's live-run file get no `left:` line, as the
+        Trigger check lists them."""
+        self.commit_setup()
+        self.write("direction.md", "# Direction\n\n## Constraints\nNone.\n")
+        os.utime(os.path.join(self.root, "direction.md"), (time.time() - 3600,) * 2)   # an earlier session's
+        self.write("tools/new_tool.py", "x\n")   # the Engine
+        live = os.path.join(self.root, ".build", "runs", "2031-01-02-100000", "live")
+        os.makedirs(os.path.dirname(live))
+        start = datetime.datetime.fromtimestamp(int(time.time() - 600)).astimezone().isoformat()
+        with open(live, "w", encoding="utf-8") as f:
+            json.dump({"start": start, "mode": "write"}, f)
+        self.write("profile.md", "# Profile\n\n## Skills\nGo, Rust.\n\n## Education\nBSc.\n")   # the live run's
+        code, out = self.run_tool(FOLDER, "--humanizer", "none", "--commit", "write(example): Engineer")
+        self.assertEqual(code, 0, out)
+        self.assertEqual([l for l in out.splitlines() if l.startswith("left: ")],
+                         ["left: direction.md: differs from HEAD, not written by this save: not committed"])
+
     def test_commit_refuses_a_subject_the_mode_does_not_give(self):
         """#518 (2): a fix-up subject of the run's own is a failing line, and nothing is committed."""
         self.commit_setup()
@@ -921,6 +946,35 @@ class CheckSave(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("finding: outputs/reports/2026-02-02-pitch.md: no provenance table", out)
         self.assertTrue(out.endswith("check_save: 1 findings: report each\n"), out)
+
+
+class SharedContract(unittest.TestCase):
+    """The subject, Archived marker and citation rules application.py and check.py share (#661)."""
+    def test_write_subject_round_trip_and_level_suffix(self):
+        self.assertEqual(check_save.parse_write_subject("write(acme): Backend Engineer"), ("acme", "Backend Engineer"))
+        self.assertEqual(check_save.parse_write_subject("write(acme): Backend Engineer to Reference"),
+                         ("acme", "Backend Engineer"))
+        self.assertIsNone(check_save.parse_write_subject("scan(2026-01-01): accepted"))
+        self.assertEqual(check_save.write_subject("acme", "Backend Engineer"), "write(acme): Backend Engineer")
+
+    def test_archived_marker_is_exact_case_on_every_os(self):
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root)
+        for name, marker in (("2026-01-01-a-b", "archived.md"), ("2026-01-02-c-d", "Archived.md")):
+            os.makedirs(os.path.join(root, "outputs", "applications", name))
+            open(os.path.join(root, "outputs", "applications", name, marker), "w").close()
+        self.assertTrue(check_save.logfiles.is_archived_folder(root, "outputs/applications/2026-01-01-a-b"))
+        self.assertFalse(check_save.logfiles.is_archived_folder(root, "outputs/applications/2026-01-02-c-d"))
+        self.assertEqual(check_save.archived_outputs(root), ["outputs/applications/2026-01-01-a-b"])
+
+    def test_cites_only_the_output_itself(self):
+        rel = "outputs/applications/2026-01-05-acme-backend"
+        for text, ok in (("outputs/applications/2026-01-05-acme-backend", True),
+                         ("applications/2026-01-05-acme-backend", True),
+                         ("outputs/applications/2026-01-05-acme-backend/answers.md", True),
+                         ("sources/applications/2026-01-05-acme-backend", False),
+                         ("outputs/applications/2026-01-05-acme-backend-2", False)):
+            self.assertEqual(check_save.cites(text, rel), ok, text)
 
 
 if __name__ == "__main__":

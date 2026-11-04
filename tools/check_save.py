@@ -72,7 +72,7 @@ to do. In order:
   - an added line citing an Archived output (a folder with archived.md, a report with the Archived
     line): an Archived save adds no line;
   - a removed line with an added one that differs from it only in words (a rewrite), and more lines
-    removed than added (a drop happens only beside an addition, at the three-wording cap); a
+    removed than added (a drop happens only beside an addition, at the PHRASING_CAP cap); a
     removed line citing an Archived output is the demote's (write › Save levels › To Archived) and is
     set aside.
   It lists, without failing, as `check:` lines: an added line that differs only in words from a line
@@ -104,14 +104,15 @@ file (scan reports aside). The last line is `check_save: ok` (exit 0, no finding
 
 For a save, the last line is `check_save: ok` (exit 0), or `check_save: fix the lines above, then run it
 again` (exit 1). With --commit (one <saved>), it also checks the subject: an application folder's
-`write(<company>): <role>`, whose company and role, as ASCII names (tools/logfiles.py ascii_slug),
+`write(<company>): <role>`, whose company and role, as ASCII names (tools/logfiles.py posting_slug),
 are the folder's name after its date (the `commit:` line tools/application.py name printed); a target's `write(<target>): resume`; a report's `write(<slug>):
 <kind>`, as its file name and Kind: line give them; a ranking's `rank(<event>): <n> employers`,
 <event> as its file name has it. A subject that is none of these is a `Commit subject:` line that
 fails. On `check_save: ok` it commits, printing `commit: <subject>`, then a `left: <path>: differs
-from HEAD, not written by this save: not committed` line for each other path that differs from HEAD
-(a bulk change waiting for its yes stays out), then tools/sync.py commit's lines, so it still ends
-with `sync: ok` or a `next:` line; it exits with sync.py's code. It commits only the files this save wrote, told by what each
+from HEAD, not written by this save: not committed` line for each other Log file that differs from
+HEAD, as tools/check.py's Uncommitted Log changes lists them, less a live run's (a bulk change
+waiting for its yes stays out), then tools/sync.py commit's lines, so it still ends with `sync: ok`
+or a `next:` line; it exits with sync.py's code. It commits only the files this save wrote, told by what each
 gained or lost since HEAD (new files included): <saved>, a target's .tex and .pdf with its .md; each
 entry whose `## Past phrasings` gained or lost a line naming the output (its path from outputs/ on, or
 a target's <target>.md, .tex or .pdf) or gained one holding its bullet; stories.md when a line it
@@ -139,11 +140,12 @@ import logfiles
 from entries import ENTRY_PATH, SCAN_REPORT, outputs   # what an entry's path is; the Log's outputs
 from entries import PHRASING_PARTS, SIMILAR, phrasings, similar, words   # the Past phrasings parser
 import writing_lint   # the Visibility and AI-tell check 9 lines, run again at save
+import sponsorship   # where the sponsorship records are (RECORDS)
 import resume   # which pdftotext tools/resume.py uses
 
 OUTPUT_REF = re.compile(r"\b(?:outputs|applications|resumes|reports)/|\bresume\.tex\b|\bprovenance\b", re.I)
 SOURCE_PATH = re.compile(r"\bsources/(?:[^;|\s]|\s+(?![^;|\s]*\b(?:outputs|applications|resumes|reports)/))*|[\w.-]+@[0-9a-f]{6,}:\S+|https?://(?![^\s]*/outputs/)\S+")
-SPONSORSHIP_RECORDS = re.compile(r"(?<![\w./-])outputs/reports/sponsorship\.jsonl(?![\w./-])")   # a source, not an output
+SPONSORSHIP_RECORDS = re.compile(r"(?<![\w./-])%s(?![\w./-])" % re.escape(sponsorship.RECORDS))   # a source, not an output
 MD_FILE = re.compile(r"[\w./\\-]*\w\.md\b", re.I)
 SECTION_REF = re.compile(r"(?:\[[^\]]*\]\(([^)\s]+)\)|([\w./\\-]*\w))\s+›\s+([^;|]+)")
 PROVENANCE_FILE = re.compile(r"outputs/applications/[^/]+/provenance\.md$|outputs/(?:resumes|reports)/[^/]+\.md$")
@@ -155,6 +157,8 @@ RANKING = re.compile(r"outputs/reports/\d{4}-\d{2}-\d{2}-([^/\s]+)-ranking\.md$"
 EVENTS = "Events and contacts"
 CHECK_LINE = re.compile(r"(?:^|\s|: )check: ")
 ARCHIVED = re.compile(r"Archived \(user, (\d{4}-\d{2}-\d{2})\)")
+PHRASING_CAP = 2   # the wordings ## Past phrasings keeps per claim and angle (consolidate step 2)
+WRITE_SUBJECT = re.compile(r"write\((.+?)\): (\S.*?)(?: to (?:Reference|Archived))?")   # fullmatch
 KINDS = ("resume bullets", "cover letter", "bio", "elevator pitch", "application answer", "interview answer", "other")
 EMPLOYER_KINDS = ("resume bullets", "cover letter", "application answer")
 APPLICATION_FILES = ("posting.md", "resume.tex", "resume.pdf")   # provenance.md: its Provenance check line
@@ -305,6 +309,19 @@ def report_marks(text):
     return kind, any(ARCHIVED.fullmatch(l.strip()) for l in lines)
 
 
+def write_subject(name, what):
+    """The commit subject of a write save: `write(<company>): <role>`, `write(<target>): resume`,
+    `write(<slug>): <kind>`."""
+    return "write(%s): %s" % (name, what)
+
+
+def parse_write_subject(subject):
+    """(name, what) of a write save's commit subject, or of a level change's (`<subject> to
+    Reference`), the level left out; None for any other subject."""
+    m = WRITE_SUBJECT.fullmatch(subject.strip())
+    return (m.group(1), m.group(2)) if m else None
+
+
 def bad_marker(line):
     """Whether a line meant as the Archived marker is not `Archived (user, YYYY-MM-DD)` with a real date."""
     m = ARCHIVED.fullmatch(line.strip())
@@ -396,7 +413,11 @@ def check_files(root, rel, out):
             for h in untyped_headings(read(root, rel + "/answers.md").splitlines()):
                 out.fail("Files (%s): answers.md heading with no Type: line under it: %s" % (rel, h),
                          "write `Type: <question type>` under it, the type as its stories.md row's first column has it")
-        if exists(root, rel + "/archived.md"):
+        for other in logfiles.archived_misnamed(root, rel):
+            out.fail("Files (%s): %s is no Archived marker: the marker is archived.md, in lowercase" % (rel, other),
+                     "rename it with `git mv %s/%s %s/archived.md`, or delete it when archived.md is there too"
+                     % (rel, other, rel))
+        if logfiles.is_archived_folder(root, rel):
             body = [l.strip() for l in read(root, rel + "/archived.md").splitlines() if l.strip()]
             if len(body) != 1 or bad_marker(body[0]):
                 out.fail("Files (%s): archived.md is not the one line `Archived (user, YYYY-MM-DD)`" % rel,
@@ -514,19 +535,18 @@ def bullets_of(root, rel):
 
 
 def archived_outputs(root):
-    """The outputs saved Archived, as a Past phrasings citation names them (`outputs/` left off, as
-    older citations do): each application folder with an archived.md, and each report with the
-    Archived line."""
+    """The outputs saved Archived, as paths from the root: each application folder with an
+    archived.md, and each report with the Archived line."""
     out = []
     apps = os.path.join(root, "outputs", "applications")
     for name in os.listdir(apps) if os.path.isdir(apps) else []:
-        if os.path.isfile(os.path.join(apps, name, "archived.md")):
-            out.append("applications/" + name)
+        if logfiles.is_archived_folder(root, "outputs/applications/" + name):
+            out.append("outputs/applications/" + name)
     reports = os.path.join(root, "outputs", "reports")
     for name in os.listdir(reports) if os.path.isdir(reports) else []:
         try:
             if name.endswith(".md") and report_marks(read(root, "outputs/reports/" + name))[1]:
-                out.append("reports/" + name)
+                out.append("outputs/reports/" + name)
         except (OSError, UnicodeError):
             pass
     return out
@@ -554,11 +574,16 @@ def output_name(rel):
         name = re.escape(rel[len("outputs/"):-len(".md")]) + r"\.(?:md|tex|pdf)"
     else:
         name = re.escape(rel[len("outputs/"):])
-    return r"(?<![\w.-])" + name + r"(?![\w.-])"
+    return r"(?<![\w./-])(?:outputs/)?" + name + r"(?![\w.-])"
+
+
+def cites(text, rel):
+    """Whether a text (a Past phrasings citation, a pointer, a row) names the saved output rel."""
+    return re.search(output_name(rel), text) is not None
 
 
 def names_output(text, saved):
-    return any(re.search(output_name(rel), text) for rel in saved)
+    return any(cites(text, rel) for rel in saved)
 
 
 def added_lines(root, rel, old=None):
@@ -580,8 +605,7 @@ def saves_entry(old, new, saved, approved):
 
 
 def at_head(root, rel):
-    p = logfiles.git_run(root, "show", "HEAD:./" + rel)
-    return p.stdout if p.returncode == 0 else ""
+    return (logfiles.git_blob(root, "HEAD", rel) or b"").decode("utf-8", "replace")
 
 
 def show_line(line):
@@ -596,7 +620,7 @@ def check_phrasings(root, entry, old, new, approved, archived, out):
         return
     kept = list((before & after).elements())
     raw = {l.strip().lower() for l in (logfiles.section(new, "Past phrasings") or "").splitlines()}
-    cites = lambda line, paths: any(re.search(re.escape(p) + r"(?![\w.-])", line[1]) for p in paths)
+    cites = lambda line, paths: names_output(line[1], paths)
     fails, checks = [], []
     demoted = [r for r in removed if cites(r, archived)]
     removed = [r for r in removed if r not in demoted]
@@ -625,8 +649,8 @@ def check_phrasings(root, entry, old, new, approved, archived, out):
         if twin and similar(r, twin) >= SIMILAR:
             fails.append("rewritten %s -> %r: a line stays as written" % (show_line(r), twin[1][:120]))
         else:
-            checks.append("removed %s: check it is the line consolidate step 2 ranks last, at the three-wording cap"
-                          % show_line(r))
+            checks.append("removed %s: check it is the line consolidate step 2 ranks last, a claim keeping %d wordings"
+                          % (show_line(r), PHRASING_CAP))
     if len(removed) > len(added):
         fails.append("%d line(s) removed, %d added: a drop happens only beside an addition" % (len(removed), len(added)))
     head = "Past phrasings (%s): +%d -%d" % (entry, len(added), len(removed) + len(demoted))
@@ -738,25 +762,19 @@ def is_ranking(root, rel):
     return bool(RANKING.match(rel)) and (not exists(root, rel) or report_marks(read(root, rel))[0] is None)
 
 
-def name_part(text, fallback=""):
-    """A company, role or event as a file name has it: tools/logfiles.py ascii_slug (tools/scan.py
-    names a name with no ASCII letter or digit `posting`)."""
-    return logfiles.ascii_slug(text) or fallback
-
-
 def subject_problem(root, rel, subject):
     """Why a --commit subject is not the one the save's mode gives for rel, or None."""
     if APPLICATION.match(rel):
-        m = re.fullmatch(r"write\((.+?)\): (\S.*)", subject)
+        m = parse_write_subject(subject)
+        m = m if m and write_subject(*m) == subject else None   # a level change's ` to <level>` is no save's
         folder = rel.split("/")[-1]
-        names = {"%s-%s" % (name_part(m.group(1), c), name_part(m.group(2), r))
-                 for c in ("", "posting") for r in ("", "posting")} if m else set()
-        if any(re.fullmatch(r"\d{4}-\d{2}-\d{2}-%s(?:-\d+)?" % re.escape(n), folder) for n in names):
+        name = m and "%s-%s" % (logfiles.posting_slug(m[0]), logfiles.posting_slug(m[1]))
+        if name and re.fullmatch(r"\d{4}-\d{2}-\d{2}-%s(?:-\d+)?" % re.escape(name), folder):
             return None
         return ("`write(<company>): <role>`, the `commit:` line tools/application.py name printed (a scan accept: "
                 "company and role as the folder's name gives them after its date)")
     if TARGET.match(rel):
-        want = "write(%s): resume" % TARGET.match(rel).group(1)
+        want = write_subject(TARGET.match(rel).group(1), "resume")
         return None if subject == want else "`%s`" % want
     if is_ranking(root, rel):
         event = RANKING.match(rel).group(1)
@@ -766,7 +784,7 @@ def subject_problem(root, rel, subject):
         return "`rank(<event>): <n> employers`, <event> the event the file is named for (%s)" % event
     slug = rel.split("/")[-1][len("YYYY-MM-DD-"):-len(".md")]
     kind = report_marks(read(root, rel))[0] if exists(root, rel) else None
-    want = "write(%s): %s" % (slug, kind or "<its Kind: line's kind>")
+    want = write_subject(slug, kind or "<its Kind: line's kind>")
     return None if subject == want else "`%s`" % want
 
 
@@ -793,16 +811,18 @@ def commit_paths(root, saved, entries):
         scans = [p for p in changed_paths(root, "outputs/reports/") if SCAN_REPORT.fullmatch(p.split("/")[-1])
                  and exists(root, p) and any(names_output(l, saved) for l in added_lines(root, p))]
         if scans:
-            paths += scans + changed_paths(root, "outputs/dashboard/")
+            import dashboard   # the scan dashboard's page (OUT); it imports scan.py, so only when a save needs it
+            paths += scans + changed_paths(root, posixpath.dirname(dashboard.OUT) + "/")
     if any(is_ranking(root, rel) for rel in saved) and any(names_output(l, saved) for l in added_lines(root, "applications.md")):
         paths.append("applications.md")
     return list(dict.fromkeys(paths))
 
 
 def left_paths(root, paths):
-    """The paths that differ from HEAD and are not among the committed ones (nor in a committed folder)."""
+    """The Log's own files that differ from HEAD (logfiles.uncommitted) and are not among the committed
+    ones (nor in a committed folder), less those of a live run (a run going in another session)."""
     inside = lambda p: any(p == c or p.startswith(c.rstrip("/") + "/") for c in paths)
-    return [p for p in changed_paths(root) if not inside(p)]
+    return sorted(p for _, p, _, key in logfiles.uncommitted(root) or [] if not key and not inside(p))
 
 
 def commit(root, saved, subject, entries):

@@ -1500,8 +1500,7 @@ def read_marks(work, rows):
     return marks
 
 
-def plural(n, word):
-    return f"{n} {word}" + ("" if n == 1 else "s")
+plural = logfiles.plural
 
 
 def cmd_tally(a):

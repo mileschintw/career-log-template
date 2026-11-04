@@ -550,7 +550,8 @@ class Main(unittest.TestCase):
                                                    "widget[^[:alnum:]]*sorter[^[:alnum:]]*lab\n"))
 
     def test_entry_relative_to_root(self):
-        # Run from another folder, a relative path is read against --root; one from the current folder wins
+        # Run from another folder, a relative path is read against --root first, then the current folder,
+        # as entries.py reads one (#651 C8)
         with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as elsewhere:
             make_log(root)
             with open(os.path.join(root, "entries", "2026-08-kite.md"), "w", encoding="utf-8") as f:
@@ -558,19 +559,24 @@ class Main(unittest.TestCase):
             os.makedirs(os.path.join(elsewhere, "entries"))
             with open(os.path.join(elsewhere, "entries", "2026-01-widget-sorter.md"), "w", encoding="utf-8") as f:
                 f.write("---\norg: Korvane\n---\n")
+            with open(os.path.join(elsewhere, "entries", "2026-02-only-here.md"), "w", encoding="utf-8") as f:
+                f.write("---\norg: Korvane\n---\n")
             saved = os.getcwd()
             try:
                 os.chdir(elsewhere)
                 outs = []
-                for rel in ("entries/2026-01-widget-sorter.md", "entries/2026-08-kite.md", "entries/no.md"):
+                for rel in ("entries/2026-01-widget-sorter.md", "entries/2026-08-kite.md", "entries/2026-02-only-here.md",
+                            "entries/no.md"):
                     out = io.StringIO()
                     with redirect_stdout(out):
                         outs.append((deny_coverage.main(["deny_coverage.py", "entry", "--root", root, rel]),
                                      out.getvalue()))
             finally:
                 os.chdir(saved)
-        self.assertEqual(outs, [(0, "Korvane\n"),
+        self.assertEqual(outs, [(0, "glintmoor\ncourse[^[:alnum:]]*group\nterm[^[:alnum:]]*two\n"
+                                    "widget[^[:alnum:]]*sorter[^[:alnum:]]*lab\n"),
                                 (0, "Brindlewood[^[:alnum:]]*Kite[^[:alnum:]]*Map\n"),
+                                (0, "Korvane\n"),
                                 (2, "FAIL: no entries/no.md\n")])
 
     def test_entry_not_utf8(self):
