@@ -58,8 +58,9 @@ function Set-Machine($Key, $Value) {   # one `<key> = <TOML value>` line in mach
   New-Item -ItemType Directory -Force -Path (Split-Path $Machine) | Out-Null
   $Lines = if (Test-Path $Machine) { @(Get-Content $Machine) } else { @(
     '# career-log Machine setup: the optional tools the user wants on this machine',
-    '# (true) or declined (false), and where poppler came from. Written by tools/setup.sh and',
-    '# tools/setup.ps1; whether a tool is installed is detected on every run (tools/check.py).') }
+    '# (true) or declined (false), and where poppler came from. Written by tools/setup.sh,',
+    '# tools/setup.ps1 and tools/speech.py (its setup); whether a tool is installed is detected',
+    '# on every run (tools/check.py).') }
   Write-Machine (@($Lines | Where-Object { $_ -notmatch "^$([regex]::Escape($Key)) *=" }) + "$Key = $Value")
   Write-Host "machine.toml: $Key = $Value"
 }

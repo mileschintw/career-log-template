@@ -42,7 +42,20 @@ Entries appear here as you log them.
 
 This repo was created from the Template at https://github.com/mileschintw/career-log-template. Report a changed chat-export format or a broken step there, as an issue (use the "Chat export format changed" form) or a pull request. Issues are public: include keys and shapes only, never your records. The import mode drafts the report for you and asks before posting ([import-chats.md](skills/career-log/modes/import-chats.md), step 8).
 
-To upgrade this Log to a newer Template, ask your agent to "upgrade to the latest Template". The upgrade mode ([upgrade.md](skills/career-log/modes/upgrade.md)) fetches the release, replaces the Engine, runs the upgrade guide of each release in between with you, offers to merge your own Engine edits back, and commits once you say yes. The Template's [Releases](https://github.com/mileschintw/career-log-template/releases) page says what each release changed. A Log made before 0.1.0 starts with the guide in [v0.1.0](https://github.com/mileschintw/career-log-template/releases/tag/v0.1.0).
+## Upgrade
+
+To upgrade this Log to a newer Template, ask your agent to "upgrade to the latest Template". The upgrade mode ([upgrade.md](skills/career-log/modes/upgrade.md)) fetches the release and replaces the Engine (the skill, `tools/` and the other files the Template ships), runs the upgrade guide of each release in between with you (a guide is where a release changes your records' format, with your yes), and commits each release's step. It starts only from a clean working tree and pushes nothing until you say yes to the whole upgrade; until then, you can take the Log back to the commit it started from. The Template's [Releases](https://github.com/mileschintw/career-log-template/releases) page says what each release changed.
+
+What happens to Engine files you changed:
+
+- **A file you edited** is replaced by the release's. Then the agent offers, file by file, to merge your edits back in, and shows you each merged change where it now sits. Your version also stays in git history.
+- **A conflict** is a place where the release changed the same lines you did. The file keeps both versions between conflict markers; the agent shows you each one with both sides, and you choose yours, the release's or a mix. Nothing is committed until every conflict is settled.
+- **A file the release dropped** is deleted. If you had edited it, the agent shows you your version and asks whether to keep it as your own file or let it go.
+- **A file you added** (a mode or a tool of your own) stays. If a release ships a file at the same path, the release's takes it over, and the agent offers to move yours to another path.
+- **A file you deleted** comes back as the release has it.
+- **Your own `.gitignore` lines** are put back with no question.
+
+The upgrade runs from 0.2.0 on. A Log older than that upgrades to v0.3.2 first, as [its notes](https://github.com/mileschintw/career-log-template/releases/tag/v0.3.2) say, then again from 0.3.2.
 
 ## License
 

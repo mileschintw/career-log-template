@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The check every career-log trigger runs first (SKILL.md › Trigger check).
 
-  python3 -I tools/check.py <mode> [--root <root>]     (Windows: py -3 -I tools/check.py <mode>)
+  python3 -I tools/check.py <mode> [--session <key>] [--root <root>]     (Windows: py -3 -I tools/check.py <mode>)
 
 <mode> is a mode from SKILL.md's modes table (`setup` checks every optional tool), or `browser`:
 playwright-cli's lines alone, with `now` steps, for browser.md before a first open. <root> is the
@@ -18,8 +18,10 @@ Checks run in the order of CHECKS. Each takes the Context and returns (lines, ne
 A later check is one more function appended to CHECKS.
 
 Machine setup: TinyTeX (with poppler) is required, so setup installs it with no question.
-~/.career-log/machine.toml holds the user's yes or no per optional tool (playwright-cli) on this
-machine, one `<tool> = true|false` line each, written by tools/setup.sh and tools/setup.ps1; a
+~/.career-log/machine.toml holds the user's yes or no per optional tool (playwright-cli, speech) on
+this machine, one `<tool> = true|false` line each, written by tools/setup.sh and tools/setup.ps1
+(speech's by `tools/speech.py setup`, which also sets it up: its offer gives the three ways to take a
+spoken answer and what each gives, #707); a
 leftover `tinytex` line from before TinyTeX was required is ignored. Whether a tool is installed is
 detected here on every run, never stored. Setup also records there where poppler came from
 (`poppler = "micromamba"` or `"own"`); the check tells that from the path of the pdftotext
@@ -41,15 +43,22 @@ members, from interviewer_profiles.
 Unattended: with CAREER_LOG_UNATTENDED set (a scheduled run), a step that would install something or
 ask the user says setup is needed instead, since no one is there to answer a question.
 
+Session (ADR 0014): every mode's check (not `browser`) in a git repository prints `session: <key>`. At a session's first
+check, without --session, it makes a new key (logfiles.SESSIONS/<key>/) whose record holds the
+baseline: the hash of each uncommitted Log file it found, which is not this session's (tools/sync.py
+claim and commit refuse it until it is settled). A later check passes --session <key> and keeps it, as
+the first `mode start:` value is kept; a key whose record is gone gets it made again, with no baseline.
+
 Uncommitted Log changes: the Log's own files (LOG_PATHS) that git shows as changed or new are
 listed, so a session settles what an earlier one left before it writes anything; the `next:` line
-points at tools/sync.py's `status` and `settle`. A file a run still going in another session wrote
-is that run's, and is left out of the settle: a live run is a `.build/runs/<key>/live` marker
-(tools/scan.py run) touched in the last logfiles.LIVE_HOURS hours, in a folder named as a run key,
-and a file on disk whose time is at or after its `start` belongs to it (to the latest-started such
-run, when several are live). It prints as `log change (live run <key>): <XY> <path>`, with a
-`next:` line to leave it alone that names `scan.py end <key>` for a session that ended without
-saving. `done`'s `Not saved yet` leaves these files out too.
+points at tools/sync.py's `status` and `settle` (with --session <key>). A file this session claimed
+prints as `log change (this session): <XY> <path>`. A file another session claimed (tools/sync.py
+claim, or a commit under its key) prints as `log change (session <key>): <XY> <path>`, with a `next:`
+line to leave it out of every settle and commit, and no question about that session: time never
+releases a claim, and no session is ever named as possibly ended. A baseline file no session claimed
+whose hash changed since this session's first check prints as `log change (still changing): <XY>
+<path>`: another session is still writing it, so it is kept out of the settle too. `done`'s `Not saved
+yet` counts only this session's files and those an earlier session left.
 
 This Log's git state, read only (tools/sync.py makes every change): `identity: ok (<email>)` or
 `identity: missing`, the repo-local user.email every commit needs (SETUP.md step 3); a missing one
@@ -66,7 +75,8 @@ Pull: a run with no `next: stop:`, on a branch with an upstream, ends its steps 
 line to run tools/sync.py pull (another clone may have pushed); this script itself never pulls.
 
 Setup for this Log: config.toml at the Log root (tools/config.py) says setup has run. Without it every
-mode but setup stops and points to setup; with it, one `config <field>: <value>` line per Config field.
+mode but setup stops and points to setup; with it, one `config <field>: <value>` line per Config field
+(an empty conversation_language prints what it means: the language the user writes in).
 
 Entry size: an `entry over threshold: <path> <n> tokens` line for each entry tools/entries.py
 estimates past its threshold (half of what one Read call returns), in every mode. It has no
@@ -86,7 +96,7 @@ line (HEAD and the time, for `done --since`; the mode keeps its first check's, a
 suggest a fresh session when this session already ran another mode. The modes that do not count
 come from the flows table of docs/guide.md (tools/guide.py flows): a step whose session is `same`.
 
-  python3 -I tools/check.py done <mode> [--since <sha>@<time>] [--for <mode>] [--no-posting] [--family <target>]
+  python3 -I tools/check.py done <mode> [--session <key>] [--since <sha>@<time>] [--for <mode>] [--no-posting] [--family <target>]
 
 (--root as above) prints the Next up block that ends <mode>, as English data lines the agent renders in the user's
 language (SKILL.md › Next up): a `Close-out` heading line; the count and subjects of the commits made since `mode
@@ -119,6 +129,9 @@ from a posting's fit, and the block names none. With Log changes
 uncommitted or commits not pushed, it says so in place of the fresh-session line and exits 1; for
 commits not pushed, its `next:` line names `sync.py push`. For log it prints only that Target version
 line, measured from log's last commit (HEAD~1, or --since), or nothing; nothing in an unattended run.
+--session <key>: when it exits 0, every claim of that session is released (an unattended run too);
+its record stays, so the session goes on idle with its key. On exit 1 the claims stay while the
+session settles what is not saved; a session that cannot settle it keeps them, as a crashed one does.
 
 Exit 1 when the check ends the run (a `next: stop:` line, or this Python is too old), 2 on a bad
 argument, 0 otherwise. -h or --help prints this text and exits 0. Standard library only.
@@ -147,15 +160,16 @@ UNATTENDED = bool(os.environ.get("CAREER_LOG_UNATTENDED"))
 # `hard`: the step that needs it cannot run without it. `soft`: that step has a fallback
 # (browser.md › Fallback order). Either way only the step that needs the tool waits on it (WHEN),
 # never the whole mode.
-TOOLS = ["playwright-cli"]
+TOOLS = ["playwright-cli", "speech"]
 NEEDS = {
     "fit": [("playwright-cli", "soft")],
     "write": [("tinytex", "hard"), ("playwright-cli", "soft")],
     "rank": [("playwright-cli", "soft")],
     "scan": [("tinytex", "soft"), ("playwright-cli", "soft")],
-    "interview": [("playwright-cli", "soft")],
+    "interview": [("playwright-cli", "soft"), ("speech", "soft")],
+    "stories": [("speech", "soft")],   # a behavioural question practised out loud
     "import": [("playwright-cli", "soft")],
-    "setup": [("playwright-cli", "soft"), ("tinytex", "soft")],
+    "setup": [("playwright-cli", "soft"), ("tinytex", "soft"), ("speech", "soft")],
     "browser": [("playwright-cli", "soft")],   # not a mode: browser.md's own check, before a first open
 }
 WHAT = {
@@ -167,20 +181,22 @@ WHAT = {
                          " home folder (about 400 MB in all; about 150 MB with Chrome or Edge installed (on"
                          " macOS, in /Applications))"),
 }
-NAME = {"playwright-cli": "playwright-cli"}
+NAME = {"playwright-cli": "playwright-cli", "speech": "speech.py"}
 PURPOSE = {"playwright-cli": "reads web pages that show their content only after their scripts run"
                              " or you sign in"}
-FEATURE = {"playwright-cli": "Browser capture"}
+FEATURE = {"playwright-cli": "Browser capture", "speech": "Transcription with times (tools/speech.py)"}
 WHEN = {"playwright-cli": "when a page needs a Browser capture (item 2 of browser.md, Fallback order)",
-        "tinytex": "when a step builds a PDF"}
+        "tinytex": "when a step builds a PDF",
+        "speech": "when a practice round takes a spoken answer"}
 # How to run setup when it installs something: TinyTeX outlasts a shell tool's usual time limit.
 RUN_SETUP = "as a background command, and wait for it to end (it can take 5-20 minutes)"
 
 
 class Context:
-    def __init__(self, mode, root=ROOT, home=None):
+    def __init__(self, mode, root=ROOT, home=None, session=None):
         self.mode = mode
         self.root = root
+        self.session = session   # this session's key (--session, or the one check_session_key makes)
         self.home = home or os.path.expanduser("~")
         self.machine_toml = os.path.join(self.home, ".career-log", "machine.toml")
 
@@ -193,6 +209,21 @@ def setup_cmd(root, yes=(), no=()):
         return cmd + (" -Yes " + ",".join(yes) if yes else "") + (" -No " + ",".join(no) if no else "")
     cmd = "sh '%s/tools/setup.sh'" % root.replace("'", "'\\''")
     return cmd + (" --yes " + ",".join(yes) if yes else "") + (" --no " + ",".join(no) if no else "")
+
+
+def install_cmd(ctx, tool, yes=True):
+    """The command that records the user's yes (installing the tool) or no for an optional tool:
+    speech.py sets itself up; the others go through tools/setup.sh or setup.ps1."""
+    if tool == "speech":
+        return "%s setup %s" % (tool_cmd(ctx.root, "speech.py"), "--yes" if yes else "--no")
+    return setup_cmd(ctx.root, yes=[tool]) if yes else setup_cmd(ctx.root, no=[tool])
+
+
+def run_how(tool):
+    if tool == "speech":
+        return ("as a background command, and wait for it to end (it downloads about %.1f GB)"
+                % tools_module("speech").plan()[3])
+    return RUN_SETUP
 
 
 def run(cmd, timeout=30):
@@ -209,13 +240,13 @@ def run(cmd, timeout=30):
 def newer_pythons(home):
     """Python 3.11+ interpreters off this one's PATH, where setup puts them."""
     if WINDOWS:
-        pattern = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python3*", "python.exe")
+        paths = logfiles.glob_under(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python3*", "python.exe")
         minor = lambda path: re.fullmatch(r"python3(\d+)", os.path.basename(os.path.dirname(path)).lower())
     else:
-        pattern = os.path.join(home, ".local", "bin", "python3.*")
+        paths = logfiles.glob_under(home, ".local", "bin", "python3.*")
         minor = lambda path: re.fullmatch(r"python3\.(\d+)", os.path.basename(path))
     found = []
-    for path in glob.glob(pattern):
+    for path in paths:
         m = minor(path)
         if m and int(m.group(1)) >= MIN_PYTHON[1] and os.access(path, os.X_OK):
             found.append((int(m.group(1)), path))
@@ -279,11 +310,11 @@ def which(name, extra_dirs):
 def node_dirs(home):
     if WINDOWS:
         local = os.environ.get("LOCALAPPDATA", "")
-        return (sorted(glob.glob(os.path.join(local, "Microsoft", "WinGet", "Packages", "OpenJS.NodeJS*", "node-*")), reverse=True)
+        return (sorted(logfiles.glob_under(local, "Microsoft", "WinGet", "Packages", "OpenJS.NodeJS*", "node-*"), reverse=True)
                 + [os.path.join(local, "Microsoft", "WinGet", "Links"),
                    os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "nodejs")])
     # setup's links to nvm's Node first, then nvm's versions, newest first
-    nvm = glob.glob(os.path.join(home, ".nvm", "versions", "node", "*", "bin"))
+    nvm = logfiles.glob_under(home, ".nvm", "versions", "node", "*", "bin")
     key = lambda d: [int(n) for n in re.findall(r"\d+", os.path.basename(os.path.dirname(d)))]
     return [local_bin(home)] + sorted(nvm, key=key, reverse=True)
 
@@ -304,7 +335,8 @@ def npm_bin_dirs(home):
     packaged app's store first, as resume.APPDATA_STORE says), the Node folder itself for winget's
     per-user zip, and nvm's bin folder elsewhere."""
     if WINDOWS:
-        store = glob.glob(os.path.expandvars(resume_module().APPDATA_STORE + "npm"))
+        local = os.environ.get("LOCALAPPDATA", "")   # escaped: its folder may hold [ ] (a user name like dev[1])
+        store = glob.glob(resume_module().APPDATA_STORE.replace("%LOCALAPPDATA%", glob.escape(local)) + "npm") if local else []
         return [os.path.normpath(d) for d in sorted(store)] + [os.path.join(os.environ.get("APPDATA", ""), "npm")] + node_dirs(home)
     return node_dirs(home)
 
@@ -376,7 +408,7 @@ def chromium_installed(home, pinned):
     when it lacks one, None when nothing is pinned to compare with but the cache holds some Chromium."""
     cache = playwright_cache(home)
     if pinned is None:
-        return None if glob.glob(os.path.join(cache, "chromium-*", "INSTALLATION_COMPLETE")) else False
+        return None if logfiles.glob_under(cache, "chromium-*", "INSTALLATION_COMPLETE") else False
     return all(any(cached(cache, f) for f in names) for names in pinned)
 
 
@@ -401,8 +433,8 @@ def missing_libraries(home, pinned):
     for the `pinned` folders when they are known, else for every revision's."""
     cache = playwright_cache(home)
     folders = [f for names in pinned for f in names] if pinned else ["chromium-*", "chromium_headless_shell-*"]
-    for binary in [b for f in folders for b in glob.glob(os.path.join(cache, f, "chrome-linux*", "chrome"))
-                   + glob.glob(os.path.join(cache, f, "chrome-*", "chrome-headless-shell"))]:
+    for binary in [b for f in folders for b in logfiles.glob_under(cache, f, "chrome-linux*", "chrome")
+                   + logfiles.glob_under(cache, f, "chrome-*", "chrome-headless-shell")]:
         code, out = run(["ldd", binary])
         if code is not None and "not found" in out:
             return True
@@ -618,7 +650,7 @@ def playwright_state(ctx):
         lines.append("browser: present (Chromium in %s; %s)" % (cache, unpinned(cli)))
     else:
         found = sorted(os.path.basename(os.path.dirname(p))
-                       for p in glob.glob(os.path.join(cache, "chromium*-*", "INSTALLATION_COMPLETE")))
+                       for p in logfiles.glob_under(cache, "chromium*-*", "INSTALLATION_COMPLETE"))
         stale = [f for f in found if pinned and not any(f in names for names in pinned)]
         lacking = [names[0] for names in pinned if not any(cached(cache, f) for f in names)] if pinned else ["Chromium"]
         moved = home_chrome(ctx.home)
@@ -756,17 +788,43 @@ def poppler_source(ctx, pdftotext):
     return "the user's own install; setup leaves it as it is, and the tool that installed it updates it"
 
 
-STATE = {"playwright-cli": playwright_state, "tinytex": tinytex_state}
+def speech_state(ctx):
+    """tools/speech.py's environment in ~/.career-log/speech: `speech: ok|missing|outdated`."""
+    st, detail = tools_module("speech").state(ctx.home)
+    line = "speech: %s%s" % (st, " (%s)" % detail if detail else "")
+    return [line], {"ok": [], "missing": ["speech"], "outdated": ["old speech"]}[st], [], None
+
+
+STATE = {"playwright-cli": playwright_state, "tinytex": tinytex_state, "speech": speech_state}
+
+
+def speech_offer(ctx):
+    """The offer of #707: the three ways to take a spoken answer, and what each gives."""
+    backend, gpu, _, gb = tools_module("speech").plan()
+    where = ("on the NVIDIA GPU" if gpu else "on the Apple GPU" if backend == "mlx-whisper" else "on the CPU")
+    return ('ask the user once, in these words: "To hear a spoken answer, I need its words. Three ways:'
+            " 1. speech.py (recommended): a transcript with times, so a talk's length, pace, pauses and part"
+            ' timings, and the words a second model heard differently; all on this machine, nothing uploaded.'
+            ' It installs %s with its models (about %.1f GB), %s, for your user only, in %s.'
+            " 2. This app's own voice input: a transcript only. No times, so no pauses, pace or part timings"
+            ' (you time a talk with a stopwatch), and dictation may tidy slips and restarts away.'
+            ' 3. Typing or pasting: the content only. Your answer is kept in %s, so I will not ask again on'
+            ' this machine." On 1 run `%s` %s; on 2 or 3 run `%s`, and the round takes the answer that way.'
+            ' Then run this check again.'
+            % (backend, gb, where, tools_module("speech").speech_dir(ctx.home), ctx.machine_toml,
+               install_cmd(ctx, "speech"), run_how("speech"), install_cmd(ctx, "speech", yes=False)))
 
 
 def offer(ctx, tool, kind):
+    if tool == "speech":
+        return speech_offer(ctx)
     need = (" %s cannot do that without it." % ctx.mode) if kind == "hard" and ctx.mode != "setup" else ""
     return ('ask the user once, in these words: "%s %s.%s Install it on this machine? It installs'
             ' %s, for your user only. Your answer is kept in %s, so I will not ask again on this'
             ' machine." Any answer but yes is a no. On yes run `%s` %s; on no run `%s`. Then run this'
             ' check again.'
             % (NAME[tool], PURPOSE[tool], need, WHAT[tool], ctx.machine_toml,
-               setup_cmd(ctx.root, yes=[tool]), RUN_SETUP, setup_cmd(ctx.root, no=[tool])))
+               install_cmd(ctx, tool), RUN_SETUP, install_cmd(ctx, tool, yes=False)))
 
 
 def check_tools(ctx):
@@ -798,6 +856,8 @@ def check_tools(ctx):
             unavailable = "%s cannot go past this step" % ctx.mode
         elif tool == "playwright-cli":
             unavailable = "go to the next item of browser.md, Fallback order"
+        elif tool == "speech":
+            unavailable = "the round takes the answer through this app's voice input, or typed or pasted"
         else:
             unavailable = "skip the steps that need it"
         todo = []
@@ -814,16 +874,18 @@ def check_tools(ctx):
             if hard:
                 todo.append("stop: %s needs %s, which the user turned off on this machine. Tell them, and"
                             " that saying \"install %s\" turns it on: `%s`."
-                            % (ctx.mode, tool, tool, setup_cmd(ctx.root, yes=[tool])))
+                            % (ctx.mode, tool, tool, install_cmd(ctx, tool)))
             elif ctx.mode == "setup":   # a state: setup has nothing to install, and reads no page
                 lines[-1 - len(tl)] += (" (%s is off on this machine; nothing to do in setup unless the user asks"
-                                        " to install it: `%s`)" % (FEATURE[tool], setup_cmd(ctx.root, yes=[tool])))
+                                        " to install it: `%s`)" % (FEATURE[tool], install_cmd(ctx, tool)))
             else:
                 todo.append("%s is off on this machine (the user declined %s): %s. Install it only when"
                             " the user asks for it: `%s`."
-                            % (FEATURE[tool], tool, unavailable, setup_cmd(ctx.root, yes=[tool])))
+                            % (FEATURE[tool], tool, unavailable, install_cmd(ctx, tool)))
         elif choice is None and missing and ctx.mode == "setup":   # setup's own round asks
-            if os.path.exists(os.path.join(ctx.root, "config.toml")):
+            if tool == "speech":   # setup's round does not ask: the mode that needs it offers it
+                lines[-1 - len(tl)] += " (offered when a practice round first takes a spoken answer)"
+            elif os.path.exists(os.path.join(ctx.root, "config.toml")):
                 lines[-1 - len(tl)] += " (the user skipped it in setup; the skill offers it when a mode needs it)"
         elif choice is None and missing:
             todo.append(offer(ctx, tool, kind))
@@ -833,7 +895,7 @@ def check_tools(ctx):
                         % (tool, missing_clause(machine), setup_cmd(ctx.root), RUN_SETUP))
         elif machine:
             todo.append("the user chose %s on this machine, and %s: run `%s` %s; then run this"
-                        " check again." % (tool, missing_clause(machine), setup_cmd(ctx.root, yes=[tool]), RUN_SETUP))
+                        " check again." % (tool, missing_clause(machine), install_cmd(ctx, tool), run_how(tool)))
         else:
             if off_path:
                 todo.append("start every command that runs node, npm or playwright-cli in this session"
@@ -885,34 +947,75 @@ def tool_cmd(root, name):
     return '%s -I "%s"' % (python_cmd(), os.path.join(root, "tools", name))
 
 
-def check_uncommitted(ctx):
-    """One line per Log file with uncommitted changes, a live run's marked as its; nothing when the
-    Log is clean or git fails."""
+def check_session_key(ctx):
+    """The session's key (ADR 0014): --session's, kept; or, at the session's first check, a new one, whose record
+    holds the baseline (each uncommitted Log file's hash, logfiles.file_hash). Nothing outside a git repository."""
+    if ctx.session:
+        if logfiles.read_session(ctx.root, ctx.session) is None:
+            logfiles.write_session(ctx.root, ctx.session, {"start": None, "baseline": {}, "claims": []})
+            return ["session: %s (its record was gone: made again, with no baseline)" % ctx.session], [], False
+        return ["session: %s" % ctx.session], [], False
     found = logfiles.uncommitted(ctx.root)
-    files = [(status, path + (" (from %s)" % old if old else ""), key) for status, path, old, key in found or []]
+    if found is None:
+        return [], [], False
+    ctx.session = logfiles.new_session(ctx.root, {path: logfiles.file_hash(ctx.root, path) for _, path, _, _ in found})
+    return ["session: %s (this session's key: give --session %s to every later check, claim, commit and Next up of"
+            " this session; on a rerun of a check, keep the first one)" % (ctx.session, ctx.session)], [], False
+
+
+def log_files(ctx):
+    """[(kind, status, path as shown, owner)] of the uncommitted Log files (logfiles.uncommitted); kind is `own`
+    (claimed by this session), `theirs` (by another session, the owner), `changing` (in this session's baseline,
+    claimed by none, and changed since its first check) or `left` (any other: an earlier session's); None when
+    git fails."""
+    found = logfiles.uncommitted(ctx.root)
+    if found is None:
+        return None
+    record = logfiles.read_session(ctx.root, ctx.session) if ctx.session else None
+    baseline = record["baseline"] if record else {}
+    out = []
+    for status, path, old, owner in found:
+        if owner:
+            kind = "own" if owner == ctx.session else "theirs"
+        elif path in baseline and baseline[path] != logfiles.file_hash(ctx.root, path):
+            kind = "changing"
+        else:
+            kind = "left"
+        out.append((kind, status, path + (" (from %s)" % old if old else ""), owner))
+    return out
+
+
+def check_uncommitted(ctx):
+    """One line per Log file with uncommitted changes, marked by whose it is (log_files); nothing when the Log
+    is clean or git fails. No line asks whether another session is still going (ADR 0014)."""
+    files = log_files(ctx) or []
     if not files:
         return [], [], False
-    live = [f for f in files if f[2]]
-    lines = ["log changes: uncommitted (%d file(s)%s)" % (len(files), ", %d of them a live run's" % len(live) if live else "")]
-    lines += ["log change: %s %s" % (status, path) for status, path, key in files if not key]
-    lines += ["log change (live run %s): %s %s" % (key, status, path) for status, path, key in live]
+    theirs = [f for f in files if f[0] == "theirs"]
+    lines = ["log changes: uncommitted (%d file(s)%s)"
+             % (len(files), ", %d of them another session's" % len(theirs) if theirs else "")]
+    lines += ["log change: %s %s" % (status, path) for kind, status, path, _ in files if kind == "left"]
+    lines += ["log change (this session): %s %s" % (status, path) for kind, status, path, _ in files if kind == "own"]
+    lines += ["log change (still changing): %s %s" % (status, path) for kind, status, path, _ in files if kind == "changing"]
+    lines += ["log change (session %s): %s %s" % (key, status, path) for kind, status, path, key in theirs]
     sync = tool_cmd(ctx.root, "sync.py")
+    flag = " --session %s" % ctx.session if ctx.session else ""
     nexts = []
-    if len(live) < len(files):
+    if any(f[0] == "left" for f in files):
         nexts.append("next: now, first: the `log change:` files above that are not this session's own bulk change"
                      " waiting for the user's yes are changes an earlier session left. Show the user what `%s status"
-                     " -- <file>...` prints for those files and ask whether to commit them (`%s settle commit --"
-                     " <file>...`) or discard them (`%s settle discard -- <file>...`, then follow its output),"
-                     " naming those files each time; then go on with the request." % (sync, sync, sync))
-    if live:
-        keys = sorted({key for _, _, key in live})
-        scan = tool_cmd(ctx.root, "scan.py")
-        nexts.append("next: now, first: the `log change (live run <key>):` files above are the work of a run still"
-                     " going in another session in this Log (%s): keep them as they are, out of every settle and"
-                     " commit of this session, and tell the user so in one line. A run stays live for %d hours after"
-                     " its last draft; when the user says its session has ended without saving, `%s end <key>`"
-                     " ends it, and the next check offers its files as an earlier session's."
-                     % (", ".join(keys), logfiles.LIVE_HOURS, scan))
+                     " -- <file>...` prints for those files and ask whether to commit them (`%s settle commit%s --"
+                     " <file>...`) or discard them (`%s settle discard%s -- <file>...`, then follow its output),"
+                     " naming those files each time; then go on with the request." % (sync, sync, flag, sync, flag))
+    if any(f[0] == "changing" for f in files):
+        nexts.append("next: now, first: the `log change (still changing):` files above changed since this session's"
+                     " first check, and no session claimed them: another session is still writing them. Keep them out"
+                     " of every settle and commit of this session, and tell the user so in one line.")
+    if theirs:
+        nexts.append("next: now, first: the `log change (session <key>):` files above are claimed by another session"
+                     " in this Log (%s): keep them as they are, out of every settle and commit of this session, and"
+                     " tell the user so in one line. That session saves them itself."
+                     % ", ".join(sorted({key for _, _, _, key in theirs})))
     return lines, nexts, False
 
 
@@ -1006,7 +1109,12 @@ def check_config(ctx):
                 ["next: stop: setup has not run for this Log, so no mode runs yet. Tell the user, and"
                  " on their yes start the setup mode (SKILL.md, Modes) in place of this request; take"
                  " the request up again once setup is done."], True)
-    return ["config %s: %s%s" % (f, v, " (default)" if d else "") for f, (v, d) in config.items()], [], False
+    return ["config %s: %s%s" % (f, v if v != "" else EMPTY_CONFIG.get(f, v), " (default)" if d else "")
+            for f, (v, d) in config.items()], [], False
+
+
+# What an empty Config value means, printed in its place.
+EMPTY_CONFIG = {"conversation_language": "empty, the language the user writes in"}
 
 
 # ---- Mode state ----
@@ -1343,9 +1451,9 @@ def saved_lines(root, since):
 
 
 def unsaved(ctx):
-    """What keeps the Log from holding everything: uncommitted Log files, commits not on origin."""
-    lines, _, _ = check_uncommitted(ctx)
-    files = [l[len("log change: "):] for l in lines if l.startswith("log change: ")]
+    """What keeps the Log from holding everything: uncommitted Log files (this session's and those no session
+    is writing), commits not on origin."""
+    files = ["%s %s" % (status, path) for kind, status, path, _ in log_files(ctx) or [] if kind in ("left", "own")]
     extra = git_out(ctx.root, "-c", "core.quotepath=false", "status", "--porcelain", "-z", "--untracked-files=all",
                     "--", *SAVED_TOO)
     files += [e[:2].strip() + " " + e[3:] for e in (extra or "").split("\0") if len(e) > 3]
@@ -1551,8 +1659,25 @@ def next_step(guide, mode, root):
 
 
 def done(argv, root=ROOT):
-    """`done <mode> [--since <sha>@<time>] [--for <mode>] [--no-posting] [--family <target>]`: the Next up
-    block; (exit code, lines)."""
+    """`done <mode> [--session <key>] [--since <sha>@<time>] [--for <mode>] [--no-posting] [--family <target>]`:
+    the Next up block; (exit code, lines). With --session, once the block exits 0, releases every claim of that
+    session (ADR 0014), whose record stays: the session goes on idle, with its key. On exit 1 (its own files not
+    saved) the claims stay, so no other session is offered those files while it settles them."""
+    args, session = list(argv), None
+    if "--session" in args:
+        i = args.index("--session")
+        session = args[i + 1] if i + 1 < len(args) else ""
+        del args[i:i + 2]
+        if not logfiles.SESSION_KEY.match(session):
+            return 2, ["usage: --session needs the key the Trigger check's `session:` line printed"]
+    code, out = next_up(args, root, session)
+    if session and code == 0 and logfiles.read_session(root, session) is not None:
+        logfiles.release_claims(root, session)
+    return code, out
+
+
+def next_up(argv, root, session):
+    """done's block, before it releases the session's claims."""
     opts, args = {}, list(argv)
     no_posting = "--no-posting" in args
     args = [a for a in args if a != "--no-posting"]
@@ -1569,7 +1694,7 @@ def done(argv, root=ROOT):
             or ("--for" in opts and (args[0] != "setup" or opts["--for"] not in MODES))
             or (no_posting and args[0] != "fit")
             or ("--family" in opts and (args[0] != "rank" or not logfiles.is_target_name(opts["--family"])))):
-        return 2, ["usage: %s -I tools/check.py done <mode> [--since <sha>@<time>] [--for <mode>] [--no-posting]"
+        return 2, ["usage: %s -I tools/check.py done <mode> [--session <key>] [--since <sha>@<time>] [--for <mode>] [--no-posting]"
                    " [--family <target>] (--for with setup only, --no-posting with fit only, --family with rank"
                    " only, a lowercase target name); <mode> is one of %s" % (python_cmd(), ", ".join(sorted(known)))]
     mode = args[0]
@@ -1589,7 +1714,7 @@ def done(argv, root=ROOT):
                            " language too, with no English words in it, and name the mode beside it as `audit`,"
                            " in code"] if lines else []
     out = ["Close-out"] + saved_lines(root, opts.get("--since"))
-    missing = unsaved(Context(mode, root=root))
+    missing = unsaved(Context(mode, root=root, session=session))
     if "--for" in opts:
         out.append("Next: go back to `%s` in this session: setup ran for that request." % opts["--for"])
         if missing:
@@ -1638,7 +1763,7 @@ def done(argv, root=ROOT):
     return 0, out
 
 
-CHECKS = [check_python, check_session, check_uncommitted, check_git, check_config, check_mode_state, check_size,
+CHECKS = [check_python, check_session_key, check_session, check_uncommitted, check_git, check_config, check_mode_state, check_size,
           check_release, check_tools, check_pull]
 BROWSER_CHECKS = [check_python, check_tools]   # `browser`: playwright-cli's state alone
 
@@ -1660,12 +1785,19 @@ def main(argv):
         for line in out:
             print(line)
         return code
-    if len(argv) != 1 or argv[0] not in MODES + ["browser"]:
-        print("usage: %s -I tools/check.py <mode> [--root <root>]; <mode> is one of %s, or browser"
-              % (python_cmd(), ", ".join(MODES)))
+    session = None
+    if "--session" in argv:
+        i = argv.index("--session")
+        session = argv[i + 1] if i + 1 < len(argv) else ""
+        argv = argv[:i] + argv[i + 2:]
+    if (len(argv) != 1 or argv[0] not in MODES + ["browser"] or session == ""
+            or (session is not None and (argv[0] == "browser" or not logfiles.SESSION_KEY.match(session)))):
+        print("usage: %s -I tools/check.py <mode> [--session <key>] [--root <root>]; <mode> is one of %s, or browser"
+              " (which takes no --session); <key> is the one this session's first check printed on its `session:`"
+              " line" % (python_cmd(), ", ".join(MODES)))
         return 2
     resume_module().no_error_dialogs()   # for every program the checks start, not only poppler
-    ctx = Context(argv[0], root=root)
+    ctx = Context(argv[0], root=root, session=session)
     print("root: %s" % ctx.root)
     lines, nexts, stopped = [], [], False
     for check in BROWSER_CHECKS if ctx.mode == "browser" else CHECKS:

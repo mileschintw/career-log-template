@@ -39,7 +39,20 @@
 
 這個 repo 是從 https://github.com/mileschintw/career-log-template 這個 Template 建立的。聊天匯出格式改了或某個步驟壞了，請到那裡回報：開 issue（用「Chat export format changed」表單）或發 pull request。Issue 是公開的：只附欄位名稱和結構，絕不附你的記錄。import 模式會幫你草擬回報，貼出前會先問你（[import-chats.md](skills/career-log/modes/import-chats.md) 第 8 步）。
 
-要把這個 Log 升到較新的 Template，請跟你的 agent 說「升級到最新的 Template」。upgrade 模式（[upgrade.md](skills/career-log/modes/upgrade.md)）會抓下那個版本、換掉 Engine、跟你一起依序跑中間每個版本的升級指引、問你要不要把你自己改過的 Engine 檔合併回去，等你說好才 commit。每個版本改了什麼，寫在 Template 的 [Releases](https://github.com/mileschintw/career-log-template/releases) 頁面。0.1.0 以前建立的 Log，從 [v0.1.0](https://github.com/mileschintw/career-log-template/releases/tag/v0.1.0) 的指引開始。
+## 升級
+
+要把這個 Log 升到較新的 Template，請跟你的 agent 說「升級到最新的 Template」。upgrade 模式（[upgrade.md](skills/career-log/modes/upgrade.md)）會抓下那個版本、換掉 Engine（skill、`tools/` 和 Template 附的其他檔案）、跟你一起依序跑中間每個版本的升級指引（某個版本要改你記錄的格式，就在指引裡做，並先問你），每個版本的步驟各 commit 一次。它只從乾淨的 working tree 開始，在你對整個升級說好之前什麼都不 push；在那之前，你都可以讓 Log 回到升級開始前的那個 commit。每個版本改了什麼，寫在 Template 的 [Releases](https://github.com/mileschintw/career-log-template/releases) 頁面。
+
+你改過的 Engine 檔會怎樣：
+
+- **你編輯過的檔案**會被換成新版本的。接著 agent 會一個檔案一個檔案問你要不要把你的修改合併回去，並讓你看每一處合併後的改動落在哪裡。你的版本也留在 git 歷史裡。
+- **衝突**是新版本改到和你同樣的幾行。檔案裡會用衝突標記把兩邊都留著；agent 會逐一給你看兩邊，由你選你的、新版本的，或兩者混合。每個衝突都解決之前，什麼都不會 commit。
+- **新版本拿掉的檔案**會被刪除。如果你改過它，agent 會給你看你的版本，問你要留下當成你自己的檔案，還是放掉。
+- **你自己加的檔案**（你自己的模式或工具）會留著。如果某個版本在同一個路徑放了自己的檔案，就由新版本的取代，agent 會提議把你的搬到別的路徑。
+- **你刪掉的檔案**會照新版本的樣子回來。
+- **你自己加的 `.gitignore` 行**會直接放回去，不會問你。
+
+升級支援 0.2.0 起的 Log。比它更舊的 Log 要照 [v0.3.2 的說明](https://github.com/mileschintw/career-log-template/releases/tag/v0.3.2)先升到 v0.3.2，再從 0.3.2 升一次。
 
 ## 授權
 

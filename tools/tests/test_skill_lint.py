@@ -187,6 +187,34 @@ class SkillLint(unittest.TestCase):
             "Run `entries.py x`. Write the `Lead: none` line, then the `missing: x` line; the entry keeps its"
             " `Type: x` line, and git prints nothing.\nThe check prints `missing: x`.\n", self.TOOLS), [])
 
+    # Pointers in the tools' strings: `file.md › Section`, `file.md step N`, and a bare mode name
+    # (`fit step 5`, `fit › Save`), docstrings included (#774)
+    POINTERS = ('"""Run fit step 5, as fit.md › Save says."""\n'
+                'def go(x, name):\n'
+                '    """See SKILL.md › Commits and SETUP.md step 4."""\n'
+                '    print("next: fit.md step 7, then fit › Check the draft claim by claim")\n'
+                '    print("direction.md › %s names %s; %s step 5; its step 9" % (x, x, x))\n'
+                '    print(f"{name}.md › {x}; direction.md › Constraints; fit step 7")\n')
+
+    def test_tool_pointers_that_resolve_pass(self):
+        self.assertEqual(self.lint("", {"tools/x.py": self.POINTERS}), [])
+
+    def test_tool_pointer_to_a_missing_section_or_step(self):
+        """#725: a tool's next: line named a step a mode no longer had. A problem's line is the
+        literal's first line plus the newlines before the pointer in its value."""
+        tool = ('"""As fit.md step 6 does."""\n'
+                'print("next: fit › Draft the letter; "\n'
+                '      "then SKILL.md › Comits; fit › Save %s; fit › Draft %s" % (1, 2))\n'
+                'HINT = "see `direction.md › Emphasis`, and fit step 9"\n')
+        self.assertEqual(sorted(self.lint("", {"tools/x.py": tool})), [
+            (1, "fit.md step 6: no such step"),
+            (2, "SKILL.md › Comits: no such section"),
+            (2, "modes/fit.md › Draft the letter: no such section"),
+            (2, "modes/fit.md › Draft: no such section"),
+            (4, "direction.md › Emphasis: no such section"),
+            (4, "modes/fit.md step 9: no such step"),
+        ])
+
     def test_repo_skill_passes(self):
         """The skill in this repo passes the lint as committed."""
         p = subprocess.run([sys.executable, "-I", TOOL], capture_output=True, text=True, encoding="utf-8")

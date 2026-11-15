@@ -821,9 +821,12 @@ def index(*rows, tail=""):
             % ("".join("| %s | %s |\n" % r for r in rows), tail))
 
 
-def story(path, anchor="", label="Widget", summary="", marker=""):
-    return "%s[%s](%s%s)%s" % ("*(%s)* " % marker if marker else "", label, path, "#" + anchor if anchor else "",
-                                " — " + summary if summary else "")
+def story(path, anchor="", label="Widget", summary="", marker="", name=""):
+    return "%s[%s](%s%s%s)%s" % ("*(%s)* " % marker if marker else "", label, path, "#" + anchor if anchor else "",
+                                  ' "%s"' % name if name else "", " — " + summary if summary else "")
+
+
+HINT = "; if the section holds different Stories, name each with story-name"
 
 
 def talking(type_, confirmed, *stories, cue=None):
@@ -871,6 +874,25 @@ class StoryParseTest(Log):
         self.assertEqual([i.kind for i in items], ["unlinked", "entry", "entry"])
         self.assertEqual((items[1].markers, items[1].summary), (["raw", "pending"], "late marker"))
         self.assertTrue(items[1].unfinished())
+
+    def test_named_items(self):
+        """#695: a Story's name is its link's title, a slug; the key is <path>#<anchor>~<name>."""
+        cell = "; ".join([story(W, "contribution", name="origin"), story(W, "contribution", name="launch"),
+                          story(W, "contribution"), story(G, name="whole-entry"),
+                          story(P, "a", name="Not A Slug"), '[X](%s#b  "two-spaces")' % P])
+        self.write("stories.md", index(("Proudest project", cell)))
+        items = entries.story_index(self.root)[0].items
+        self.assertEqual([i.key for i in items], [W + "#contribution~origin", W + "#contribution~launch",
+                                                  W + "#contribution", G + "~whole-entry", P + "#a", P + "#b~two-spaces"])
+        self.assertEqual([i.name for i in items], ["origin", "launch", "", "whole-entry", "", "two-spaces"])
+        self.assertEqual((items[0].label, items[0].anchor, items[0].summary), ("Widget", "contribution", ""))
+        self.assertEqual(entries.split_key(W + "#contribution~origin"), (W, "contribution", "origin"))
+        self.assertEqual(entries.split_key(G + "~whole-entry"), (G, "", "whole-entry"))
+        self.assertEqual(entries.split_key(W + "#a~B"), (W, "a~B", ""))   # not a slug: no name
+        self.write("stories/x.md", talking("X", "2031-06-01", W + '#contribution "launch"', G))
+        tp = entries.TalkingPoints(self.root, "stories/x.md")
+        self.assertEqual([s.key for s in tp.stories], [W + "#contribution~launch", G])
+        self.assertEqual(tp.entries, sorted([W, G]))
 
     def test_talking_points_ignore_comments(self):
         self.write("stories/x.md", talking("X", "2031-06-01", W) + "<!-- e.g. [Y](../%s) -->\n" % G)
@@ -930,7 +952,7 @@ class StoryCoverageTest(Log):
         rows = self.five_core() + [("X%d" % n, story(G, "s") + "; " + story(W, "z%d" % n)) for n in range(4)]
         self.write("stories.md", index(*rows))
         code, lines = self.coverage()
-        self.assertIn("story under too many types: %s#s in 4 types (more than 3): X0 | X1 | X2 | X3" % G, lines)
+        self.assertIn("story under too many types: %s#s in 4 types (more than 3): X0 | X1 | X2 | X3%s" % (G, HINT), lines)
         self.assertFalse([l for l in lines if l.startswith("story under too many types: %s" % W)], lines)   # by key
         self.assertEqual(code, 1)
 
@@ -947,6 +969,34 @@ class StoryCoverageTest(Log):
         self.assertFalse([l for l in lines if l.startswith("story carries")], lines)
         code, lines = self.coverage("X0", "T0=%s#pending" % G)   # a chosen Story
         self.assertFalse([l for l in lines if l.startswith("story carries")], lines)
+
+    def test_named_stories_of_one_section_are_different_stories(self):
+        """#695: two Stories named in one section lead two questions with no finding; a real double use of
+        one named Story still prints one, with no hint; an unnamed key behaves as before."""
+        rows = self.five_core() + [("Conflict", story(G, "c", name="origin")), ("Failure", story(G, "c", name="launch")),
+                                   ("Deadline", story(G, "c")), ("Ownership", story(G, "c"))]
+        self.write("stories.md", index(*rows))
+        code, lines = self.coverage("Conflict", "Failure")
+        self.assertIn("interview: Conflict: leads with %s#c~origin" % G, lines)
+        self.assertIn("interview: Failure: leads with %s#c~launch" % G, lines)
+        self.assertFalse([l for l in lines if l.startswith("story carries")], lines)
+        code, lines = self.coverage("Conflict", "Failure=%s#c~origin" % G)
+        self.assertIn("story carries too many questions in one interview: %s#c~origin leads 2 (more than 1):"
+                      " Conflict | Failure" % G, lines)
+        code, lines = self.coverage("Deadline", "Ownership")
+        self.assertIn("story carries too many questions in one interview: %s#c leads 2 (more than 1):"
+                      " Deadline | Ownership%s" % (G, HINT), lines)
+        rows = self.five_core() + [("X%d" % n, story(G, "s", name="a" if n < 2 else "b")) for n in range(4)]
+        self.write("stories.md", index(*rows))
+        self.assertFalse([l for l in self.coverage()[1] if l.startswith("story under too many types")])
+        rows = self.five_core() + [("X%d" % n, story(G, "s", name="a")) for n in range(4)]
+        self.write("stories.md", index(*rows))
+        self.assertIn("story under too many types: %s#s~a in 4 types (more than 3): X0 | X1 | X2 | X3" % G,
+                      self.coverage()[1])
+        rows = self.five_core() + [("X%d" % n, story(G, "pending", marker="pending", name="outage")) for n in range(4)]
+        self.write("stories.md", index(*rows))   # a named #pending key is one Story
+        self.assertIn("story under too many types: %s#pending~outage in 4 types (more than 3): X0 | X1 | X2 | X3" % G,
+                      self.coverage()[1])
 
     def test_a_series_is_one_experience(self):
         first, later = "entries/2031-01-shop.md", "entries/2032-01-shop-scale.md"
@@ -984,10 +1034,47 @@ class StoryCoverageTest(Log):
         self.assertFalse([l for l in lines if l.startswith("story carries")], lines)
         code, lines = self.coverage("Conflict", "Failure", "Deadline")
         self.assertIn("story carries too many questions in one interview: %s#c leads 2 (more than 1):"
-                      " Conflict | Failure" % G, lines)
+                      " Conflict | Failure%s" % (G, HINT), lines)
         code, lines = self.coverage("Conflict=%s#a" % W, "Failure", "Deadline")
         self.assertIn("interview: Conflict: leads with %s#a" % W, lines)
         self.assertFalse([l for l in lines if l.startswith("story carries")], lines)
+
+    def test_interviewers_let_a_story_lead_more(self):
+        """#706: --interviewers <n> lets one Story lead up to n questions of one interview."""
+        rows = self.five_core() + [("Conflict", story(G, "c")), ("Failure", story(G, "c")), ("Deadline", story(G, "c"))]
+        self.write("stories.md", index(*rows))
+        code, lines = self.coverage("Conflict", "Failure")
+        self.assertIn("story carries too many questions in one interview: %s#c leads 2 (more than 1):"
+                      " Conflict | Failure%s" % (G, HINT), lines)
+        code, lines = self.run_tool("story-coverage", "--root", self.root, "--interviewers", "4",
+                                    "--type", "Conflict", "--type", "Failure")
+        self.assertEqual(code, 0, lines)
+        self.assertFalse([l for l in lines if l.startswith("story carries")], lines)
+        code, lines = self.run_tool("story-coverage", "--root", self.root, "--interviewers", "2",
+                                    "--type", "Conflict", "--type", "Failure", "--type", "Deadline")
+        self.assertIn("story carries too many questions in one interview: %s#c leads 3 (more than 2):"
+                      " Conflict | Failure | Deadline%s" % (G, HINT), lines)
+        for bad in ("0", "two", "²", "-1"):
+            code, lines = self.run_tool("story-coverage", "--root", self.root, "--interviewers", bad)
+            self.assertEqual(code, 2, lines)
+
+    def test_plan_led_by_fewer_than_three_stories(self):
+        """#706: a list of five or more questions led by fewer than 3 Stories is a finding; a shorter one is not."""
+        rows = self.five_core() + [("Q%d" % n, story(G if n < 4 else W, "c")) for n in range(8)]
+        self.write("stories.md", index(*rows))
+        types = ["Q%d" % n for n in range(8)]
+        code, lines = self.run_tool("story-coverage", "--root", self.root, "--interviewers", "4",
+                                    *[a for t in types for a in ("--type", t)])
+        self.assertEqual(code, 1, lines)
+        self.assertIn("interview plan leads with fewer than 3 stories: 2 stories lead 8 questions", lines)
+        self.assertFalse([l for l in lines if l.startswith("story carries")], lines)
+        code, lines = self.run_tool("story-coverage", "--root", self.root, "--interviewers", "4",
+                                    *[a for t in types[:4] for a in ("--type", t)])
+        self.assertFalse([l for l in lines if l.startswith(("interview plan leads", "story carries"))], lines)
+        code, lines = self.coverage(*types[:4] + ["Q4=%s#a" % P, "Q5=%s#a" % S])
+        self.assertFalse([l for l in lines if l.startswith("interview plan leads")], lines)
+        code, lines = self.coverage(*types[:3] + ["Unknown", "Other"])   # two questions led nothing: 3 led
+        self.assertFalse([l for l in lines if l.startswith("interview plan leads")], lines)
 
     def test_talking_points_lead_and_files(self):
         rows = self.five_core() + [("[Conflict](stories/conflict.md)", story(G, "c") + "; " + story(P, "d")),
@@ -1026,6 +1113,169 @@ class StoryCoverageTest(Log):
         code, lines = self.coverage()
         self.assertEqual(lines[0].count("(2 types)"), 5, lines)   # the second T0 row adds no type
         self.assertEqual(lines[2:], ["duplicate question type: T0"])
+
+
+CARD = "outputs/applications/2031-06-acme-engineer/cue-card-final.md"
+SECTIONS = "Body.\n\n## My contribution\nI built it.\n\n## Results\nIt shipped.\n"
+
+
+def card(confirmed, rows, provenance, stage="final"):
+    """A cue card file: rows [(story, leads)], provenance [(story, sections cell)]."""
+    return ("---\nstage: %s\nconfirmed: %s\n---\n\n# Cue card: %s\n\nAnswer order: situation, task, action, result.\n\n"
+            "## Card\n\n| Story | Leads | Key facts | Task | I did | Result |\n|---|---|---|---|---|---|\n%s\n"
+            "## Finder\n\n| Story | Question types | Key words |\n|---|---|---|\n| gap | Most technical project | - |\n\n"
+            "## Self-drill\n\n- \"A time you disagreed\" → origin\n\n"
+            "## Provenance\n\n| Story | Sections |\n|---|---|\n%s"
+            % (stage, confirmed, stage, "".join("| %s | %s | a fact | my job was to | I did | a result |\n" % r
+                                                for r in rows),
+               "".join("| %s | %s |\n" % p for p in provenance)))
+
+
+def card_link(path, anchor, label="Widget"):
+    return "[%s](../../../%s#%s)" % (label, path, anchor)
+
+
+class StoryCardTest(Log):
+    """#706: story-card prints a cue card's scaffold for one interview's plan, checks a card, and confirms it."""
+    def setUp(self):
+        super().setUp()
+        self.write(W, entry(body=SECTIONS))
+        self.write(G, entry(title="Gadget", body=SECTIONS))
+        self.write(P, entry(title="Plinth", body=SECTIONS))
+        self.write("stories.md", index(
+            ("Conflict", story(W, "my-contribution", name="origin") + "; " + story(P, "results", label="Plinth")),
+            ("Failure", story(W, "my-contribution", name="launch")),
+            ("Ownership", story(G, "results", label="Gadget")),
+            ("Deadline", story(G, "results", label="Gadget"))))
+        self.write("stories/wordings/conflict.md", "---\ntype: Conflict\n---\n\n# Conflict\n\n- Tell me about a disagreement\n")
+
+    def card_tool(self, *args):
+        return self.run_tool("story-card", "--root", self.root, *args)
+
+    def test_scaffold(self):
+        code, lines = self.card_tool("--type", "Conflict", "--type", "Failure", "--type", "Ownership",
+                                     "--type", "Deadline", "--type", "Leadership")
+        self.assertEqual(code, 1, lines)   # Leadership is no type of the index
+        self.assertEqual(lines[:4], [
+            "question 1: Conflict: leads with %s#my-contribution~origin" % W,
+            "question 2: Failure: leads with %s#my-contribution~launch" % W,
+            "question 3: Ownership: leads with %s#results" % G,
+            "question 4: Deadline: leads with %s#results" % G])
+        self.assertIn("story 1: origin; key %s#my-contribution~origin; leads Conflict" % W, lines)
+        self.assertIn("story 3: Gadget; key %s#results; leads Ownership | Deadline" % G, lines)
+        self.assertIn("finder: Gadget: Ownership | Deadline", lines)
+        self.assertIn("wording: origin: Conflict | Tell me about a disagreement", lines)
+        self.assertIn("section: launch: %s#my-contribution" % W, lines)
+        self.assertIn("interview type not in stories.md: Leadership", lines)
+        md = lines[lines.index("scaffold:") + 1:]
+        self.assertIn("confirmed:", md)
+        self.assertIn("| origin | Conflict |  |  |  |  |", md)
+        self.assertIn("| Gadget | Ownership; Deadline |  |  |  |  |", md)
+        self.assertIn("| launch | %s |" % card_link(W, "my-contribution", "Widget Sorter › My contribution"), md)
+        self.assertEqual([l for l in md if l.startswith("## ")], ["## Card", "## Finder", "## Self-drill", "## Provenance"])
+
+    def test_scaffold_with_a_chosen_story(self):
+        code, lines = self.card_tool("--type", "Conflict=%s#results" % P, "--type", "Failure")
+        self.assertEqual(code, 0, lines)
+        self.assertIn("story 1: Plinth; key %s#results; leads Conflict" % P, lines)
+        code, lines = self.card_tool("--type", "Conflict=%s#context" % G)   # not indexed: named by its key
+        self.assertIn("story 1: %s#context; key %s#context; leads Conflict" % (G, G), lines)
+
+    def commit(self, message, *args):
+        """A commit dated 2020, before any confirmed: value a test writes."""
+        env = dict(os.environ, GIT_AUTHOR_DATE="2020-01-01T12:00:00", GIT_COMMITTER_DATE="2020-01-01T12:00:00")
+        subprocess.run(["git", "-C", self.root, "-c", "user.name=t", "-c", "user.email=t@example.com",
+                        "-c", "commit.gpgsign=false", "commit", "-q", "-m", message] + list(args),
+                       check=True, capture_output=True, env=env)
+
+    def committed_card(self, rows, provenance, confirmed="2031-06-10 09:00"):
+        self.git("init", "-q")
+        self.write(CARD, card(confirmed, rows, provenance))
+        self.git("add", "-A")
+        self.commit("interview(acme): cue card")
+
+    def test_check(self):
+        self.committed_card([("origin", "Conflict"), ("Gadget", "Ownership; Deadline")],
+                            [("origin", card_link(W, "my-contribution") + "; " + card_link(W, "results")),
+                             ("Gadget", card_link(G, "results", "Gadget"))])
+        code, lines = self.card_tool("--check", CARD)
+        self.assertEqual(code, 0, lines)
+        self.assertEqual(lines[-1], "card: ok, 2 stories, 2 entries unchanged since the confirmed card")
+        self.write(G, "\nlater\n", "a")
+        self.commit("log(gadget)", "-a")
+        self.write(W, "\nuncommitted\n", "a")
+        code, lines = self.card_tool("--check", CARD)
+        self.assertEqual(code, 1, lines)
+        self.assertTrue([l for l in lines if re.match(r"FAIL: entry changed since confirmed: %s [0-9a-f]+ \S+ log\(gadget\)$"
+                                                      % G, l)], lines)
+        self.assertIn("FAIL: entry changed since confirmed: %s uncommitted" % W, lines)
+
+    def test_check_row_and_anchor(self):
+        self.committed_card([("origin", "Conflict"), ("Gadget", "Ownership"), ("launch", "Failure")],
+                            [("origin", card_link(W, "lessons")), ("Gadget", "the results, from memory")])
+        code, lines = self.card_tool("--check", CARD)
+        self.assertEqual(code, 1, lines)
+        self.assertIn("FAIL: anchor the entry lacks: origin: %s#lessons" % W, lines)
+        self.assertIn("FAIL: row with no provenance: Gadget", lines)
+        self.assertIn("FAIL: row with no provenance: launch", lines)
+        self.write(CARD, card("2031-06-10 09:00", [("x", "Conflict")], [("x", "[X](../../../entries/2031-09-gone.md#a)")]))
+        self.assertIn("FAIL: missing entry: x: entries/2031-09-gone.md", self.card_tool("--check", CARD)[1])
+
+    def test_check_unconfirmed_and_confirm(self):
+        self.committed_card([("origin", "Conflict")], [("origin", card_link(W, "results"))], confirmed="")
+        code, lines = self.card_tool("--check", CARD)
+        self.assertEqual(code, 1, lines)
+        self.assertIn("FAIL: card with no readable confirmed date: -", lines)
+        code, lines = self.card_tool("--confirm", CARD)
+        self.assertEqual(code, 0, lines)
+        self.assertRegex(lines[0], r"^confirmed: %s: \d{4}-\d{2}-\d{2} \d{2}:\d{2}$" % re.escape(CARD))
+        self.assertRegex(self.read_file(CARD), r"(?m)^confirmed: \d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
+        self.write(W, "\nthe run's own edit, not yet committed\n", "a")
+        code, lines = self.card_tool("--check", CARD)   # uncommitted card: dated by the confirmed line
+        self.assertEqual(code, 0, lines)
+        self.git("add", "-A")
+        self.commit("interview(acme): confirm the card")
+        self.write(W, "\nafter the confirmed card\n", "a")
+        self.assertIn("FAIL: entry changed since confirmed: %s uncommitted" % W, self.card_tool("--check", CARD)[1])
+
+    def test_check_needs_sections(self):
+        self.write(CARD, "---\nconfirmed: 2031-06-10\n---\n\n# Cue card\n")
+        code, lines = self.card_tool("--check", CARD)
+        self.assertEqual(code, 1, lines)
+        self.assertIn("FAIL: no ## Card table: %s" % CARD, lines)
+        self.assertIn("FAIL: no ## Provenance table: %s" % CARD, lines)
+
+    def test_scaffold_for_eight_questions(self):
+        """#706's Done when: the scaffold for a list of 8 questions, one row per Story, each question once."""
+        rows = [("Q%d" % n, story([W, G, P][n % 3], "results", label=["Widget", "Gadget", "Plinth"][n % 3]))
+                for n in range(8)]
+        self.write("stories.md", index(*rows))
+        code, lines = self.card_tool(*[a for n in range(8) for a in ("--type", "Q%d" % n)])
+        self.assertEqual(code, 0, lines)
+        self.assertEqual(len([l for l in lines if l.startswith("question ")]), 8, lines)
+        self.assertEqual([l for l in lines if l.startswith("story ")], [
+            "story 1: Widget; key %s#results; leads Q0 | Q3 | Q6" % W,
+            "story 2: Gadget; key %s#results; leads Q1 | Q4 | Q7" % G,
+            "story 3: Plinth; key %s#results; leads Q2 | Q5" % P])
+        md = lines[lines.index("scaffold:") + 1:]
+        card_rows = md[md.index("## Card") + 4:md.index("## Finder") - 1]
+        self.assertEqual(card_rows, ["| Widget | Q0; Q3; Q6 |  |  |  |  |", "| Gadget | Q1; Q4; Q7 |  |  |  |  |",
+                                     "| Plinth | Q2; Q5 |  |  |  |  |"])
+
+    def test_check_empty_card(self):
+        self.write(CARD, card("2031-06-10 09:00", [], []))
+        code, lines = self.card_tool("--check", CARD)
+        self.assertEqual(code, 1, lines)
+        self.assertIn("FAIL: card with no rows: %s" % CARD, lines)
+
+    def test_usage(self):
+        for args in ((), ("--check", CARD, "--type", "Conflict"), ("--check",), ("--confirm", CARD, "--check")):
+            self.assertEqual(self.card_tool(*args)[0], 2, args)
+        before = self.read_file(W)
+        for flag in ("--confirm", "--check"):   # a file of the Log that is no cue card
+            code, lines = self.card_tool(flag, W)
+            self.assertEqual(code, 2, lines)
+        self.assertEqual(self.read_file(W), before)
 
 
 class StoryCandidatesTest(Log):
@@ -1095,12 +1345,54 @@ class StoryLeadsTest(Log):
         self.assertEqual(rest[:-1], self.candidates("Leading a team"))
         self.assertTrue(rest[-1].startswith("next: now, show the user each question's proposed type"), rest[-1])
         self.assertIn("then end your turn", rest[-1])
-        # the three Lead: forms --check reads, so interview step 3 need not spell them (#651 D13)
+        # the three Lead: forms --check reads, so interview-pack.md › Stories need not spell them (#651 D13)
         self.assertTrue(rest[-1].endswith(
             "; each question's one Lead: line is `Lead: <the Story's key, as this command printed it> (user, <the date"
             " of their answer>)` for a lead the user picked, `Lead: set aside (user, <that date>)`, or `Lead: <the"
             " Story's key> (<the Talking points file>, confirmed <the date on its talking points: line>)` for a lead"
             " taken from confirmed Talking points the user did not change"), rest[-1])
+
+    def brief(self, *types):
+        args = ["story-leads", "--brief"]
+        for t in types:
+            args += ["--type", t]
+        code, lines = self.run_tool(*args, "--root", self.root)
+        self.assertEqual(code, 0, lines)
+        return lines
+
+    def test_brief_one_line_per_question_then_the_ask(self):
+        """#696: a type with confirmed Talking points gives its lead, one without its top candidate."""
+        self.write("stories.md", index(("[Debugging](stories/debugging.md)", story(W, "dead-ends")),
+                                       ("Leading a team", story(P, "people"))))
+        self.write("stories/debugging.md", talking("Debugging", "2031-06-01 13:00", G + "#context", W + "#dead-ends"))
+        lines = self.brief("Debugging", "Leading a team", "Raising a risk")
+        self.assertEqual(lines[:3], [
+            "question 1: Debugging; lead: %s#context (stories/debugging.md, confirmed 2031-06-01 13:00);"
+            " candidates: 2 in talking points, 1 indexed, 3 not yet indexed" % G,
+            "question 2: Leading a team; top candidate: %s#people (indexed); candidates: 1 indexed, 3 not yet indexed" % P,
+            "question 3: Raising a risk (a new type); top candidate: none indexed; candidates: 0 indexed,"
+            " 4 not yet indexed"])
+        self.assertEqual(len(lines), 4, lines)
+        self.assertTrue(lines[3].startswith("next: now, for each question with a `top candidate:`"),
+                        lines[3])
+        self.assertIn("story-leads --type \"<its type>\" --root <root>`", lines[3])
+        self.assertIn("then end your turn", lines[3])
+        full = self.run_tool("story-leads", "--type", "Debugging", "--root", self.root)[1]
+        self.assertTrue(lines[3].endswith(full[-1].partition("then end your turn")[2]), lines[3])
+
+    def test_brief_unconfirmed_talking_points_give_no_lead(self):
+        self.write("stories.md", index(("[Debugging](stories/debugging.md)", story(W, "dead-ends"))))
+        self.write("stories/debugging.md", talking("Debugging", "", G + "#context"))
+        self.assertEqual(self.brief("Debugging")[0],
+                         "question 1: Debugging; top candidate: %s#context (talking points, not confirmed);"
+                         " candidates: 1 in talking points, 1 indexed, 3 not yet indexed" % G)
+
+    def test_brief_thirteen_types_thirteen_lines(self):
+        lines = self.brief(*["Type %d" % n for n in range(13)])
+        self.assertEqual([l.split(";")[0] for l in lines[:13]],
+                         ["question %d: Type %d (a new type)" % (n + 1, n) for n in range(13)])
+        self.assertEqual(len(lines), 14)
+        self.assertTrue(lines[13].startswith("next: "))
 
     def leads(self, pack):
         self.write("outputs/applications/a/interview-screen.md", pack)
@@ -1128,6 +1420,16 @@ class StoryLeadsTest(Log):
         self.assertTrue(lines[1].startswith("next: write the pack's ## Stories"), lines)
         self.assertEqual(self.leads("## Stories\n\nNone predicted.\n"), (0, ["leads: ok, none predicted"]))
         self.assertEqual(self.leads("## Stories\n\nSome text.\n")[0], 1)
+
+    def test_story_leads_point_at_interview_pack_stories(self):
+        """#725: interview.md has phases, not numbered steps; the Stories rules are in interview-pack.md."""
+        full = self.run_tool("story-leads", "--type", "Debugging", "--root", self.root)[1][-1]
+        fail = self.leads("# Pack\n\n## Likely questions\n- x\n")[1][-1]
+        usage = [l for l in self.run_tool("--help")[1] if l.startswith("- `story-leads --type")][0]
+        for line in (full, fail, usage):
+            self.assertIn("interview-pack.md › Stories", line)
+            self.assertNotIn("interview step", line)
+        self.assertNotIn("interview step", entries.cmd_story_leads.__doc__)
 
     def test_check_reads_a_pack_from_the_current_folder(self):
         """#651 C8: a pack path is read against --root, then the current folder, as an entry's is."""
@@ -1164,6 +1466,16 @@ class StoryLeadsTest(Log):
         self.assertIn("FAIL: lead not in confirmed talking points: Hard bug: %s (stories/conflict.md, confirmed"
                       " 2031-06-01): no such file" % P, lines)
         self.assertTrue(lines[-1].startswith("next: fix a `no type` or `leads:` line"), lines[-1])
+
+    def test_check_passes_a_named_lead(self):
+        """#695: a lead taken from Talking points is matched by its named key."""
+        self.write("stories/debugging.md", talking("Debugging", "2031-06-01", W + '#dead-ends "the-hunt"', P))
+        pack = "## Stories\n\n### Hard bug\nType: Debugging\nLead: %s (stories/debugging.md, confirmed 2031-06-01)\n"
+        code, lines = self.leads(pack % (W + "#dead-ends~the-hunt"))
+        self.assertEqual((code, lines[-1]), (0, "leads: ok, 1 question(s)"), lines)
+        code, lines = self.leads(pack % (W + "#dead-ends"))   # the unnamed key is another Story
+        self.assertEqual(code, 1, lines)
+        self.assertIn("not in the file's ## Stories", lines[0])
 
     def test_check_names_a_mis_shaped_taken_lead_a_format_error(self):
         """#530 (1): a value ending `(..., confirmed ...)` that misses the form is rewritten, not asked about."""
@@ -1202,7 +1514,8 @@ class StoryLeadsTest(Log):
 
     def test_usage(self):
         for args in (["story-leads"], ["story-leads", "pack.md"], ["story-leads", "--check"],
-                     ["story-leads", "--check", "a.md", "--type", "Debugging"], ["story-leads", "--type", "Debugging", "x"]):
+                     ["story-leads", "--check", "a.md", "--type", "Debugging"], ["story-leads", "--type", "Debugging", "x"],
+                     ["story-leads", "--brief"], ["story-leads", "--brief", "--check", "a.md"]):
             self.assertEqual(self.run_tool(*args, "--root", self.root)[0], 2, args)
 
 
@@ -1605,6 +1918,46 @@ class StoryWriteTest(Log):
             self.assertTrue(lines[0].startswith("FAIL: "), lines)
         self.assertEqual(self.tool("story-add", "Debugging")[0], 2)
         self.assertEqual(self.read(), before)
+
+    def test_story_add_story_and_story_name(self):
+        """#695: --story writes the name as the link's title; story-name names an item already there."""
+        for path, title in ((W, "Widget | Sorter [v2]"), (G, "Gadget")):
+            self.write(path, entry(title=title) + self.BODY + "\n## Context\nText.\n")
+        self.write("stories.md", index(("Debugging", story(G, "context", summary="the outage")), ("Proudest", "")))
+        code, lines = self.tool("story-add", "Proudest", W + "#context", "--story", "origin", "--summary", "how it began")
+        self.assertEqual(lines, ['added: Proudest: [Widget \\| Sorter [v2\\] › Context](%s#context "origin")'
+                                 ' — how it began' % W])
+        self.assertEqual(self.tool("story-add", "Proudest", W + "#context", "--story", "launch")[0], 0)
+        self.assertEqual(self.tool("story-add", "Proudest", W + "#context")[1][0][:7], "added: ")   # three keys
+        self.assertEqual(self.tool("story-add", "Proudest", W + "#Context", "--story", "origin")[1][0][:16],
+                         "already linked: ")
+        row = entries.story_index(self.root)[1]
+        self.assertEqual([s.key for s in row.stories], [W + "#context~origin", W + "#context~launch", W + "#context"])
+        before = self.read()
+        for args in [("story-add", "Proudest", W + "#context", "--story", "Origin"),
+                     ("story-add", "Proudest", W + "#context", "--story", "a b"),
+                     ("story-name", "Debugging", G + "#context", "Outage"),
+                     ("story-name", "Debugging", G + "#gone", "outage"),
+                     ("story-name", "Nope", G + "#context", "outage"),
+                     ("story-name", "Proudest", W + "#context", "origin"),   # the key another item has
+                     ("story-name", "Debugging", G + "#context")]:
+            code, lines = self.tool(*args)
+            self.assertEqual(code, 2, (args, lines))
+        self.assertEqual(self.read(), before)
+        self.assertEqual(self.tool("story-name", "Debugging", G + "#context", "outage"),
+                         (0, ['named: Debugging: [Widget](%s#context "outage") — the outage' % G]))
+        self.assertIn('| Debugging | [Widget](%s#context "outage") — the outage |' % G, self.read().decode())
+        self.assertEqual(self.tool("story-name", "Debugging", G + "#context~outage", "outage"),
+                         (0, ['already named: Debugging: [Widget](%s#context "outage") — the outage' % G]))
+        self.assertEqual(self.tool("story-name", "Debugging", G + "#context~outage", "rollback")[1],
+                         ['named: Debugging: [Widget](%s#context "rollback") — the outage' % G])
+
+    def test_story_finish_keeps_a_name(self):
+        self.write(W, entry(body="## Context\nText.\n"))
+        self.write("stories.md", index(("Debugging", story(W, "context", marker="raw", name="origin"))))
+        code, lines = self.tool("story-finish", W)
+        self.assertEqual(lines[0], 'dropped: Debugging: raw: [Widget](%s#context "origin")' % W)
+        self.assertEqual(entries.story_index(self.root)[0].stories[0].key, W + "#context~origin")
 
     def test_story_add_keeps_bom_crlf_and_other_cells(self):
         text = "﻿" + index(("Debugging", story(G, marker="raw, pending")), ("Proudest", "")).replace("\n", "\r\n")

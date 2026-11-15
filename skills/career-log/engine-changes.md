@@ -18,6 +18,20 @@ The branch, issue and pull-request flow for an Engine change (a parser fix, a ch
 - **Data and Engine in one session:** commit the data and the Engine change separately, each its own way.
 - **An Engine commit that went straight to the default branch:** revert it there and re-land it through a pull request; never rewrite the published history.
 
+## A shared helper and its guard test
+
+A list of copies in a doc does not stop the next copy: the agent writing it is not reading that list. A test that fails does, since the checks run it on the change that adds the copy (pull request CI, or the checks [SETUP.md](../../SETUP.md) step 7 runs).
+
+When a change moves logic copied across tools into one shared helper (in `tools/logfiles.py`, `tools/config.py`, or another module the tools import), it also adds a guard test:
+- It scans the tools for the old copied pattern and fails on each copy outside the helper, printing the file, the line and the helper to call instead.
+- It fails on the default branch as it was before the change (run it there once to see it fail on the copies), and passes after.
+- A call that rightly stays by hand is listed in the test, by its source text, with a comment saying why; a listed call that is gone fails the test too, so the list stays true.
+- It lives in a test file `tools/checks_for.py` already runs, or the change adds the file's entry there.
+
+The example is `GlobUnder` in `tools/tests/test_logfiles.py`: `test_no_tool_globs_by_hand` parses each tool with `ast` and fails on any `glob.glob` or `glob.iglob` call, or `from glob import`, outside `logfiles.glob_under`, which escapes the folder it globs under, in the Log or not. Only a call `glob_under` cannot take stays listed in `OUTSIDE_THE_LOG`, with the reason, and `test_the_list_holds_no_call_glob_under_takes` fails on one it could take. `test_the_guard_reads_each_way_to_glob_by_hand` feeds the scan the copied forms, so a scan that misses one fails.
+
+Only duplication a scan can find gets a guard test: the same call or construction. The same sentence copied into several modes cannot be scanned for: keep it in one file and link to it from the others.
+
 ## The Template export
 
 `tools/export-template.sh <dest>` builds the shareable Template: the Engine paths [AGENTS.md › Changes](../../AGENTS.md#changes) lists, plus the empty Log skeleton in `tools/template/`. Keep every Engine file free of personal content: no names, employers, projects, dates or quotes from this Log. Those belong in the Log files (`direction.md`, entries). It exports committed content only, so commit before exporting. It scans file names and contents for the patterns in `.export-deny` and fails on a hit; the `import`, `log` and `consolidate` modes append new employer and project names, and the export refuses an empty list.

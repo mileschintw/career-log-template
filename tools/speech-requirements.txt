@@ -1,0 +1,20 @@
+# The packages tools/speech.py's setup installs into ~/.career-log/speech/venv (#707, ADR 0013).
+# speech.py reads this file itself: lines marked `# gpu` are installed only when an NVIDIA GPU is
+# found (and not with `setup --no-gpu`); pip reads the environment markers. Pinned 2026-11-13.
+
+# Windows, Linux, x86-64 Mac: faster-whisper (CTranslate2), on the GPU when there is one
+faster-whisper==1.2.1; sys_platform != "darwin" or platform_machine != "arm64"
+ctranslate2==4.9.0; sys_platform != "darwin" or platform_machine != "arm64"
+# CTranslate2 4.9 loads cuBLAS 12 and cuDNN 9
+nvidia-cublas-cu12==12.9.2.10; sys_platform != "darwin"  # gpu
+nvidia-cudnn-cu12==9.28.1.4; sys_platform != "darwin"  # gpu
+
+# macOS on Apple Silicon: mlx-whisper, fed an array PyAV decodes
+mlx-whisper==0.4.3; sys_platform == "darwin" and platform_machine == "arm64"
+huggingface-hub>=0.21; sys_platform == "darwin" and platform_machine == "arm64"
+
+# Decoding (.m4a, .mp3, .wav, ...) everywhere, with the FFmpeg PyAV's wheels bundle: no system tool.
+# PyAV 19 needs Python 3.12; its Apple Silicon wheels need macOS 14, which setup checks.
+av==19.0.2; python_version >= "3.12"
+av==18.1.0; python_version < "3.12"
+numpy>=1.24

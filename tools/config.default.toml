@@ -5,6 +5,11 @@
 # The language Log files are written in.
 record_language = "English"
 
+# The language the agent talks to the user in, as a BCP 47 tag with its script and region
+# (zh-Hant-TW: Chinese in traditional characters, with that region's usage); setup writes it from the user's words.
+# Empty: the language the user writes in.
+conversation_language = ""
+
 # Interviewer profiles only signed-in members can see (LinkedIn): "never" or "always".
 interviewer_profiles = "never"
 

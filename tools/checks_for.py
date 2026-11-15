@@ -62,6 +62,12 @@ SOURCE_ENGINE = (".export-allow", ".github/", "maintainer/", "docs/maintaining.m
 NEXT_TEST = "docs/upgrades/test-next.sh"   # a Log format change's scratch Log (docs/maintaining.md)
 FRONT_PAGES = ("tools/template/README.md", "tools/template/README.zh-TW.md")
 OK = "the last line is `OK`"
+CHECK_PY = ("the last line is `OK (skipped=6)` on Windows, `OK (skipped=5)` on macOS or Linux: the skipped cases "
+            "are the other platform's (nvm and `~/.local/bin` on Windows, the Windows-only ones elsewhere), which CI "
+            "runs on Ubuntu and Windows; one more means a poppler of this machine's own or a link it cannot make "
+            "(run it with -v to see which)")
+CHAT_EXPORT_PY = ("the last line is `OK (skipped=1)` on Windows, `OK` on macOS or Linux: the skipped case is the "
+                  "TZ one, which CI runs on Ubuntu; one more means `git` is not on `PATH`")
 
 
 def py(script, check=OK):
@@ -88,13 +94,13 @@ GROUPS = [
         "tools/chat_export.py", "tools/tests/test_chat_export.py", "tools/tests/make_fixtures.py",
         "tools/tests/fixtures/", "tools/tests/expected/", "tools/logfiles.py",
     ], [
-        py("tools/tests/test_chat_export.py"),
+        py("tools/tests/test_chat_export.py", CHAT_EXPORT_PY),
     ]),
     ("check run/save", "parser-tests.yml", [
         "tools/check_run.py", "tools/tests/test_check_run.py", "tools/check_save.py", "tools/tests/test_check_save.py",
         "tools/chat_export.py", "tools/entries.py", "tools/logfiles.py", "tools/writing_lint.py", "tools/resume.py",
         "tools/config.py", "tools/config.default.toml", "tools/fit.py", "tools/sponsorship.py", "tools/dashboard.py",
-        "skills/career-log/writing.md", "skills/career-log/modes/review.md", "skills/career-log/modes/scan.md",
+        "tools/sync.py", "skills/career-log/writing.md", "skills/career-log/modes/review.md", "skills/career-log/modes/scan.md",
     ], [
         py("tools/tests/test_check_run.py"),
         py("tools/tests/test_check_save.py"),
@@ -117,7 +123,7 @@ GROUPS = [
         "tools/template/README.md", "tools/template/README.zh-TW.md", "tools/template/direction.md",
     ], [
         py("tools/tests/test_config.py"),
-        py("tools/tests/test_check.py"),
+        py("tools/tests/test_check.py", CHECK_PY),
     ]),
     ("machine check", "machine-check.yml", [
         "tools/check.py", "tools/resume.py", "tools/entries.py", "tools/logfiles.py", "tools/upgrade.py",
@@ -125,7 +131,14 @@ GROUPS = [
         "tools/guide.py", "docs/guide.md", "skills/career-log/SKILL.md", "skills/career-log/start.py",
         "tools/setup.sh", "tools/setup.ps1",
     ], [
-        py("tools/tests/test_check.py"),
+        py("tools/tests/test_check.py", CHECK_PY),
+    ]),
+    ("speech", "machine-check.yml", [   # tools/check.py offers and detects it
+        "tools/speech.py", "tools/speech-requirements.txt", "tools/tests/test_speech.py", "tools/tests/speech/",
+        "tools/logfiles.py",   # speech.py imports it
+    ], [
+        py("tools/tests/test_speech.py"),
+        py("tools/tests/test_check.py", CHECK_PY),
     ]),
     ("setup scripts", "machine-check.yml", [
         "tools/setup.sh", "tools/setup.ps1",
@@ -189,7 +202,7 @@ GROUPS = [
     ]),
     ("upgrade", "upgrade-tests.yml", [
         "tools/upgrade.py", "tools/tests/test_upgrade.py", "tools/export-template.sh", "docs/upgrades/",
-        "tools/config.py", "tools/logfiles.py", "tools/sponsorship.py",
+        "tools/config.py", "tools/logfiles.py",
     ], [
         py("tools/tests/test_upgrade.py"),
     ]),
@@ -236,6 +249,11 @@ GROUPS = [
         "tools/checks_for.py", "tools/tests/test_checks_for.py", EXPORT, ".github/workflows/",
     ], [
         py("tools/tests/test_checks_for.py"),
+    ]),
+    # the guards that keep a shared helper the one copy (engine-changes.md › A shared helper and its
+    # guard test) scan every tool, so they run on a change to any of them, where a copy would land
+    ("tool guards", "template-scan.yml", ["tools/"], [
+        py("tools/tests/test_logfiles.py"),
     ]),
 ]
 

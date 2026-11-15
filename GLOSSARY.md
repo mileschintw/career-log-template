@@ -45,12 +45,20 @@ Whether a saved application or bullets report feeds later runs (**Reference**, t
 _Avoid_: draft (an Archived application was sent), record (that word is the Log's)
 
 **Story**:
-One concrete point of an experience (an entry, or a whole series), recorded in one of its sections, that can answer behavioural interview questions; its facts live only in the entry, and a long experience holds many Stories. A **core Story** is an experience the user marked core: one of the few they reuse across many question types, from different angles.
+One concrete point of an experience (an entry, or a whole series), recorded in one of its sections, that can answer behavioural interview questions; its facts live only in the entry, and a long experience holds many Stories, several often in one section. A Story is named by its key, the section it links, which may carry a name that tells it from the section's other Stories ([ADR 0012](docs/adr/0012-a-story-is-named-within-its-section.md)); a key with no name means the whole section. A **core Story** is an experience the user marked core: one of the few they reuse across many question types, from different angles.
 _Avoid_: anecdote, example
 
 **Talking points**:
 The spoken route for one behavioural question type: the Stories chosen for it in order of preference, an opening line, and cue lines in telling order that each point at an entry section. It holds no facts and is not a script; the user confirms it, and it is checked again when an entry it points at changes.
 _Avoid_: answer (that is a written form answer), script, answer outline
+
+**Cue card**:
+One interview's Stories on one page, `cue-card-<stage>.md` in the application folder: per Story the questions it leads, two or three key facts with their caveats, the task sentence, what the user did and the result, then a finder from questions to Stories, a self-drill and the entry sections behind each row. It holds facts, unlike Talking points, and no script; the user confirms it, and it is checked again when an entry it cites changes. Pages for practice and the day are built from it.
+_Avoid_: cheat sheet, crib sheet, story sheet
+
+**Prep file**:
+The state of one interview stage's preparation, `prep-<stage>.md` in the application folder: each item of the prep with its phase, its state (`open`, `done`, `user-only` or `set aside`) and where its file is, the decisions the user made, the schedule and the pages built for the run. `application.py prep-init` writes it and `prep-status` reads it; practice results go in the practice log it links.
+_Avoid_: handover, prep notes, status file
 
 **Durable source**:
 A source that stays and can be linked: the user's repos, PRs, issues and ADRs, and the files in a Log's `sources/`; an entry links it and does not copy it.
@@ -65,7 +73,7 @@ One experience split into several entries, one per part a reader would pick for 
 _Avoid_: sub-entry, chapter, entry folder
 
 **Machine setup**:
-Whether the user wants each optional tool on one machine (playwright-cli, with Node, its skill and a browser), kept as a yes or no per tool in `~/.career-log/machine.toml`, outside every repo; whether a tool is installed is detected by `tools/check.py` on every run, never stored. TinyTeX is required, so it has no yes or no; the same file records where poppler came from (setup's micromamba environment, or the user's own).
+Whether the user wants each optional tool on one machine (playwright-cli, with Node, its skill and a browser; `tools/speech.py`, which transcribes a recording with its times in its own environment and models under `~/.career-log/speech`), kept as a yes or no per tool in `~/.career-log/machine.toml`, outside every repo; whether a tool is installed is detected by `tools/check.py` on every run, never stored. TinyTeX is required, so it has no yes or no; the same file records where poppler came from (setup's micromamba environment, or the user's own).
 _Avoid_: config, environment, settings (for this)
 
 **Screen**:
@@ -84,10 +92,18 @@ _Avoid_: tracker, board, report (for this)
 Reading a web source that shows its content only after its scripts run or the user signs in; a page a plain fetch can read is not one.
 _Avoid_: advanced operation, scraping, crawling
 
+**Session key**:
+The name the Engine gives one agent session in a Log, `<YYYY-MM-DD>-<HHMMSS>[-<n>]`: its first *Trigger check* makes it, prints it on a `session:` line and records under `.build/sessions/<key>/` the session's baseline, the Log files uncommitted at that moment, which are not the session's to commit until they are settled. Each later check, claim, commit and Next up of the session passes it as `--session <key>`. A session is live while it holds a Claim and idle once it has released them all; an idle session keeps its key ([ADR 0014](docs/adr/0014-a-session-claims-the-log-files-it-writes.md)).
+_Avoid_: run key (a posting run's folder), live run
+
+**Claim**:
+A session's hold on a Log file it writes, taken before its first edit (`tools/sync.py claim`, or a commit under its key) and kept until the session's Next up, its `sync.py end`, or a `release` that hands the file on; time never releases one. Another session's claim, commit or settle of that file is refused, and only then is the user asked whether the holding session is still going.
+_Avoid_: lock, ownership by time on disk
+
 ## Languages
 
 **Conversation language**:
-Whatever language the user talks to the agent in.
+The language the agent talks to the user in, a Config field (`conversation_language`): a BCP 47 tag that names the script and region too (`zh-Hant-TW`); empty, it is the language the user writes in.
 
 **Record language**:
 The language Log files are written in, a Config field (`record_language`); the user's own words are paraphrased in it, and their original wording, when it came from a session, is kept in an excerpt.

@@ -5,8 +5,9 @@
 
 The tool states are faked, so the tests pass on any machine whatever it has installed.
 """
-import datetime, http.server, importlib.util, io, json, os, shutil, socket, subprocess, sys, tempfile, threading, time, unittest
+import datetime, http.server, importlib.util, io, json, os, re, shutil, socket, subprocess, sys, tempfile, threading, time, unittest
 from contextlib import redirect_stdout
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.join(HERE, "..", "check.py")
@@ -28,13 +29,17 @@ class CheckTest(unittest.TestCase):
         self.addCleanup(lambda: __import__("shutil").rmtree(self.home, ignore_errors=True))
         self.saved_state = dict(check.STATE)
         self.addCleanup(lambda: check.STATE.update(self.saved_state))
-        self.state(playwright_cli=OK, tinytex=OK)   # a test fakes the tool it is about
+        self.state(playwright_cli=OK, tinytex=OK, speech=OK)   # a test fakes the tool it is about
+        speech = check.tools_module("speech")   # the offer's size, with no nvidia-smi run
+        saved_plan = speech.plan
+        speech.plan = lambda gpu_wanted=True: ("faster-whisper", None, ("large-v3-turbo", "small"), 2.3)
+        self.addCleanup(setattr, speech, "plan", saved_plan)
         self.saved_context = check.Context
         self.addCleanup(lambda: setattr(check, "Context", self.saved_context))
         home, root = self.home, os.path.join(self.home, "root")
         os.makedirs(root)
         shutil.copy(DEFAULTS, os.path.join(root, "config.toml"))   # setup has run for this Log
-        check.Context = lambda mode, **_: self.saved_context(mode, root=root, home=home)
+        check.Context = lambda mode, **kw: self.saved_context(mode, root=root, home=home, session=kw.get("session"))
         for key in check.BROWSER_ENV:   # the machine's own; a test sets the one it is about
             if key in os.environ:
                 self.addCleanup(os.environ.__setitem__, key, os.environ.pop(key))
@@ -127,6 +132,56 @@ class CheckTest(unittest.TestCase):
         yes, no = ("--yes playwright-cli", "--no playwright-cli") if os.name != "nt" else ("-Yes playwright-cli", "-No playwright-cli")
         self.assertIn(yes, offer[0])
         self.assertIn(no, offer[0])
+
+    def test_speech_offer_gives_the_three_ways(self):
+        """#707: a mode that takes a spoken answer offers speech.py, recommended, beside the app's voice
+        input and typing, with what each gives; the mode goes on meanwhile."""
+        self.state(speech=(["speech: missing"], ["speech"], [], None))
+        code, lines = self.run_check("interview")
+        self.assertEqual(code, 0)
+        offer = [l for l in lines if "speech.py (recommended)" in l]
+        self.assertEqual(len(offer), 1, lines)
+        self.assertTrue(offer[0].startswith("next: when a practice round takes a spoken answer, first: ask the user once"))
+        for text in ("length, pace, pauses and part timings", "2. This app's own voice input: a transcript only.",
+                     "3. Typing or pasting: the content only.", "about 2.3 GB", "speech.py\" setup --yes`",
+                     "speech.py\" setup --no`", "as a background command"):
+            self.assertIn(text, offer[0])
+        self.assertIn("speech wanted: not asked", lines)
+        self.assertEqual(lines[-1], "next: go on with the mode")
+
+    def test_stories_offers_speech_too(self):
+        """A behavioural question practised out loud runs in stories, not interview (harness round 1 of #707)."""
+        self.state(speech=(["speech: missing"], ["speech"], [], None))
+        code, lines = self.run_check("stories")
+        self.assertEqual(code, 0)
+        self.assertEqual(len([l for l in lines if "speech.py (recommended)" in l]), 1, lines)
+
+    def test_speech_declined_takes_the_answer_another_way(self):
+        self.machine("speech = false\n")
+        self.state(speech=(["speech: missing"], ["speech"], [], None))
+        code, lines = self.run_check("interview")
+        off = [l for l in lines if "Transcription with times (tools/speech.py) is off on this machine" in l]
+        self.assertEqual(len(off), 1, lines)
+        self.assertIn("voice input, or typed or pasted", off[0])
+        self.assertFalse(any("ask the user" in l for l in lines))
+
+    def test_speech_is_not_asked_in_setup(self):
+        self.state(speech=(["speech: missing"], ["speech"], [], None))
+        code, lines = self.run_check("setup")
+        self.assertIn("speech wanted: not asked (offered when a practice round first takes a spoken answer)", lines)
+        self.assertFalse(any("speech" in l for l in lines if l.startswith("next:")), lines)
+
+    def test_speech_chosen_and_outdated_sets_it_up_again(self):
+        self.machine("speech = true\n")
+        self.state(speech=(["speech: outdated (x)"], ["old speech"], [], None))
+        code, lines = self.run_check("interview")
+        run = [l for l in lines if "the user chose speech on this machine, and speech is too old" in l]
+        self.assertEqual(len(run), 1, lines)
+        self.assertIn("speech.py\" setup --yes`", run[0])
+
+    def test_speech_state_reads_its_folder(self):
+        ctx = self.saved_context("interview", root=self.home, home=self.home)
+        self.assertEqual(check.speech_state(ctx), (["speech: missing"], ["speech"], [], None))
 
     def test_chosen_and_missing_runs_setup_without_asking(self):
         self.machine("playwright-cli = true\n")
@@ -400,6 +455,62 @@ class CheckTest(unittest.TestCase):
         self.assertFalse([l for l in lines if "broken link" in l or "setup links" in l], lines)
         self.assertFalse([m for m in machine if "link" in m], machine)
         self.assertEqual(off_path, [d])
+
+    def odd_home(self):
+        """Move the scratch home into a folder named like `dev[1]` (and `*?` where the system allows
+        them), which glob reads as a pattern unless check escapes it (#712); returns it."""
+        odd = os.path.join(self.home, "dev[1]" + ("" if os.name == "nt" else "*?"))
+        os.makedirs(odd)
+        self.addCleanup(shutil.rmtree, self.home, ignore_errors=True)   # setUp's removes only the new self.home
+        self.home = odd
+        return odd
+
+    def test_nvm_node_in_a_home_with_glob_characters(self):
+        self.odd_home()
+        d = self.nvm_node("v22.1.0")
+        with mock.patch.object(check, "WINDOWS", False):
+            self.assertEqual(check.node_dirs(self.home)[1:], [d])
+
+    def test_winget_node_in_a_localappdata_with_glob_characters(self):
+        local = os.path.join(self.odd_home(), "Local")
+        node_dir = os.path.join(local, "Microsoft", "WinGet", "Packages", "OpenJS.NodeJS.LTS_x", "node-v24.0.0-win-x64")
+        os.makedirs(node_dir)
+        with mock.patch.object(check, "WINDOWS", True), mock.patch.dict(os.environ, LOCALAPPDATA=local):
+            self.assertEqual(check.node_dirs(self.home)[0], node_dir)
+
+    def test_npm_store_in_a_localappdata_with_glob_characters(self):
+        self.odd_home()
+        store = self.appdata("store", "npm", "playwright-cli.cmd")
+        self.fake_profile()
+        with mock.patch.object(check, "WINDOWS", True):
+            self.assertEqual(check.npm_bin_dirs(self.home)[0], os.path.normpath(store))
+
+    def test_newer_python_in_a_home_with_glob_characters(self):
+        self.odd_home()
+        for windows, parts in ((False, (".local", "bin", "python3.13")),
+                               (True, ("Local", "Programs", "Python", "Python313", "python.exe"))):
+            path = os.path.join(self.home, *parts)
+            os.makedirs(os.path.dirname(path))
+            open(path, "w").close()
+            os.chmod(path, 0o755)
+            with mock.patch.object(check, "WINDOWS", windows), \
+                    mock.patch.dict(os.environ, LOCALAPPDATA=os.path.join(self.home, "Local")):
+                self.assertEqual(check.newer_pythons(self.home), [path])
+
+    def test_chromium_in_a_cache_with_glob_characters(self):
+        self.odd_home()
+        lines, _, _, _ = self.config_state(folders=["chromium-1100"], pinned=None)
+        self.assertTrue(self.browser_line(lines).startswith("browser: present (Chromium in"), lines)
+        lines, _, _, _ = self.config_state()   # the stale chromium-1100 is listed as found
+        self.assertIn("; found chromium-1100, which", self.browser_line(lines))
+        for parts in (("chromium-1100", "chrome-linux64", "chrome"),
+                      ("chromium_headless_shell-1100", "chrome-headless-shell-linux64", "chrome-headless-shell")):
+            binary = os.path.join(self.home, "ms-playwright", *parts)
+            os.makedirs(os.path.dirname(binary))
+            open(binary, "w").close()
+            with mock.patch.dict(os.environ, PLAYWRIGHT_BROWSERS_PATH=os.path.join(self.home, "ms-playwright")), \
+                    mock.patch.object(check, "run", lambda cmd, binary=binary: (0, "libnss3.so => not found" if cmd[1] == binary else "")):
+                self.assertTrue(check.missing_libraries(self.home, [[parts[0]]]), parts)
 
     def browser_roots(self, *installed):
         """Fake %LOCALAPPDATA%, %ProgramFiles% and %ProgramFiles(x86)%, the real Edge or Chrome hidden;
@@ -1105,97 +1216,116 @@ class CheckTest(unittest.TestCase):
     def test_not_a_repo_prints_nothing(self):
         self.assertEqual(self.uncommitted(self.home), ([], [], False))
 
-    # ---- a run still going in another session (#609) ----
+    # ---- sessions: a key, a baseline and claims (ADR 0014) ----
 
-    def live_marker(self, root, key, started_ago, touched_ago=0):
-        """A run's live marker (scan.py run), started and last touched that many seconds ago."""
-        path = os.path.join(root, ".build", "runs", key, "live")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        start = datetime.datetime.fromtimestamp(int(time.time() - started_ago)).astimezone()
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump({"start": start.isoformat(), "mode": "write"}, f)
-        os.utime(path, (time.time() - touched_ago,) * 2)
+    def ctx(self, root, session=None):
+        return self.saved_context("log", root=root, home=self.home, session=session)
 
-    def aged(self, root, path, text, ago):
-        """Write a Log file whose time on disk is `ago` seconds back."""
-        self.write(root, path, text)
-        os.utime(os.path.join(root, path), (time.time() - ago,) * 2)
+    def claimed(self, root, *paths, baseline=None):
+        """A session of this Log that claimed paths; its key."""
+        key = check.logfiles.new_session(root, baseline or {})
+        record = check.logfiles.read_session(root, key)
+        record["claims"] = list(paths)
+        check.logfiles.write_session(root, key, record)
+        return key
 
-    def test_a_live_runs_files_print_as_its_own_with_no_settle(self):
+    def test_the_first_check_makes_a_session_whose_baseline_holds_the_uncommitted_files(self):
         root = self.log_repo()
-        self.live_marker(root, "2031-01-02-100000", started_ago=600)
-        self.aged(root, "entries/2024-01-a.md", "a fact step 7 added\n", ago=60)
-        self.aged(root, "profile.md", "p\n", ago=0)
-        lines, nexts, stop = self.uncommitted(root)
+        self.write(root, "profile.md", "p\n")
+        ctx = self.ctx(root)
+        lines, nexts, stop = check.check_session_key(ctx)
+        key = ctx.session
+        self.assertTrue(check.logfiles.SESSION_KEY.match(key), key)
+        self.assertEqual(lines, ["session: %s (this session's key: give --session %s to every later check, claim,"
+                                 " commit and Next up of this session; on a rerun of a check, keep the first one)"
+                                 % (key, key)])
+        self.assertEqual((nexts, stop), ([], False))
+        record = check.logfiles.read_session(root, key)
+        self.assertEqual(record["baseline"], {"profile.md": check.logfiles.file_hash(root, "profile.md")})
+        self.assertEqual(record["claims"], [])
+        self.assertEqual(check.check_session_key(self.ctx(root, key))[0], ["session: %s" % key])   # a later check keeps it
+        shutil.rmtree(os.path.join(root, ".build"))
+        self.assertEqual(check.check_session_key(self.ctx(root, key))[0],
+                         ["session: %s (its record was gone: made again, with no baseline)" % key])
+        self.assertEqual(check.logfiles.read_session(root, key)["baseline"], {})
+        self.assertEqual(check.check_session_key(self.ctx(self.home)), ([], [], False))   # not a repository
+
+    def test_another_sessions_claimed_files_print_as_its_with_no_question(self):
+        root = self.log_repo()
+        other = self.claimed(root, "entries/2024-01-a.md")
+        mine = self.claimed(root, "stories.md")
+        self.write(root, "entries/2024-01-a.md", "the other session's\n")
+        self.write(root, "stories.md", "mine\n")
+        self.write(root, "direction.md", "left by an earlier session\n")
+        lines, nexts, stop = check.check_uncommitted(self.ctx(root, mine))
         self.assertFalse(stop)
-        self.assertEqual(lines, ["log changes: uncommitted (2 file(s), 2 of them a live run's)",
-                                 "log change (live run 2031-01-02-100000): M entries/2024-01-a.md",
-                                 "log change (live run 2031-01-02-100000): ?? profile.md"])
-        self.assertEqual(len(nexts), 1)
-        self.assertNotIn("settle", nexts[0].split("keep them as they are")[0])
-        self.assertIn("another session", nexts[0])
-        self.assertIn("scan.py\" end <key>", nexts[0])
-        self.assertIn("(2031-01-02-100000)", nexts[0])
-
-    def test_a_finished_sessions_leftover_is_offered_beside_a_live_run(self):
-        root = self.log_repo()
-        self.aged(root, "direction.md", "left by an earlier session\n", ago=3600)
-        self.live_marker(root, "2031-01-02-100000", started_ago=600)
-        self.aged(root, "entries/2024-01-a.md", "the live run's\n", ago=30)
-        lines, nexts, _ = self.uncommitted(root)
-        self.assertEqual(lines, ["log changes: uncommitted (2 file(s), 1 of them a live run's)",
+        self.assertEqual(lines, ["log changes: uncommitted (3 file(s), 1 of them another session's)",
                                  "log change: ?? direction.md",
-                                 "log change (live run 2031-01-02-100000): M entries/2024-01-a.md"])
+                                 "log change (this session): ?? stories.md",
+                                 "log change (session %s): M entries/2024-01-a.md" % other])
         self.assertEqual(len(nexts), 2)
         self.assertIn("an earlier session left", nexts[0])
-        self.assertIn("settle discard -- <file>...", nexts[0])
-        self.assertIn("still going in another session", nexts[1])
+        self.assertIn("settle discard --session %s -- <file>..." % mine, nexts[0])
+        self.assertIn("claimed by another session in this Log (%s)" % other, nexts[1])
+        self.assertIn("out of every settle and commit of this session", nexts[1])
 
-    def test_a_file_under_an_expired_marker_is_offered_as_today(self):
-        root = self.log_repo()
-        self.live_marker(root, "2031-01-02-100000", started_ago=4 * 3600, touched_ago=check.logfiles.LIVE_HOURS * 3600 + 60)
-        self.aged(root, "entries/2024-01-a.md", "a crashed run's\n", ago=3 * 3600)
-        lines, nexts, _ = self.uncommitted(root)
-        self.assertEqual(lines, ["log changes: uncommitted (1 file(s))", "log change: M entries/2024-01-a.md"])
-        self.assertEqual(len(nexts), 1)
-        self.assertIn("an earlier session left", nexts[0])
-
-    def test_an_ended_or_unreadable_marker_is_no_live_run(self):
-        root = self.log_repo()
-        os.makedirs(os.path.join(root, ".build", "runs", "2031-01-02-100000"))   # ended: its marker deleted
-        bad = os.path.join(root, ".build", "runs", "2031-01-02-110000", "live")
-        os.makedirs(os.path.dirname(bad))
-        self.write(root, ".build/runs/2031-01-02-110000/live", "not json\n")
+    def test_an_idle_session_is_never_named_as_possibly_ended(self):
+        """No timer and no routine question: a session that ran no tool for a day still holds its files, and
+        no check line asks whether it has ended."""
+        root = self.log_repo("log [1]")   # a glob character in the root, as #662 B1
+        other = self.claimed(root, "profile.md")
+        record = check.logfiles.read_session(root, other)
+        record["start"] = "2000-01-01T00:00:00+00:00"
+        check.logfiles.write_session(root, other, record)
+        day = time.time() - 24 * 3600
+        for path in (check.logfiles.session_path(root, other), os.path.dirname(check.logfiles.session_path(root, other))):
+            os.utime(path, (day, day))
         self.write(root, "profile.md", "p\n")
-        lines, _, _ = self.uncommitted(root)
-        self.assertEqual(lines, ["log changes: uncommitted (1 file(s))", "log change: ?? profile.md"])
+        os.utime(os.path.join(root, "profile.md"), (day, day))
+        lines, nexts, _ = check.check_uncommitted(self.ctx(root))
+        self.assertEqual(lines[1:], ["log change (session %s): ?? profile.md" % other])
+        for line in nexts:
+            for word in ("ended", "still going", "end --session", "crash"):
+                self.assertNotIn(word, line)
 
-    def test_a_live_run_in_a_root_with_glob_characters(self):
-        """#662 (B1): the marker is found in a Log root whose path holds `[`."""
-        root = self.log_repo("log [1]")
-        self.live_marker(root, "2031-01-02-100000", started_ago=600)
-        self.aged(root, "profile.md", "p\n", ago=0)
-        lines, _, _ = self.uncommitted(root)
-        self.assertEqual(lines[1:],["log change (live run 2031-01-02-100000): ?? profile.md"])
-
-    def test_a_marker_in_a_folder_named_as_no_run_key_is_no_live_run(self):
-        """#662 (B1): only a folder `scan.py run` could have made holds a live run."""
+    def test_a_baseline_file_that_changed_since_the_first_check_is_still_changing(self):
         root = self.log_repo()
-        self.live_marker(root, "notes", started_ago=600)
-        self.aged(root, "profile.md", "p\n", ago=0)
-        lines, _, _ = self.uncommitted(root)
-        self.assertEqual(lines, ["log changes: uncommitted (1 file(s))", "log change: ?? profile.md"])
+        self.write(root, "profile.md", "p\n")
+        ctx = self.ctx(root)
+        check.check_session_key(ctx)
+        self.assertEqual(check.check_uncommitted(ctx)[0][1:], ["log change: ?? profile.md"])
+        self.write(root, "profile.md", "p, and more from a session that claimed nothing\n")
+        lines, nexts, _ = check.check_uncommitted(ctx)
+        self.assertEqual(lines[1:], ["log change (still changing): ?? profile.md"])
+        self.assertEqual(len(nexts), 1)
+        self.assertIn("another session is still writing them", nexts[0])
+        self.assertIn("out of every settle and commit", nexts[0])
 
-    def test_two_live_runs_each_take_the_files_since_their_start(self):
+    def test_a_baseline_entry_lapses_once_its_file_matches_head(self):
         root = self.log_repo()
-        self.live_marker(root, "2031-01-02-100000", started_ago=1200)
-        self.live_marker(root, "2031-01-02-101500", started_ago=300)
-        self.aged(root, "entries/2024-01-a.md", "the first run's\n", ago=600)
-        self.aged(root, "profile.md", "p\n", ago=60)
-        lines, nexts, _ = self.uncommitted(root)
-        self.assertIn("log change (live run 2031-01-02-100000): M entries/2024-01-a.md", lines)
-        self.assertIn("log change (live run 2031-01-02-101500): ?? profile.md", lines)
-        self.assertIn("(2031-01-02-100000, 2031-01-02-101500)", nexts[0])
+        self.write(root, "entries/2024-01-a.md", "left\n")
+        ctx = self.ctx(root)
+        check.check_session_key(ctx)
+        self.write(root, "entries/2024-01-a.md", "a\n")   # as HEAD has it: settled
+        self.assertEqual(check.check_uncommitted(ctx), ([], [], False))
+        self.assertEqual(check.logfiles.read_session(root, ctx.session)["baseline"], {})
+        self.write(root, "entries/2024-01-a.md", "this session's own\n")
+        self.assertEqual(check.check_uncommitted(ctx)[0][1:], ["log change: M entries/2024-01-a.md"])
+
+    def test_main_takes_session(self):
+        root = os.path.join(self.home, "root")
+        subprocess.run(["git", "-C", root, "init", "-q"], check=True)
+        code, lines = self.run_check("log")
+        key = next(l for l in lines if l.startswith("session: ")).split()[1]
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = check.main(["log", "--session", key])
+        self.assertIn("session: %s" % key, out.getvalue().splitlines())
+        for args in (["log", "--session"], ["log", "--session", "notes"], ["browser", "--session", key]):
+            out = io.StringIO()
+            with redirect_stdout(out):
+                self.assertEqual(check.main(args), 2, args)
+            self.assertTrue(out.getvalue().startswith("usage:"), args)
 
     def test_uncommitted_line_comes_before_go_on(self):
         root = self.log_repo()
@@ -1288,7 +1418,7 @@ class GitStateTest(unittest.TestCase):
 
     def run_check(self, root, mode="log"):
         home, saved = self.home, check.Context
-        check.Context = lambda m, **_: saved(m, root=root, home=home)
+        check.Context = lambda m, **kw: saved(m, root=root, home=home, session=kw.get("session"))
         try:
             return self.run_main([mode])
         finally:
@@ -1429,8 +1559,9 @@ class GitStateTest(unittest.TestCase):
         settle = [n for n in nexts if "status -- <file>..." in n]
         self.assertEqual(len(settle), 1, nexts)
         self.assertIn("sync.py\" status -- <file>...`", settle[0])
-        self.assertIn("sync.py\" settle commit -- <file>...`", settle[0])
-        self.assertIn("sync.py\" settle discard -- <file>...`", settle[0])
+        key = next(l for l in lines if l.startswith("session: ")).split()[1]   # this first check's new key
+        self.assertIn("sync.py\" settle commit --session %s -- <file>...`" % key, settle[0])
+        self.assertIn("sync.py\" settle discard --session %s -- <file>...`" % key, settle[0])
         self.assertLess(nexts.index(settle[0]), next(i for i, n in enumerate(nexts) if "pull`" in n))
         self.assertEqual(nexts[-1], "next: go on with the mode")
 
@@ -1561,12 +1692,19 @@ class ConfigCheckTest(unittest.TestCase):
         lines, nexts, stop = self.config("write", 'record_language = "Deutsch"\n')
         self.assertFalse(stop)
         self.assertEqual(nexts, [])
-        self.assertEqual(lines, ["config record_language: Deutsch", "config interviewer_profiles: never (default)",
+        self.assertEqual(lines, ["config record_language: Deutsch",
+                                 "config conversation_language: empty, the language the user writes in (default)",
+                                 "config interviewer_profiles: never (default)",
                                  "config front_page: full (default)", "config window: 7 (default)",
                                  "config scheduled_window: window (default)", "config screen_budget: 40 (default)",
                                  "config fit_budget: 15 (default)", "config n: 10 (default)", "config auto_write: off (default)", "config m: 5 (default)",
                                  "config update_check: on (default)", "config resume_max_pages: 1 (default)",
                                  "config plan_preview: ask (default)"])
+
+    def test_conversation_language_is_printed_in_every_mode(self):   # #699
+        for mode in check.MODES:
+            lines = self.config(mode, 'conversation_language = "zh-Hant-TW"\n')[0]
+            self.assertIn("config conversation_language: zh-Hant-TW", lines, mode)
 
     def test_unreadable_or_unknown_field_stops(self):
         for text in ("record_language = \n", 'colour = "blue"\n', 'front_page = "half"\n'):
@@ -1601,7 +1739,48 @@ class ConfigCheckTest(unittest.TestCase):
 
 
 REPO = os.path.dirname(os.path.dirname(HERE))
+
 README_HEAD = "# Log\n\n## Entries\n\n| Period | Entry | Type | Status |\n|---|---|---|---|\n"
+
+
+class ToolListTest(unittest.TestCase):
+    """The hand-written lists of Machine setup tools name every tool check.py knows (#777)."""
+
+    WRITERS = ("tools/setup.sh", "tools/setup.ps1", "tools/speech.py")   # each writes machine.toml
+
+    def read(self, rel):
+        with open(os.path.join(REPO, rel), encoding="utf-8") as f:
+            return f.read()
+
+    def test_platforms_names_every_machine_setup_tool(self):
+        # SKILL.md › Platforms: "The tools of Machine setup (TinyTeX, playwright-cli, ...) go only ..."
+        m = re.search(r"The tools of Machine setup \(([^)]*)\)", self.read("skills/career-log/SKILL.md"))
+        self.assertTrue(m, "SKILL.md › Platforms lost its sentence 'The tools of Machine setup (...)'")
+        listed = {name.strip().lower() for name in m.group(1).split(",")}
+        for tool in sorted(check.STATE):   # every tool check.py reports on, optional (TOOLS) or required
+            name = check.NAME.get(tool, tool).lower()
+            self.assertIn(name, listed, "SKILL.md › Platforms' list of Machine setup tools leaves out %s"
+                          " (check.py knows it): add it to 'The tools of Machine setup (...)'" % name)
+
+    def test_machine_toml_header_names_every_writer(self):
+        # The header a new machine.toml starts with, written in three copies: shell and PowerShell
+        # cannot import a Python constant, so the copies stay and this test keeps them alike.
+        copies = {}
+        for rel in self.WRITERS:
+            lines = re.findall(r"""["'](# [^"'\n]*)["']""", self.read(rel))
+            starts = [i for i, l in enumerate(lines) if l.startswith("# career-log Machine setup:")]
+            self.assertTrue(starts, "%s lost the machine.toml header ('# career-log Machine setup: ...')" % rel)
+            start = starts[0]
+            header = []
+            for l in lines[start:]:
+                header.append(l)
+                if l.rstrip().endswith("(tools/check.py)."):
+                    break
+            copies[rel] = " ".join(l[2:] for l in header)
+        self.assertEqual(len(set(copies.values())), 1, "the machine.toml header differs: %r" % copies)
+        text = copies["tools/setup.sh"]
+        for writer in self.WRITERS:
+            self.assertIn(writer, text, "the machine.toml header leaves out its writer %s" % writer)
 
 
 class ModeStateTest(unittest.TestCase):
@@ -2345,23 +2524,52 @@ class SessionTest(unittest.TestCase):
                       " you leave this session.", out)
         self.assertTrue(out[-1].startswith("next: now, first: settle what is not saved"))
 
-    def test_a_live_runs_files_are_not_unsaved(self):
+    def test_another_sessions_files_are_not_unsaved_and_this_sessions_are(self):
         self.entry("consolidated")
         self.repo()
-        live = os.path.join(self.root, ".build", "runs", "2031-01-02-100000", "live")
-        os.makedirs(os.path.dirname(live))
-        start = datetime.datetime.fromtimestamp(int(time.time() - 600)).astimezone()
-        with open(live, "w", encoding="utf-8") as f:
-            json.dump({"start": start.isoformat(), "mode": "write"}, f)
+        other = check.logfiles.new_session(self.root, {})
+        mine = check.logfiles.new_session(self.root, {})
+        for key, path in ((other, "entries/2031-01-widget.md"), (mine, "stories.md")):
+            record = check.logfiles.read_session(self.root, key)
+            record["claims"] = [path]
+            check.logfiles.write_session(self.root, key, record)
         self.write("entries/2031-01-widget.md", "another session's fact\n")
-        code, out = self.done("fit")
-        self.assertEqual(code, 0, out)
-        self.assertFalse([l for l in out if l.startswith("Not saved yet")], out)
-        os.remove(live)   # that run ended without saving: its file is this Log's to settle again
-        code, out = self.done("fit")
+        code, out = self.done("fit", "--session", other)   # the other session's view: its own file is unsaved
         self.assertEqual(code, 1)
         self.assertIn("Not saved yet: 1 Log file(s) not committed (M entries/2031-01-widget.md). Save it before"
                       " you leave this session.", out)
+        # not saved: its claim stays, so no other session is offered the file while this one settles it
+        self.assertEqual(check.logfiles.read_session(self.root, other)["claims"], ["entries/2031-01-widget.md"])
+        code, out = self.done("fit", "--session", mine)
+        self.assertEqual(code, 0, out)
+        self.assertFalse([l for l in out if l.startswith("Not saved yet")], out)
+        self.write("stories.md", "# Stories, this session's\n")
+        code, out = self.done("fit", "--session", mine)
+        self.assertEqual(code, 1)
+        self.assertIn("Not saved yet: 1 Log file(s) not committed (?? stories.md). Save it before you leave this"
+                      " session.", out)
+
+    def test_done_releases_the_sessions_claims_and_it_goes_on_idle_with_its_key(self):
+        self.entry("consolidated")
+        self.repo()
+        key = check.logfiles.new_session(self.root, {})
+        other = check.logfiles.new_session(self.root, {})
+        for k in (key, other):
+            record = check.logfiles.read_session(self.root, k)
+            record["claims"] = ["stories.md"] if k == key else ["profile.md"]
+            check.logfiles.write_session(self.root, k, record)
+        code, out = self.done("fit", "--session", key)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(check.logfiles.read_session(self.root, key)["claims"], [])
+        self.assertEqual(check.logfiles.read_session(self.root, other)["claims"], ["profile.md"])   # only its own
+        ctx = check.Context("fit", root=self.root, session=key)   # a later mode in this session goes on with the key
+        self.assertEqual(check.check_session_key(ctx)[0], ["session: %s" % key])
+        self.assertEqual(self.done("log", "--session", key)[0], 0)
+        self.assertEqual(self.done("fit", "--session", "notes")[0], 2)
+        self.assertEqual(self.done("fit", "--session")[0], 2)
+        record = check.logfiles.read_session(self.root, other)
+        self.assertEqual(self.done("deploy", "--session", other)[0], 2)
+        self.assertEqual(check.logfiles.read_session(self.root, other), record)   # a usage error releases nothing
 
     def test_uncommitted_talking_points_and_guard_files_count(self):
         self.entry("consolidated")

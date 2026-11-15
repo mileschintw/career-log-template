@@ -3,11 +3,14 @@
 session left (SKILL.md › Commits).
 
   python3 -I <root>/tools/sync.py pull [--root <root>]            (Windows: py -3 -I ...)
-  python3 -I <root>/tools/sync.py commit [--root <root>] [--no-push] <subject> -- <path>...
+  python3 -I <root>/tools/sync.py commit [--root <root>] [--no-push] [--session <key>] <subject> -- <path>...
   python3 -I <root>/tools/sync.py push [--root <root>]
   python3 -I <root>/tools/sync.py status [--root <root>] [-- <path>...]
-  python3 -I <root>/tools/sync.py settle commit [--root <root>] [--no-push] [--subject <subject>] [-- <path>...]
-  python3 -I <root>/tools/sync.py settle discard [--root <root>] [--sources-checked] [-- <path>...]
+  python3 -I <root>/tools/sync.py settle commit [--root <root>] [--no-push] [--session <key>] [--subject <subject>] [-- <path>...]
+  python3 -I <root>/tools/sync.py settle discard [--root <root>] [--session <key>] [--sources-checked] [-- <path>...]
+  python3 -I <root>/tools/sync.py claim [--root <root>] --session <key> -- <path>...
+  python3 -I <root>/tools/sync.py release [--root <root>] --session <key> -- <path>...
+  python3 -I <root>/tools/sync.py end [--root <root>] --session <key>
 
 <root> is the Log's root, by default the folder above this script's. The Log's own files are
 logfiles.LOG_PATHS (AGENTS.md › Changes); Engine files and the ignored inbox are never settled.
@@ -18,19 +21,32 @@ Otherwise `git pull --ff-only`: `pull: up to date`, `pull: ok (<n> new commit(s)
 remote` with no origin. When origin cannot be reached (no network, a host that does not resolve
 or answer) it prints `pull: offline (origin unreachable, working on the local copy)` and ends with
 `sync: ok`. An unattended run (CAREER_LOG_UNATTENDED) pulls even with uncommitted Log changes,
-which it leaves as they are (scan.md › unattended), so that its own commit is not pushed from
+which it leaves as they are (scan.md › Schedule), so that its own commit is not pushed from
 behind. When the pull fails any other way (it would not fast-forward, the remote refuses the
 login), it prints `pull: refused`, git's message indented, and a `next: stop:` line (exit 1).
 
 commit: refuses without a repo-local identity (`git config --local user.email`, SETUP.md step 3),
 and on any branch except the default one (when origin says which) and the scan draft branches
-(`scan/<name>`). Then it adds each path by name (a folder adds what is under it; a deleted file is
-committed as deleted), commits those paths only, whatever else is staged, as <subject>, and pushes
-the branch to origin.
+(`scan/<name>`); that `next: stop:` line also tells a session in another worktree of this Log not
+to push its head to the default branch instead. Then it adds each path by name (a folder adds what
+is under it; a deleted file is committed as deleted), commits those paths only, whatever else is
+staged, as <subject>, and pushes the branch to origin.
 Done when `git status --short -- <path>...` prints nothing and, once pushed, `origin/<branch>..HEAD`
 counts 0. It
 prints `committed: [<branch> <sha>] <subject>` (or `commit: nothing to commit` when the paths
 match HEAD; it still pushes), `pushed: origin/<branch>` (or `push: no remote`), and `sync: ok`.
+Sessions (ADR 0014): <key> is the session key tools/check.py printed on its `session:` line at this
+session's first Trigger check (logfiles.SESSIONS/<key>/ holds its baseline and claims). Before adding
+anything, commit holds each changed Log file among the paths (or under a folder among them) that
+another session has claimed, with a `held: <path> (session <other key>)` line, and each one in this
+session's baseline (uncommitted when it started, so not its own) with a `held: <path> (uncommitted
+when this session started)` line; then a `next: stop:` line, the only place the user is asked whether
+another session is still going (on their word that it has ended, `end --session <its key>` releases
+its claims), commits nothing and exits 1. Otherwise it claims each changed file it commits and each
+file path it names, which stay this session's until it releases them. While another session holds
+claims, a commit without --session stops with a `session: none given` line and a `next: stop:` line
+naming the flag. --run <run key> (the `run:` key of scan.py run) stands for the session that run
+recorded (scan.py run --session), for one release; a run that recorded none stands for no session.
 A path neither on disk nor known to git (an optional file the mode names that does not exist) is
 left out, with a `skipped: <path>` line; when every path is, it is a usage error. The subject is
 the mode's message, or a `commit: <subject>` line another tool printed. --no-push commits and
@@ -41,7 +57,7 @@ Two sessions in one Log: a git add, commit, restore or rebase that finds `.git/i
 session's git step holds the index) tries again, LOCK_TRIES times LOCK_WAIT seconds apart, before it
 stops. A push origin refuses as non-fast-forward (another clone pushed first) runs `git pull --rebase
 --autostash` once, printing `push: rebased on origin/<branch>`, and pushes again; each uncommitted
-file keeps its time on disk, which tools/check.py reads. A rebase that fails is undone (`git rebase
+file keeps its time on disk. A rebase that fails is undone (`git rebase
 --abort`) and the push stops as a refused one does.
 
 push: pushes the commits already on HEAD and not on origin (those a mode that commits nothing left,
@@ -56,14 +72,28 @@ nothing.
 
 settle commit: commits every Log change (or only the paths given) as `commit` does, with the subject
 `log: changes left uncommitted (<files>)` (the file names, comma-separated, or `<n> files` for more
-than three), or --subject for a bulk change's yes; --no-push as for commit.
-settle discard: puts every Log change (or only the paths given) back as HEAD has it: a changed or
+than three), or --subject for a bulk change's yes; --no-push and --session (or --run) as for commit.
+It is how a baseline file is settled, on the user's yes: it holds a file another session has claimed,
+not one in this session's baseline, and claims nothing.
+settle discard: puts every Log change (or only the paths given) back as HEAD has it, unless a session
+(other than --session's) has claimed one: then it holds them as commit does and changes nothing. A changed or
 deleted file is restored (`restored: <path>`), a new one deleted (`deleted: <path>`). A new file
 under sources/ may be an original an import moved out of sources/inbox/, the user's only copy: while
 any is in the set, it changes nothing, prints `new source: <path>` for each and a `next: now,
 first:` line, and exits 1. Move each such original back into sources/inbox/ under its old name,
 then run it again with --sources-checked to delete the rest. Done when `status` prints `log
 changes: none` (for the paths given, when given).
+
+claim: claims each path (a Log file, or a folder of the Log) for the session, before its first edit:
+`claimed: <path>` each (`(already)` when it held it). All or none: a path another session has claimed
+gets an `owned: <path> (session <other key>)` line and one in this session's baseline a `baseline:
+<path> (uncommitted when this session started)` line, then the `next: stop:` line commit's `held:`
+lines get; nothing is claimed (exit 1). A claim lasts until the session's Next up (tools/check.py
+done --session), its end, or its release. release: hands paths on (a brief's *You own:* line):
+`released: <path>`, or `not claimed: <path> (by session <key>)`. end: releases every claim of the
+session, printing `released:` lines and `session: <key> ended (...)`: run by a session that closes
+without Next up, or for another session on the user's word that it has ended. Neither deletes the
+session's record: an idle session keeps its key. Time never releases a claim.
 
 Every run ends with `sync: ok` (exit 0), or with a `next:` line the agent follows (exit 1). Exit 2
 on a bad argument. -h or --help prints this text and exits 0. Standard library only, Python 3.11+.
@@ -76,9 +106,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I leaves thi
 sys.dont_write_bytecode = True   # no tools/__pycache__ left in the Log
 import logfiles
 
-USAGE = ("usage: sync.py pull | commit [--no-push] <subject> -- <path>... | push | status [-- <path>...]"
-         " | settle commit [--no-push] [--subject <subject>] [-- <path>...]"
-         " | settle discard [--sources-checked] [-- <path>...]   (each takes --root <root>)")
+USAGE = ("usage: sync.py pull | commit [--no-push] [--session <key>] <subject> -- <path>..."
+         " | push | status [-- <path>...]"
+         " | settle commit [--no-push] [--session <key>] [--subject <subject>] [-- <path>...]"
+         " | settle discard [--session <key>] [--sources-checked] [-- <path>...]"
+         " | claim --session <key> -- <path>... | release --session <key> -- <path>... | end --session <key>"
+         "   (each takes --root <root>; --run <run key> stands for --session for one release)")
 SOURCES = "sources/"
 UNATTENDED = bool(os.environ.get("CAREER_LOG_UNATTENDED"))
 LOCK_TRIES = 10   # another session's git step holds .git/index.lock: try again, LOCK_WAIT seconds apart
@@ -184,7 +217,9 @@ def log_branch(root):
     if not current or (default and current != default and not current.startswith("scan/")):
         raise Stop("branch: %s (default: %s)" % (current or "detached HEAD", default or "unknown"),
                    "next: stop: a Log commit goes to the default branch (SKILL.md › Commits): show the"
-                   " user this line and ask how to go on.")
+                   " user this line and ask how to go on. A session in another worktree of this Log never"
+                   " pushes its head to the default branch to get round this: the user saves the change"
+                   " from a session on the main checkout.")
     return current, default
 
 
@@ -196,7 +231,103 @@ def known(root, path):
                 or logfiles.git_run(root, "ls-tree", "-r", "--name-only", "HEAD", "--", path).stdout.strip())
 
 
-def commit(root, subject, paths, push_too=True):
+def known_session(root, session):
+    """Stop when a session key names no record in this Log."""
+    if logfiles.read_session(root, session) is None:
+        raise Stop("session: %s unknown (no record of it in %s/)" % (session, logfiles.SESSIONS),
+                   "next: stop: use the key this session's first Trigger check printed on its `session:` line; when"
+                   " that is this key, run the Trigger check again with --session %s, which makes its record again,"
+                   " then this command. Nothing was changed." % session)
+
+
+def held(root, paths, session=None, settling=False):
+    """Stop when a changed Log file among paths (or under a folder among them), or a file path named, is claimed by
+    another session, or, unless settling (`settle commit`, on the user's yes), a changed one is in this session's
+    baseline; with no session, stop whenever any session holds claims. Otherwise claim, for session, each changed
+    file and each named file (not when settling); the changed files."""
+    logfiles.uncommitted(root)   # a baseline entry whose file matches HEAD lapses first
+    if session:
+        known_session(root, session)
+    with logfiles.session_lock(root):
+        records = logfiles.sessions(root)
+        changed = [p for _, p in log_changes(root, paths)]
+        if session is None:
+            holding = sorted(k for k, r in records.items() if r["claims"])
+            if holding:
+                raise Stop("session: none given (%s %s claims in this Log)"
+                           % (", ".join("session " + k for k in holding), "holds" if len(holding) == 1 else "hold"),
+                           "next: stop: while another session holds claims, a commit names its own session: run this"
+                           " command again with --session <key>, <key> the one this session's first Trigger check"
+                           " printed on its `session:` line. Nothing was committed.")
+            return changed
+        mine = records[session]
+        named = [p for p in paths if not os.path.isdir(os.path.join(root, p))]   # a file claimed before its first edit is unchanged
+        theirs = [(p, k) for p, k in ((p, logfiles.holder(records, p, but=session))
+                                      for p in dict.fromkeys(changed + named)) if k]
+        base = [] if settling else [p for p in changed if p in mine["baseline"] and p not in dict(theirs)]
+        if theirs or base:
+            raise Stop(*(["held: %s (session %s)" % t for t in theirs]
+                         + ["held: %s (uncommitted when this session started)" % p for p in base]
+                         + [stop_line(theirs, base, session)]))
+        if not settling:
+            mine["claims"] = list(dict.fromkeys(mine["claims"] + changed + named))
+            logfiles.write_session(root, session, mine)
+        return changed
+
+
+def stop_line(theirs, base, session):
+    """The `next: stop:` line under `held:` (or `owned:`) lines: the only place the user is asked whether another
+    session is still going (ADR 0014)."""
+    parts = ["next: stop: nothing was changed."]
+    if theirs:
+        keys = sorted({k for _, k in theirs})
+        parts.append("%s %s claimed by session %s: hand the rows to that session to write, or ask the user whether"
+                     " session %s is still going; when they say it has ended, `sync.py end --session %s` releases"
+                     " its claims, then run this command again."
+                     % (", ".join(dict.fromkeys(p for p, _ in theirs)), "is" if len(theirs) == 1 else "are",
+                        ", ".join(keys), " or ".join(keys), keys[0] if len(keys) == 1 else "<its key>"))
+    if base:
+        parts.append("%s had uncommitted changes when this session started, which are not this session's: settle"
+                     " %s first as the Trigger check's `next:` line says, on the user's yes (`sync.py settle commit"
+                     " --session %s -- <file>`, or `settle discard`), then run this command again."
+                     % (", ".join(base), "it" if len(base) == 1 else "them", session))
+    parts.append("Or leave the held files out, naming the others after `--`.")
+    return " ".join(parts)
+
+
+def claim(root, session, paths):
+    """`claim`: claim each path for session (all or none): refused when another session claimed it (`owned:`) or
+    it is in this session's baseline and not yet settled."""
+    logfiles.uncommitted(root)   # a settled baseline entry lapses first
+    known_session(root, session)
+    with logfiles.session_lock(root):
+        records = logfiles.sessions(root)
+        mine = records[session]
+        theirs = [(p, k) for p, k in ((p, logfiles.holder(records, p, but=session)) for p in paths) if k]
+        base = [p for p in paths if p in mine["baseline"] and p not in dict(theirs)]
+        if theirs or base:
+            raise Stop(*(["owned: %s (session %s)" % t for t in theirs]
+                         + ["baseline: %s (uncommitted when this session started)" % p for p in base]
+                         + [stop_line(theirs, base, session)]))
+        out = ["claimed: %s%s" % (p, " (already)" if p in mine["claims"] else "") for p in paths]
+        mine["claims"] = list(dict.fromkeys(mine["claims"] + paths))
+        logfiles.write_session(root, session, mine)
+    return out
+
+
+def release(root, session, paths=None):
+    """`release` (paths) and `end` (None: every claim): the released claims' lines."""
+    known_session(root, session)
+    gone = logfiles.release_claims(root, session, paths)
+    out = ["released: %s" % p for p in gone]
+    out += ["not claimed: %s (by session %s)" % (p, session) for p in paths or [] if p not in gone]
+    if paths is None:
+        out.append("session: %s ended (%s)" % (session, "%d claim(s) released" % len(gone) if gone else "it held no claim"))
+    return out
+
+
+def commit(root, subject, paths, push_too=True, session=None, settling=False):
+    held(root, paths, session, settling)
     name, email = logfiles.local_identity(root)
     if not email:
         raise Stop("identity: none (no repo-local git identity)",
@@ -220,6 +351,7 @@ def commit(root, subject, paths, push_too=True):
                        "next: stop: show the user git's message above and ask how to go on.")
         sha = logfiles.git(root, "rev-parse", "--short", "HEAD").strip()
         out.append("committed: [%s %s] %s" % (current, sha, subject))
+        logfiles.uncommitted(root)   # each baseline entry this commit settled lapses now, before a later edit
     try:
         out += push(root, current, default) if push_too else ["push: held (--no-push)"]
     except Stop as e:   # the commit line stays in the output: the commit is made
@@ -244,8 +376,7 @@ def push(root, current, default, made=True):
     out = []
     if p.returncode != 0 and ("non-fast-forward" in p.stderr or "fetch first" in p.stderr):
         # another clone pushed first: put this branch's commits on top of origin's once, then push again
-        # --autostash puts back the uncommitted files with a new time on disk; keep each one's own time,
-        # which tools/check.py reads to tell a live run's files from an earlier session's
+        # --autostash puts back the uncommitted files with a new time on disk; keep each one's own time
         times = {f: os.stat(os.path.join(root, f)) for f in logfiles.git(root, "diff", "--name-only", "-z", "HEAD").split("\0")
                  if f and os.path.isfile(os.path.join(root, f))}
         r = git_locked(root, "pull", "--rebase", "--autostash", "origin", current, timeout=180)
@@ -296,17 +427,37 @@ def left_subject(paths):
     return "log: changes left uncommitted (%s)" % (", ".join(names) if len(names) <= 3 else "%d files" % len(names))
 
 
-def settle_commit(root, subject, paths, push_too=True):
+def settle_commit(root, subject, paths, push_too=True, session=None):
     files = [p for _, p in log_changes(root, paths)]
     if not files:
         return ["log changes: none"]
-    return commit(root, subject or left_subject(files), files, push_too)
+    return commit(root, subject or left_subject(files), files, push_too, session, settling=True)
 
 
-def settle_discard(root, paths, sources_checked):
+def settle_discard(root, paths, sources_checked, session=None):
+    logfiles.uncommitted(root)   # a baseline entry whose file matches HEAD lapses first
+    if session:
+        known_session(root, session)
+    with logfiles.session_lock(root):   # no session claims a file between the check and the restore
+        out = put_back(root, paths, sources_checked, session)
+    logfiles.uncommitted(root)   # each baseline entry put back lapses now, before a later edit
+    left = log_changes(root, paths)
+    if left:
+        raise Stop(*(out + ["log change: %s %s" % f for f in left]
+                     + ["next: stop: these Log changes are still there: show the user this output and"
+                        " ask how to go on."]))
+    return out
+
+
+def put_back(root, paths, sources_checked, session):
+    """settle discard's restore and delete, under the session lock; its lines."""
     files = log_changes(root, paths)
     if not files:
         return ["log changes: none"]
+    records = logfiles.sessions(root)
+    theirs = [(p, k) for p, k in ((p, logfiles.holder(records, p, but=session)) for _, p in files) if k]
+    if theirs:   # another session's work: never put back here
+        raise Stop(*(["held: %s (session %s)" % t for t in theirs] + [stop_line(theirs, [], session)]))
     new = [p for s, p in files if s == "??" or "A" in s]   # " A": added with intent to add (add -N)
     sources = [p for p in new if p.startswith(SOURCES)]
     if sources and not sources_checked:
@@ -330,11 +481,6 @@ def settle_discard(root, paths, sources_checked):
         except FileNotFoundError:
             pass
         out.append("deleted: %s" % p)
-    left = log_changes(root, paths)
-    if left:
-        raise Stop(*(out + ["log change: %s %s" % f for f in left]
-                     + ["next: stop: these Log changes are still there: show the user this output and"
-                        " ask how to go on."]))
     return out
 
 
@@ -348,6 +494,38 @@ def split_paths(args):
     return args[:i], [p.replace("\\", "/") for p in args[i + 1:]]
 
 
+def session_flags(args, flags=("--session", "--run")):
+    """({flag: key} for --session and --run, the other arguments) from the arguments before `--`; None on a bad
+    key, a flag given twice, or both flags."""
+    keys, words, it = {}, [], iter(args)
+    for a in it:
+        if a in flags:
+            value = next(it, None)
+            if a in keys or not logfiles.SESSION_KEY.match(value or ""):
+                return None
+            keys[a] = value
+        else:
+            words.append(a)
+    return (keys, words) if len(keys) < 2 else None
+
+
+def commit_flags(root, args):
+    """(--no-push given, the session the commit runs under (logfiles.commit_session), the other arguments) from the
+    arguments before `--`; None on a bad flag."""
+    parsed = session_flags(args)
+    if parsed is None:
+        return None
+    keys, words = parsed
+    hold = "--no-push" in words
+    return hold, logfiles.commit_session(root, keys.get("--session"), keys.get("--run")), [w for w in words if w != "--no-push"]
+
+
+def file_paths(paths):
+    """The Log paths given to claim or release: / separators, no leading `./`; None when one is no Log path."""
+    out = [p[2:] if p.startswith("./") else p for p in paths]
+    return out if out and all(logfiles.is_log_path(p) for p in out) else None
+
+
 def run(root, args):
     if not os.path.isdir(os.path.join(root, ".git")) and not os.path.isfile(os.path.join(root, ".git")):
         raise logfiles.LogError("%s is not a git repository's root" % root)
@@ -359,29 +537,47 @@ def run(root, args):
     if cmd == "status":
         before, paths = split_paths(rest)
         return status(root, paths) if not before and paths != [] else None
+    if cmd in ("claim", "release", "end"):
+        before, paths = split_paths(rest)
+        parsed = session_flags(before, ("--session",))
+        if parsed is None or parsed[1] or "--session" not in parsed[0]:
+            return None
+        session = parsed[0]["--session"]
+        if cmd == "end":
+            return release(root, session) if paths is None else None
+        paths = file_paths(paths or [])
+        if paths is None:
+            return None
+        return claim(root, session, paths) if cmd == "claim" else release(root, session, paths)
     if cmd == "commit":
         before, paths = split_paths(rest)
-        hold = "--no-push" in before[:1]
-        before = before[1:] if hold else before
+        flags = commit_flags(root, before)
+        if flags is None:
+            return None
+        hold, session, before = flags
         if len(before) != 1 or not before[0].strip() or not paths:
             return None
         missing = [p for p in paths if not known(root, p)]
         if len(missing) == len(paths):
             raise ValueError("no such file, and none git knows: %s" % ", ".join(missing))
         kept = [p for p in paths if p not in missing]
-        return ["skipped: %s (no such file, and none git knows)" % p for p in missing] + commit(root, before[0], kept, not hold)
+        return ["skipped: %s (no such file, and none git knows)" % p for p in missing] + commit(root, before[0], kept, not hold, session)
     if cmd == "settle" and rest[:1] in (["commit"], ["discard"]):
         before, paths = split_paths(rest[1:])
         if paths == []:
             return None
         if rest[0] == "commit":
-            subject, hold = None, "--no-push" in before[:1]
-            before = before[1:] if hold else before
+            flags = commit_flags(root, before)
+            if flags is None:
+                return None
+            hold, session, before = flags
+            subject = None
             if before[:1] == ["--subject"] and len(before) == 2 and before[1].strip():
                 subject, before = before[1], []
-            return settle_commit(root, subject, paths, not hold) if not before else None
-        if before in ([], ["--sources-checked"]):
-            return settle_discard(root, paths, bool(before))
+            return settle_commit(root, subject, paths, not hold, session) if not before else None
+        parsed = session_flags(before, ("--session",))
+        if parsed and parsed[1] in ([], ["--sources-checked"]):
+            return settle_discard(root, paths, bool(parsed[1]), parsed[0].get("--session"))
     return None
 
 

@@ -1253,7 +1253,7 @@ class ScanTest(unittest.TestCase):
                                        "capture: .build/runs/2026-10-22-041500-2/posting.md",
                                        "paste: .build/runs/2026-10-22-041500-2/pasted.md",
                                        "sessions: posting-2026-10-22-041500-2, company-lookup-2026-10-22-041500-2, "
-                                       "lca-2026-10-22-041500-2", "live: .build/runs/2026-10-22-041500-2/live"])
+                                       "lca-2026-10-22-041500-2"])
         a, b = (r[2].split(": ", 1)[1] for r in runs[:2])
         pages = {"https://a.example/1": "Engineer A, ", "https://b.example/1": "Engineer B, "}
         old_get = scan.http_get
@@ -1280,60 +1280,48 @@ class ScanTest(unittest.TestCase):
         code, lines = self.run_tool("run")   # today is 2026-10-22: a week back is 2026-10-15
         self.assertEqual(code, 0, lines)
         self.assertEqual(lines[0], "run: 2026-10-22-041500")
-        self.assertEqual(lines[6:], ["deleted: .build/runs/2026-10-14-235959/ (older than 7 days)"])
+        self.assertEqual(lines[5:], ["deleted: .build/runs/2026-10-14-235959/ (older than 7 days)"])
         self.assertEqual(sorted(os.listdir(os.path.join(self.root, ".build/runs"))),
                          ["2026-10-15-000000-2", "2026-10-21-120000", "2026-10-22-041500", "notes"])
 
     def test_run_help_states_the_constants(self):
         """#662 (B4): the help's days and hours are the ones the code uses."""
         self.assertIn("(older than %d days)" % scan.RUN_KEEP_DAYS, scan.__doc__)
-        self.assertIn("live for %d more hours" % scan.logfiles.LIVE_HOURS, scan.__doc__)
+        self.assertIn("`<folder>/%s`" % scan.logfiles.RUN_SESSION, scan.__doc__)
         self.assertIn("`<folder>/%s`" % scan.RUN_PASTE, scan.__doc__)
 
-    # ---- a run's live marker: another session's Trigger check leaves its files alone (#609) ----
+    # ---- a run marks no file as its own; it records the session that started it (ADR 0014) ----
 
-    def live(self, key):
-        return os.path.join(self.root, ".build/runs", key, "live")
-
-    def test_run_writes_a_live_marker_with_start_and_mode(self):
-        before = time.time()
-        code, lines = self.run_tool("run", "--mode", "write")
+    def test_run_records_its_session_and_writes_no_live_marker(self):
+        code, lines = self.run_tool("run", "--mode", "write", "--session", "2026-10-22-040000")
         self.assertEqual(code, 0, lines)
         key = lines[0].split(": ", 1)[1]
-        self.assertEqual(lines[5], "live: .build/runs/%s/live" % key)
-        marker = json.loads(self.read(".build/runs/%s/live" % key))
-        self.assertEqual(marker["mode"], "write")
-        start = datetime.datetime.fromisoformat(marker["start"])
-        self.assertIsNotNone(start.tzinfo)
-        self.assertLessEqual(abs(start.timestamp() - before), 2)
+        self.assertEqual(lines[5], "session: 2026-10-22-040000")
+        self.assertEqual(self.read(".build/runs/%s/session" % key), "2026-10-22-040000\n")
+        self.assertEqual(scan.logfiles.run_session(self.root, key), "2026-10-22-040000")
+        self.assertEqual(sorted(os.listdir(os.path.join(self.root, ".build/runs", key))), ["session"])
         self.assertTrue(lines[-1].startswith("next: now, first: send the user this line"), lines)
         self.assertIn("another session in this same folder", lines[-1])
         code, lines = self.run_tool("run")
-        self.assertIsNone(json.loads(self.read(".build/runs/%s/live" % lines[0].split(": ", 1)[1]))["mode"])
-        self.assertFalse([l for l in lines if l.startswith("next:")], lines)   # the hint is write's only
+        key = lines[0].split(": ", 1)[1]
+        self.assertEqual(os.listdir(os.path.join(self.root, ".build/runs", key)), [])   # no session given: none recorded
+        self.assertIsNone(scan.logfiles.run_session(self.root, key))
+        self.assertFalse([l for l in lines if l.startswith(("next:", "session:", "live:"))], lines)   # the hint is write's only
+        self.assertEqual(self.run_tool("run", "--session", "notes")[0], 2)
 
-    def test_touch_refreshes_the_marker_and_end_deletes_it(self):
+    def test_touch_and_end_still_run_and_change_nothing(self):
+        """For one release a mode file's older `run --touch` and `end` lines still run (ADR 0014)."""
         code, lines = self.run_tool("run")
         key = lines[0].split(": ", 1)[1]
-        marker = self.read(".build/runs/%s/live" % key)
-        os.utime(self.live(key), (time.time() - 3 * 3600,) * 2)   # untouched for 3 hours: expired
-        self.assertEqual(self.run_tool("run", "--touch", key), (0, ["live: .build/runs/%s/live (touched)" % key]))
-        self.assertLessEqual(time.time() - os.path.getmtime(self.live(key)), 60)
-        self.assertEqual(self.read(".build/runs/%s/live" % key), marker)   # its start stays
-        self.assertEqual(self.run_tool("end", key), (0, ["live: .build/runs/%s/live (deleted)" % key]))
-        self.assertFalse(os.path.exists(self.live(key)))
-        self.assertTrue(os.path.isdir(os.path.dirname(self.live(key))))   # the folder stays
-        self.assertEqual(self.run_tool("end", key), (0, ["live: none (%s has no live marker)" % key]))
-
-    def test_touch_makes_an_ended_marker_again_from_its_key(self):
-        os.makedirs(os.path.join(self.root, ".build/runs/2026-10-22-041500-2"))
-        self.assertEqual(self.run_tool("run", "--touch", "2026-10-22-041500-2"),
-                         (0, ["live: .build/runs/2026-10-22-041500-2/live (made again)"]))
-        start = datetime.datetime.fromisoformat(json.loads(self.read(".build/runs/2026-10-22-041500-2/live"))["start"])
-        self.assertEqual(start.replace(tzinfo=None), datetime.datetime(2026, 10, 22, 4, 15, 0))
-        self.assertEqual(self.run_tool("run", "--touch", "2026-10-22-999999")[0], 1)   # no such folder
+        for args in (("run", "--touch", key), ("end", key)):
+            code, out = self.run_tool(*args)
+            self.assertEqual(code, 0, out)
+            self.assertEqual(len(out), 1, out)
+            self.assertTrue(out[0].startswith("live: none (") and "sync.py end --session" in out[0], out)
+        self.assertEqual(os.listdir(os.path.join(self.root, ".build/runs", key)), [])
         self.assertEqual(self.run_tool("end", "../x")[0], 1)
-        self.assertEqual(self.run_tool("run", "--touch", "2026-10-22-041500-2", "--mode", "fit")[0], 2)
+        self.assertEqual(self.run_tool("run", "--touch", key, "--mode", "fit")[0], 2)
+        self.assertEqual(self.run_tool("run", "--touch", key, "--session", "2026-10-22-040000")[0], 2)
 
     # ---- a capture's state: open or closed, and how it was read (#568) ----
 

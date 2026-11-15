@@ -56,23 +56,23 @@ def init(path):
     git(path, "config", "core.autocrlf", "false")
 
 
-V010 = {
+V020 = {
     "tools/export-template.sh": ALLOW,
-    "tools/TEMPLATE_VERSION": OLD_SHA + "\n",
+    "tools/TEMPLATE_VERSION": "0.2.0\nsource 0000000\n",
     "skills/career-log/SKILL.md": "intro\nrule one\nrule two\nrule three\nend\n",
     "skills/career-log/modes/old.md": "an old mode\n",
-    "AGENTS.md": "agents 0.1.0\n",
+    "AGENTS.md": "agents 0.2.0\n",
     ".gitignore": ".build/\n",
 }
-V020 = {
-    "tools/TEMPLATE_VERSION": "0.2.0\nsource 1111111\n",
-    "skills/career-log/SKILL.md": "intro 0.2.0\nrule one\nrule two\nrule three\nend\n",
+V030 = {
+    "tools/TEMPLATE_VERSION": "0.3.0\nsource 1111111\n",
+    "skills/career-log/SKILL.md": "intro 0.3.0\nrule one\nrule two\nrule three\nend\n",
     "skills/career-log/modes/old.md": None,
     "skills/career-log/modes/upgrade.md": "the mode\n",
-    "docs/upgrades/upgrade-0.2.0.md": "# Upgrade to 0.2.0\n",
+    "docs/upgrades/upgrade-0.3.0.md": "# Upgrade to 0.3.0\n",
     "tools/export-template.sh": 'ALLOW="skills tools AGENTS.md .gitignore docs/upgrades"\n',
 }
-V021 = {"tools/TEMPLATE_VERSION": "0.2.1\nsource 2222222\n", "AGENTS.md": "agents 0.2.1\n"}
+V031 = {"tools/TEMPLATE_VERSION": "0.3.1\nsource 2222222\n", "AGENTS.md": "agents 0.3.1\n"}
 
 
 class Upgrade(unittest.TestCase):
@@ -80,7 +80,7 @@ class Upgrade(unittest.TestCase):
         self.tmp = tempfile.mkdtemp()
         self.tpl = os.path.join(self.tmp, "tpl")
         init(self.tpl)
-        for version, files in (("0.1.0", V010), ("0.2.0", V020), ("0.2.1", V021)):
+        for version, files in (("0.2.0", V020), ("0.3.0", V030), ("0.3.1", V031)):
             write(self.tpl, files)
             git(self.tpl, "add", "-A")
             git(self.tpl, "commit", "-q", "-m", version)
@@ -90,7 +90,7 @@ class Upgrade(unittest.TestCase):
     def tearDown(self):
         rmtree(self.tmp)
 
-    def log(self, version="0.1.0", edits=None):
+    def log(self, version="0.2.0", edits=None):
         """A Log made from v<version>, its first commit only, with edits committed on top."""
         log = os.path.join(self.tmp, "log")
         init(log)
@@ -127,14 +127,14 @@ class Upgrade(unittest.TestCase):
                               "AGENTS.md": None})
         rc, out = self.plan(log)
         self.assertEqual(rc, 0, out)
-        self.assertIn("from: 0.1.0", out)
-        self.assertIn("to: 0.2.1", out)
-        # 0.2.0 has a guide, so it is a step of its own; 0.2.1 is the target
-        self.assertEqual([l for l in out if l.startswith("step: ")], ["step: 0.2.0", "step: 0.2.1"])
+        self.assertIn("from: 0.2.0", out)
+        self.assertIn("to: 0.3.1", out)
+        # 0.3.0 has a guide, so it is a step of its own; 0.3.1 is the target
+        self.assertEqual([l for l in out if l.startswith("step: ")], ["step: 0.3.0", "step: 0.3.1"])
         self.assertIn("edited: skills/career-log/SKILL.md", out)
         self.assertIn("added: skills/career-log/modes/mine.md", out)
         self.assertIn("removed: AGENTS.md", out)
-        self.assertIn("dropped: skills/career-log/modes/old.md", out)   # 0.2.0 deletes it
+        self.assertIn("dropped: skills/career-log/modes/old.md", out)   # 0.3.0 deletes it
         self.assertNotIn("entries/2026-01-x.md", "\n".join(out))
 
     def test_plan_mode_change_is_no_edit(self):
@@ -149,18 +149,18 @@ class Upgrade(unittest.TestCase):
         self.assertFalse([l for l in out if l.startswith(("edited:", "added:", "removed:"))], out)
 
     def test_plan_to_an_older_target(self):
-        rc, out = self.plan(self.log(), "--to", "0.2.0")
+        rc, out = self.plan(self.log(), "--to", "0.3.0")
         self.assertEqual(rc, 0, out)
-        self.assertEqual([l for l in out if l.startswith("step: ")], ["step: 0.2.0"])
+        self.assertEqual([l for l in out if l.startswith("step: ")], ["step: 0.3.0"])
 
     def test_plan_patch_without_guide_is_one_step(self):
-        rc, out = self.plan(self.log("0.2.0"))
+        rc, out = self.plan(self.log("0.3.0"))
         self.assertEqual(rc, 0, out)
-        self.assertIn("from: 0.2.0", out)
-        self.assertEqual([l for l in out if l.startswith("step: ")], ["step: 0.2.1"])
+        self.assertIn("from: 0.3.0", out)
+        self.assertEqual([l for l in out if l.startswith("step: ")], ["step: 0.3.1"])
 
     def test_plan_already_there(self):
-        rc, out = self.plan(self.log("0.2.1"))
+        rc, out = self.plan(self.log("0.3.1"))
         self.assertEqual(rc, 0)
         self.assertTrue(out[-1].startswith("OK: "), out)
 
@@ -171,18 +171,18 @@ class Upgrade(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertTrue(out[0].startswith("stop: uncommitted"), out)
 
-    def test_plan_before_010(self):
-        # the 0.1.0 guide lives in a later release's docs/upgrades/
-        write(self.tpl, {"docs/upgrades/upgrade-0.1.0.md": "# Upgrade to 0.1.0\n"})
-        git(self.tpl, "add", "-A")
-        git(self.tpl, "commit", "-q", "-m", "0.3.0")
-        git(self.tpl, "tag", "v0.3.0")
-        for stamp in ("04708244d0ef0000000000000000000000000000\n", None):
+    def test_plan_below_the_floor_stops_at_the_bridge(self):
+        # #685: a Log older than 0.2.0 (0.1.0's commit stamp, another commit, no stamp, a semver below the
+        # floor) is told to upgrade to v0.3.2 first, and nothing is planned
+        for stamp in (OLD_SHA + "\n", "04708244d0ef0000000000000000000000000000\n", None, "0.1.0\nsource 0000000\n"):
             log = self.log(edits={"tools/TEMPLATE_VERSION": stamp})
             rc, out = self.plan(log)
             self.assertEqual(rc, 1, out)
-            self.assertIn("before 0.1.0", out[0])
-            self.assertTrue(os.path.exists(os.path.join(log, ".build", "upgrade", "upgrade-0.1.0.md")))
+            self.assertEqual(len(out), 1, out)
+            self.assertTrue(out[0].startswith("stop: this Log is from before %s (" % upgrade.FLOOR), out)
+            self.assertIn("upgrade to v%s first" % upgrade.BRIDGE, out[0])
+            self.assertEqual((upgrade.FLOOR, upgrade.BRIDGE), ("0.2.0", "0.3.2"))   # the docs name both
+            self.assertFalse(os.path.exists(upgrade.state_path(log)))
             rmtree(log)
 
     def test_plan_next_stamp(self):
@@ -194,23 +194,23 @@ class Upgrade(unittest.TestCase):
         log = self.log(edits={".gitignore": ".build/\n# mine\nprivate/\n",
                               "skills/career-log/modes/mine.md": "my own mode\n"})
         self.assertEqual(self.plan(log)[0], 0)
-        rc, out = self.run_tool("engine", log, "0.2.1")
+        rc, out = self.run_tool("engine", log, "0.3.1")
         self.assertEqual(rc, 1, out)   # out of order
-        rc, out = self.run_tool("engine", log, "0.2.0")
+        rc, out = self.run_tool("engine", log, "0.3.0")
         self.assertEqual(rc, 0, out)
-        self.assertIn("done: deleted skills/career-log/modes/old.md (not in 0.2.0)", out)
-        self.assertTrue(out[-1].endswith("upgrade-0.2.0.md"), out)
+        self.assertIn("done: deleted skills/career-log/modes/old.md (not in 0.3.0)", out)
+        self.assertTrue(out[-1].endswith("upgrade-0.3.0.md"), out)
         self.assertTrue(os.path.exists(os.path.join(log, "skills/career-log/modes/mine.md")))
         self.assertTrue(os.path.exists(os.path.join(log, "skills/career-log/modes/upgrade.md")))
         with open(os.path.join(log, ".gitignore"), encoding="utf-8") as f:
             self.assertEqual(f.read(), ".build/\n\n# This Log's own lines\n# mine\nprivate/\n")
         git(log, "add", "-A")
-        git(log, "commit", "-q", "-m", "upgrade: Template 0.2.0")
-        rc, out = self.run_tool("engine", log, "0.2.1")
+        git(log, "commit", "-q", "-m", "upgrade: Template 0.3.0")
+        rc, out = self.run_tool("engine", log, "0.3.1")
         self.assertEqual(rc, 0, out)
         self.assertEqual(out[-1], "guide: none")
         with open(os.path.join(log, "tools/TEMPLATE_VERSION"), encoding="utf-8") as f:
-            self.assertEqual(f.readline().strip(), "0.2.1")
+            self.assertEqual(f.readline().strip(), "0.3.1")
         with open(os.path.join(log, ".gitignore"), encoding="utf-8") as f:
             self.assertEqual(f.read().count("private/"), 1)
         with open(os.path.join(log, "entries/2026-01-x.md"), encoding="utf-8") as f:
@@ -220,7 +220,7 @@ class Upgrade(unittest.TestCase):
         log = self.log(edits={"skills/career-log/SKILL.md": "intro\nrule one\nrule two\nrule three, mine\nend\n"})
         self.plan(log)
         self.assertEqual(self.run_tool("reapply", log, "--all")[0], 1)   # steps left
-        for v in ("0.2.0", "0.2.1"):
+        for v in ("0.3.0", "0.3.1"):
             self.assertEqual(self.run_tool("engine", log, v)[0], 0)
             git(log, "add", "-A")
             git(log, "commit", "-q", "-m", "upgrade: Template " + v)
@@ -228,7 +228,7 @@ class Upgrade(unittest.TestCase):
         rc, out = self.run_tool("reapply", log, "--all")
         self.assertEqual((rc, out), (0, ["merged: skills/career-log/SKILL.md"]))
         with open(os.path.join(log, "skills/career-log/SKILL.md"), encoding="utf-8") as f:
-            self.assertEqual(f.read(), "intro 0.2.0\nrule one\nrule two\nrule three, mine\nend\n")
+            self.assertEqual(f.read(), "intro 0.3.0\nrule one\nrule two\nrule three, mine\nend\n")
         # the same line changed on both sides is a conflict, markers in the file
         git(log, "checkout", "--", ".")
         state = upgrade.load(log)
@@ -236,8 +236,8 @@ class Upgrade(unittest.TestCase):
         write(log, {"skills/career-log/SKILL.md": "intro, mine\nrule one\nrule two\nrule three\nend\n"})
         git(log, "commit", "-q", "-am", "edit")
         state["start"] = git(log, "rev-parse", "HEAD").strip()
-        write(log, {"skills/career-log/SKILL.md": "intro 0.2.0\nrule one\nrule two\nrule three\nend\n"})
-        git(log, "commit", "-q", "-am", "back to 0.2.0's")
+        write(log, {"skills/career-log/SKILL.md": "intro 0.3.0\nrule one\nrule two\nrule three\nend\n"})
+        git(log, "commit", "-q", "-am", "back to 0.3.0's")
         upgrade.save(log, state)
         rc, out = self.run_tool("reapply", log, "skills/career-log/SKILL.md")
         self.assertEqual((rc, out), (1, ["conflict: skills/career-log/SKILL.md: 1"]))
@@ -247,7 +247,7 @@ class Upgrade(unittest.TestCase):
     def test_reapply_file_gone_in_new_version(self):
         log = self.log(edits={"skills/career-log/modes/old.md": "an old mode, mine\n"})
         self.plan(log)
-        for v in ("0.2.0", "0.2.1"):
+        for v in ("0.3.0", "0.3.1"):
             self.run_tool("engine", log, v)
             git(log, "add", "-A")
             git(log, "commit", "-q", "-m", "upgrade: Template " + v)
@@ -258,38 +258,38 @@ class Upgrade(unittest.TestCase):
     def test_engine_needs_the_step_before_committed(self):
         log = self.log()
         self.plan(log)
-        self.assertEqual(self.run_tool("engine", log, "0.2.0")[0], 0)
-        rc, out = self.run_tool("engine", log, "0.2.1")
+        self.assertEqual(self.run_tool("engine", log, "0.3.0")[0], 0)
+        rc, out = self.run_tool("engine", log, "0.3.1")
         self.assertEqual(rc, 1, out)
         self.assertTrue(out[0].startswith("stop: uncommitted changes; commit the step before"), out)
 
     def test_plan_path_joining_the_engine(self):
-        # 0.3.0 makes docs/ Engine; the Log had its own docs/notes.md and docs/mine.md, and 0.3.0
+        # 0.4.0 makes docs/ Engine; the Log had its own docs/notes.md and docs/mine.md, and 0.4.0
         # brings a docs/notes.md of its own
         write(self.tpl, {"tools/export-template.sh": 'ALLOW="skills tools AGENTS.md .gitignore docs"\n',
                          "docs/notes.md": "the release's notes\n"})
         git(self.tpl, "add", "-A")
-        git(self.tpl, "commit", "-q", "-m", "0.3.0")
-        git(self.tpl, "tag", "v0.3.0")
-        log = self.log("0.2.1", edits={"docs/notes.md": "my notes\n", "docs/mine.md": "mine\n"})
+        git(self.tpl, "commit", "-q", "-m", "0.4.0")
+        git(self.tpl, "tag", "v0.4.0")
+        log = self.log("0.3.1", edits={"docs/notes.md": "my notes\n", "docs/mine.md": "mine\n"})
         rc, out = self.plan(log)
         self.assertEqual(rc, 0, out)
         self.assertIn("overwritten: docs/notes.md", out)
         self.assertIn("added: docs/mine.md", out)
-        self.assertEqual(self.run_tool("engine", log, "0.3.0")[0], 0)
+        self.assertEqual(self.run_tool("engine", log, "0.4.0")[0], 0)
         self.assertTrue(os.path.exists(os.path.join(log, "docs", "mine.md")))
 
     def test_reapply_keeps_crlf_files_whole(self):
         # a file the Log checks out with CRLF (.gitattributes eol=crlf) merges line by line
         write(self.tpl, {".gitattributes": "*.ps1 text eol=crlf\n", "tools/setup.ps1": "a\nb\nc\nd\n",
-                         "tools/TEMPLATE_VERSION": "0.2.2\nsource 4444444\n"})
+                         "tools/TEMPLATE_VERSION": "0.3.2\nsource 4444444\n"})
         git(self.tpl, "add", "-A")
-        git(self.tpl, "commit", "-q", "-m", "0.2.2")
-        git(self.tpl, "tag", "v0.2.2")
-        write(self.tpl, {"tools/setup.ps1": "a 0.3.0\nb\nc\nd\n", "tools/TEMPLATE_VERSION": "0.3.0\nsource 5555555\n"})
-        git(self.tpl, "commit", "-q", "-am", "0.3.0")
-        git(self.tpl, "tag", "v0.3.0")
-        log = self.log("0.2.2")
+        git(self.tpl, "commit", "-q", "-m", "0.3.2")
+        git(self.tpl, "tag", "v0.3.2")
+        write(self.tpl, {"tools/setup.ps1": "a 0.4.0\nb\nc\nd\n", "tools/TEMPLATE_VERSION": "0.4.0\nsource 5555555\n"})
+        git(self.tpl, "commit", "-q", "-am", "0.4.0")
+        git(self.tpl, "tag", "v0.4.0")
+        log = self.log("0.3.2")
         p = os.path.join(log, "tools", "setup.ps1")
         os.remove(p)
         git(log, "checkout", "--", "tools/setup.ps1")   # with the eol rule now in place
@@ -299,13 +299,13 @@ class Upgrade(unittest.TestCase):
             f.write(b"a\r\nb\r\nc\r\nd mine\r\n")
         git(log, "commit", "-q", "-am", "edit")
         self.plan(log)
-        self.run_tool("engine", log, "0.3.0")
+        self.run_tool("engine", log, "0.4.0")
         git(log, "add", "-A")
-        git(log, "commit", "-q", "-m", "upgrade: Template 0.3.0")
+        git(log, "commit", "-q", "-m", "upgrade: Template 0.4.0")
         rc, out = self.run_tool("reapply", log, "tools/setup.ps1")
         self.assertEqual((rc, out), (0, ["merged: tools/setup.ps1"]))
         with open(p, "rb") as f:
-            self.assertEqual(f.read(), b"a 0.3.0\r\nb\r\nc\r\nd mine\r\n")
+            self.assertEqual(f.read(), b"a 0.4.0\r\nb\r\nc\r\nd mine\r\n")
 
     def front_page_release(self, version, head, zh_head):
         page = head + "## Entries\n\n| Entry |\n|---|\n\n## License\n\nMIT\n"
@@ -333,19 +333,19 @@ class Upgrade(unittest.TestCase):
             sys.modules.pop("logfiles", None)
 
     def upgrade_front_page(self, edits):
-        self.front_page_release("0.2.2", "# career-log\n\nStart with setup.\n\n", "# career-log\n\n先跑 setup。\n\n")
-        self.front_page_release("0.3.0", "# career-log\n\nStart with the guide.\n\n", "# career-log\n\n先讀指南。\n\n")
-        log = self.log("0.2.2", edits)
+        self.front_page_release("0.3.2", "# career-log\n\nStart with setup.\n\n", "# career-log\n\n先跑 setup。\n\n")
+        self.front_page_release("0.4.0", "# career-log\n\nStart with the guide.\n\n", "# career-log\n\n先讀指南。\n\n")
+        log = self.log("0.3.2", edits)
         self.assertEqual(self.plan(log)[0], 0)
-        rc, out = self.run_tool("engine", log, "0.3.0")
+        rc, out = self.run_tool("engine", log, "0.4.0")
         self.assertEqual(rc, 0, out)
         return log, out
 
     def test_engine_updates_an_unedited_front_page(self):
         row = "## Entries\n\n| Entry |\n|---|\n| [mine](entries/2026-01-x.md) |\n\n## License\n\nMIT\n"
         log, out = self.upgrade_front_page({"README.md": "# career-log\n\nStart with setup.\n\n" + row})
-        self.assertIn("done: README.md above `## Entries`: the Template's page, unedited, now 0.3.0's", out)
-        self.assertIn("done: README.zh-TW.md above `## 條目`: the Template's page, unedited, now 0.3.0's", out)
+        self.assertIn("done: README.md above `## Entries`: the Template's page, unedited, now 0.4.0's", out)
+        self.assertIn("done: README.zh-TW.md above `## 條目`: the Template's page, unedited, now 0.4.0's", out)
         with open(os.path.join(log, "README.md"), encoding="utf-8") as f:
             self.assertEqual(f.read(), "# career-log\n\nStart with the guide.\n\n" + row)   # the entry row stays
         self.assertEqual(self.front_page_state(log), "template")
@@ -374,17 +374,17 @@ class Upgrade(unittest.TestCase):
     def test_plan_flags_after_plan_name_the_flag(self):
         # only plan takes --to and --url; the others say which flag and why, from the plan's state
         log = self.log()
-        rc, out = self.run_tool("engine", log, "0.2.0", "--url", self.url)
+        rc, out = self.run_tool("engine", log, "0.3.0", "--url", self.url)
         self.assertEqual(rc, 2, out)
         self.assertEqual(out, ["error: engine takes no --url: plan fetches the releases, and engine reads them from there"])
         self.assertEqual(self.plan(log)[0], 0)
-        rc, out = self.run_tool("engine", log, "0.2.0", "--url", self.url)
+        rc, out = self.run_tool("engine", log, "0.3.0", "--url", self.url)
         self.assertEqual((rc, out), (2, ["error: engine takes no --url: plan fetched the releases (from %s), "
                                          "and engine reads them from there" % self.url]))
-        rc, out = self.run_tool("reapply", log, "--all", "--to", "0.2.1")
-        self.assertEqual((rc, out), (2, ["error: reapply takes no --to: plan set the target (0.2.1), "
+        rc, out = self.run_tool("reapply", log, "--all", "--to", "0.3.1")
+        self.assertEqual((rc, out), (2, ["error: reapply takes no --to: plan set the target (0.3.1), "
                                          "and reapply reads it from the plan"]))
-        rc, out = self.run_tool("clean", log, "--to", "0.2.1", "--url", self.url)
+        rc, out = self.run_tool("clean", log, "--to", "0.3.1", "--url", self.url)
         self.assertEqual(rc, 2, out)
         self.assertEqual([l.split(":")[1] for l in out], [" clean takes no --to", " clean takes no --url"])
         self.assertEqual(upgrade.load(log)["done"], [])   # nothing ran
@@ -463,33 +463,6 @@ class Source(unittest.TestCase):
                 with open(os.path.join(up, "upgrade-skeleton." + ext), encoding="utf-8") as f:
                     self.assertEqual(text, f.read(), "upgrade-next.%s differs from upgrade-skeleton.%s" % (ext, ext))
 
-    def test_020_guide_finds_direction_headings(self):
-        # #299: a direction.md heading tools/config.py cannot read is a migrate: line, until renamed
-        spec = importlib.util.spec_from_file_location("upgrade_020", os.path.join(REPO, "docs", "upgrades", "upgrade-0.2.0.py"))
-        guide = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(guide)
-        if not hasattr(guide, "check_direction"):
-            self.skipTest("the 0.2.0 guide no longer holds #299's check")
-        root = tempfile.mkdtemp()
-        self.addCleanup(rmtree, root)
-        os.makedirs(os.path.join(root, "tools"))
-        for name in ("config.py", "logfiles.py", "config.default.toml"):
-            shutil.copy(os.path.join(TOOLS, name), os.path.join(root, "tools", name))
-        self.assertEqual(guide.check_direction(root, False),
-                         [("migrate", "direction.md: tools/config.py cannot read target roles, sorting order, work authorisation,"
-                                      " visa sponsorship, other hard constraints, what to emphasise: direction.md is missing")])
-        with open(os.path.join(TOOLS, "template", "direction.md"), encoding="utf-8") as f:
-            template = f.read()
-        old = template.replace("## Target roles, ranked", "## Target roles")
-        write(root, {"direction.md": old})
-        self.assertEqual(guide.check_direction(root, False),
-                         [("migrate", "direction.md: tools/config.py cannot read target roles:"
-                                      " direction.md has no `## Target roles, ranked` section")])
-        write(root, {"direction.md": template})
-        self.assertEqual(guide.check_direction(root, False), [])
-        write(root, {"tools/config.py": "raise SystemExit(3)\n"})   # no lines at all is no all-clear
-        self.assertEqual([k for k, _ in guide.check_direction(root, False)], ["migrate"])
-
     def test_030_guide_moves_the_status_and_writes_the_table(self):
         # #574: an entry's status moves from its README row to its front matter, then the table is generated
         path = os.path.join(REPO, "docs", "upgrades", "upgrade-0.3.0.py")
@@ -530,92 +503,44 @@ class Source(unittest.TestCase):
         write(root, {"README.md": "# Log\n"})
         self.assertEqual([k for k, _ in guide.check_readme(root, False)], ["migrate"])
 
-    def test_020_guide_reviews_a_sponsorship_need_in_other_words(self):
-        # #284: a need for visa sponsorship with no Visa sponsorship needed line is a review: line
-        spec = importlib.util.spec_from_file_location("upgrade_020", os.path.join(REPO, "docs", "upgrades", "upgrade-0.2.0.py"))
-        guide = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(guide)
-        if not hasattr(guide, "check_visa_sponsorship"):
-            self.skipTest("the 0.2.0 guide no longer holds #284's check")
+    def test_guide_reviews_a_story_key_with_no_name_in_several_rows(self):
+        # #695: one section listed under several types with no name may hold several Stories
+        guides = sorted(f for f in os.listdir(os.path.join(REPO, "docs", "upgrades")) if re.fullmatch(r"upgrade-.*\.py", f))
+        guide = None
+        for name in guides:
+            with open(os.path.join(REPO, "docs", "upgrades", name), encoding="utf-8") as f:
+                if "def check_story_names(" in f.read():
+                    spec = importlib.util.spec_from_file_location("upgrade_695", os.path.join(REPO, "docs", "upgrades", name))
+                    guide = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(guide)
+        if guide is None:
+            self.skipTest("no guide holds #695's check")
         root = tempfile.mkdtemp()
         self.addCleanup(rmtree, root)
         os.makedirs(os.path.join(root, "tools"))
-        for name in ("config.py", "logfiles.py", "config.default.toml", "sponsorship.py"):
+        for name in ("entries.py", "logfiles.py"):
             shutil.copy(os.path.join(TOOLS, name), os.path.join(root, "tools", name))
-        with open(os.path.join(TOOLS, "template", "direction.md"), encoding="utf-8") as f:
-            template = f.read()
-        write(root, {"direction.md": template})
-        self.assertEqual(guide.check_visa_sponsorship(root, False), [])   # the Template's: all empty
-        constraints = "## Constraints\n"
-        for lines, found in (
-                ("- **Work authorisation:** Needs H-1B sponsorship (user, 2026-10-01)\n", ["Needs H-1B sponsorship"]),
-                ("- **Work authorisation:** F-1 OPT (user, 2026-10-01)\n- **Visa:** green card later (user, 2026-10-01)\n",
-                 ["F-1 OPT", "**Visa:** green card later"]),   # #377: OPT is a value the line takes
-                ("- **Work authorisation:** On CPT this year (user, 2026-10-01)\n", ["On CPT this year"]),
-                ("- Would opt for remote roles (user, 2026-10-01)\n", []),   # the verb is not OPT
-                ("- **Work authorisation:** F-1 OPT (user, 2026-10-01)\n"
-                 "- **Visa sponsorship needed:** OPT (user, 2026-10-01)\n", []),
-                ("- **Work authorisation:** Citizen, no sponsorship needed (user, 2026-10-01)\n", []),
-                ("- **Work authorisation:** Green card holder (user, 2026-10-01)\n", []),
-                ("- **Work authorisation:** EU citizen, no visa needed for EU roles (user, 2026-10-01)\n", []),
-                ("- **Work authorisation:** Needs H-1B sponsorship (user, 2026-10-01)\n"
-                 "- **Visa sponsorship needed:** H-1B (user, 2026-10-01)\n", [])):
-            write(root, {"direction.md": template.replace(constraints, constraints + lines, 1)})
-            got = guide.check_visa_sponsorship(root, False)
-            self.assertEqual([k for k, _ in got], ["review"] * len(found), lines)
-            for (_, text), f in zip(got, found):
-                self.assertIn(f, text)
-        # a line the tools cannot read is a migrate: line
-        write(root, {"direction.md": template.replace(
-            constraints, constraints + "- **Visa sponsorship needed:** yes (user, 2026-10-01)\n", 1)})
-        got = guide.check_visa_sponsorship(root, False)
-        self.assertEqual([k for k, _ in got], ["migrate"])
-        self.assertIn("`yes`", got[0][1])
+        w, g = "entries/2025-01-widget.md", "entries/2024-01-gadget.md"
+        index = ("# Stories\n\n| Question type | Stories |\n|---|---|\n"
+                 "| Conflict | [W](%s#contribution); [G](%s#pending) |\n"
+                 "| Failure | [W](%s#contribution) — the launch; [G](%s#pending); [W](%s#context \"origin\") |\n"
+                 "| Ownership | [W](%s#contribution); [W](%s#context \"origin\") |\n"
+                 "| Leadership | [G](%s#context) |\n") % (w, g, w, g, w, w, w, g)
+        write(root, {"entries/.keep": "", "stories.md": index})
+        self.assertEqual(list(guide.check_story_names(root, False)), [
+            ("review", "stories.md: %s#contribution: no name, in 3 rows: Conflict | Failure | Ownership" % w)])
+        write(root, {"stories.md": index.replace("#contribution)", '#contribution "launch")')})
+        self.assertEqual(list(guide.check_story_names(root, False)), [])
+        os.remove(os.path.join(root, "stories.md"))
+        self.assertEqual(list(guide.check_story_names(root, False)), [])
 
-    def test_020_guide_updates_template_text(self):
-        # #477: a line still as 0.1.0's Template wrote it becomes 0.2.0's; an edited line stays
-        spec = importlib.util.spec_from_file_location("upgrade_020", os.path.join(REPO, "docs", "upgrades", "upgrade-0.2.0.py"))
-        guide = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(guide)
-        if not hasattr(guide, "check_text_updates"):
-            self.skipTest("the 0.2.0 guide no longer holds #477's check")
-        for rel, old, new in guide.TEXT_UPDATES:   # the new line is the Template's own
-            with open(os.path.join(TOOLS, "template", *rel.split("/")), encoding="utf-8") as f:
-                self.assertIn(new, f.read().splitlines(), rel)
-        rel, old, new = guide.TEXT_UPDATES[0]
-        with open(os.path.join(TOOLS, "template", *rel.split("/")), encoding="utf-8") as f:
-            template = f.read()
-        root = tempfile.mkdtemp()
-        self.addCleanup(rmtree, root)
-        p = os.path.join(root, *rel.split("/"))
-        self.assertEqual(guide.check_text_updates(root, False), [])   # no file: nothing to do
-        for eol in ("\n", "\r\n"):
-            write(root, {rel: template.replace(new, old)})
-            with open(p, "rb") as f:
-                before = f.read().replace(b"\n", eol.encode())
-            with open(p, "wb") as f:
-                f.write(before)
-            self.assertEqual([k for k, _ in guide.check_text_updates(root, False)], ["apply"])
-            self.assertEqual([k for k, _ in guide.check_text_updates(root, True)], ["done"])
-            with open(p, "rb") as f:
-                self.assertEqual(f.read(), template.replace("\n", eol).encode())
-            self.assertEqual(guide.check_text_updates(root, False), [])
-            self.assertEqual(guide.check_text_updates(root, True), [])   # a second run changes nothing
-            with open(p, "rb") as f:
-                self.assertEqual(f.read(), template.replace("\n", eol).encode())
-        edited = template.replace(new, old.replace("Add a row", "Add a row (and a note)"))
-        write(root, {rel: edited})
-        self.assertEqual(guide.check_text_updates(root, True), [])
-        with open(p, encoding="utf-8", newline="") as f:
-            self.assertEqual(f.read(), edited)
-
-    def test_stamp_known_matches_010_guide(self):
-        guide = os.path.join(REPO, "docs", "upgrades", "upgrade-0.1.0.py")
-        if not os.path.exists(guide):
-            self.skipTest("no 0.1.0 guide here")
-        with open(guide, encoding="utf-8") as f:
-            sha = re.search(r'^ENGINE_VERSION = "([0-9a-f]{40})"', f.read(), re.M).group(1)
-        self.assertEqual(upgrade.STAMPS, {sha: "0.1.0"})
+    def test_no_guide_at_or_below_the_floor(self):
+        # #685: the guides and test scripts of 0.2.0 and before are gone; v0.3.2, the bridge, keeps them
+        for name in os.listdir(os.path.join(REPO, "docs", "upgrades")):
+            m = re.match(r"(?:upgrade|test)-(\d+\.\d+\.\d+)\.", name)
+            if m:
+                self.assertGreater(upgrade.key(m.group(1)), upgrade.key(upgrade.FLOOR), name)
+        self.assertLess(upgrade.key(upgrade.FLOOR), upgrade.key(upgrade.BRIDGE))
 
 
 if __name__ == "__main__":

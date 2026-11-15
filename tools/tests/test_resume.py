@@ -9,7 +9,7 @@ real PDF) build copies of the example resume in a temporary Log and are skipped,
 when tools/resume.py finds no TinyTeX or no poppler. With RESUME_TEST_INSTALL=1 the missing-package
 case also installs lipsum with tlmgr into the TeX tools/resume.py uses, and removes it afterwards.
 """
-import contextlib, importlib.util, io, os, re, shutil, subprocess, sys, tempfile, types, unittest, unittest.mock
+import contextlib, glob, importlib.util, io, os, re, shutil, subprocess, sys, tempfile, types, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS = os.path.dirname(HERE)
@@ -472,6 +472,53 @@ class OptionsTest(unittest.TestCase):
         self.assertEqual(e.exception.code, 2)
 
 
+class SearchTest(unittest.TestCase):
+    """_search with a home and LOCALAPPDATA whose names hold glob characters (#747): what ~ and a
+    variable put in is read literally; the pattern's own wildcards still match. Made-up programs in
+    a temporary home; the real home and its TinyTeX are never read."""
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.home = os.path.join(self.tmp, "dev[1]")
+        self.local = os.path.join(self.home, "AppData", "Local")
+        env = {"HOME": self.home, "USERPROFILE": self.home, "LOCALAPPDATA": self.local, "PATH": "",
+               "APPDATA": os.path.join(self.tmp, "none"), "ProgramData": os.path.join(self.tmp, "none")}
+        patch = unittest.mock.patch.dict(os.environ, env)
+        patch.start()
+        self.addCleanup(patch.stop)
+        for var in ("TINYTEX_BIN", "HOMEDRIVE", "HOMEPATH"):
+            os.environ.pop(var, None)
+
+    def program(self, folder, name):
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, name + (".exe" if resume.WINDOWS else ""))
+        with open(path, "w") as f:
+            f.write("")
+        os.chmod(path, 0o755)
+        return path
+
+    def test_a_built_in_pattern_under_the_home(self):
+        path = self.program(os.path.join(self.home, ".TinyTeX", "bin", "x86_64-linux"), "pdflatex")
+        self.assertEqual(resume.tex_bin("pdflatex"), path)
+
+    @unittest.skipUnless(resume.WINDOWS, "%LOCALAPPDATA% is expanded on Windows only")
+    def test_a_built_in_pattern_under_localappdata(self):
+        path = self.program(os.path.join(self.local, "Packages", "TeX.App", "LocalCache", "Roaming",
+                                         "TinyTeX", "bin", "windows"), "pdflatex")
+        self.assertEqual(resume.tex_bin("pdflatex"), path)
+
+    def test_a_variable_and_the_patterns_own_wildcards(self):
+        path = self.program(os.path.join(self.local, "Tool", "v2", "bin"), "tool")
+        self.assertEqual(resume._search("tool", "TOOL_BIN", ["$LOCALAPPDATA/T*/v[0-9]/bin/"]), path)
+        self.assertEqual(resume._search("tool", "TOOL_BIN", ["~/AppData/Local/Tool/v?/bin/"]), path)
+        self.assertIsNone(resume._search("tool", "TOOL_BIN", ["$LOCALAPPDATA/Tool/v[3-9]/bin/"]))
+
+    def test_an_unset_variable_stays_as_written(self):
+        os.environ.pop("NO_SUCH_VAR_747", None)
+        self.assertEqual(resume._expand("$NO_SUCH_VAR_747/b[i]n/"), "$NO_SUCH_VAR_747/b[i]n/")
+        self.assertEqual(resume._expand("$LOCALAPPDATA/x"), glob.escape(self.local) + "/x")
+
+
 class FakeTlmgrTest(unittest.TestCase):
     """--install-missing with made-up pdflatex and tlmgr: what it prints after an install."""
     def setUp(self):
@@ -705,6 +752,28 @@ class BuildTest(unittest.TestCase):
         code, out = run_tool("--baseline", "--root", self.root)
         self.assertEqual(code, 1, out)
         self.assertRegex(out.rstrip().splitlines()[-1], r"^FAIL: baseline: slack \d+, expected 321$")
+
+
+class PdfTextTest(unittest.TestCase):
+    """resume.pdf_text's failure contract, which check_save.pdf_words, application.pdf_text and
+    words_of adapt to (#791), with no poppler needed: (None, why) for each way it fails."""
+    def test_no_pdftotext(self):
+        with unittest.mock.patch.object(resume, "poppler_bin", return_value=None):
+            self.assertEqual(resume.pdf_text("x.pdf"), (None, resume.NO_PDFTOTEXT))
+
+    def test_a_pdftotext_that_cannot_start(self):
+        missing = os.path.join(tempfile.gettempdir(), "no-such-dir-791", "pdftotext")
+        with unittest.mock.patch.object(resume, "poppler_bin", return_value=missing):
+            text, why = resume.pdf_text("x.pdf")
+        self.assertIsNone(text)
+        self.assertTrue(why.startswith("pdftotext failed: "), why)
+
+    def test_a_pdftotext_that_fails(self):
+        # a Python that rejects pdftotext's arguments stands in: it exits non-zero with an error line
+        with unittest.mock.patch.object(resume, "poppler_bin", return_value=sys.executable):
+            text, why = resume.pdf_text("x.pdf")
+        self.assertIsNone(text)
+        self.assertRegex(why, r"^pdftotext failed: \S")
 
 
 if __name__ == "__main__":

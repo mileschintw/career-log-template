@@ -97,10 +97,23 @@ class Count:
         return "a whole number from %d to %d" % (self.lo, self.hi)
 
 
-# Each Config field: its allowed values (strings, and a Count for a number), or None for free text on
-# one line (a language's name).
+class LanguageTag:
+    """A BCP 47 language tag naming a language, with its script and region when they matter
+    (`zh-Hant-TW`, `en`, `es-419`): the user never types it; setup proposes it from their words."""
+    FORM = re.compile(r"[A-Za-z]{2,3}(?:-[A-Za-z]{4})?(?:-(?:[A-Za-z]{2}|\d{3}))?(?:-(?:[A-Za-z0-9]{5,8}|\d[A-Za-z0-9]{3}))*")
+
+    def __contains__(self, value):
+        return isinstance(value, str) and self.FORM.fullmatch(value) is not None
+
+    def __str__(self):
+        return "a BCP 47 language tag with its script and region, such as zh-Hant-TW"
+
+
+# Each Config field: its allowed values (strings, a Count for a number, a LanguageTag), or None for
+# free text on one line (a language's name).
 FIELDS = {
     "record_language": None,
+    "conversation_language": ("", LanguageTag()),
     "interviewer_profiles": ("never", "always"),
     "front_page": ("full", "trimmed"),
     "window": (Count(1, 90),),
@@ -196,12 +209,12 @@ def check_value(field, value):
             raise ConfigError("%s must be a string in quotes" % field)
         if not value.strip() or re.search(r'["\\\r\n]', value):
             raise ConfigError("%s must be one line of text, without quotes or backslashes" % field)
-    elif not any(value in a if isinstance(a, Count) else (isinstance(value, str) and value == a) for a in allowed):
+    elif not any((isinstance(value, str) and value == a) if isinstance(a, str) else value in a for a in allowed):
         raise ConfigError("%s must be %s, not %s" % (field, allowed_text(allowed), toml_value(value)))
 
 
 def allowed_text(allowed):
-    return " or ".join(str(a) if isinstance(a, Count) else '"%s"' % a for a in allowed)
+    return " or ".join('"%s"' % a if isinstance(a, str) else str(a) for a in allowed)
 
 
 def toml_value(value):

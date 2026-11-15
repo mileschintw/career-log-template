@@ -10,9 +10,7 @@
   python3 -I tools/scan.py prefilter <dir>
   python3 -I tools/scan.py screen <dir> --screen-budget <s> --fit-budget <f> [--sort [--give-up]]
   python3 -I tools/scan.py screen --check <results.jsonl> [--batch <batch.todo>]
-  python3 -I tools/scan.py run [--mode <mode>]
-  python3 -I tools/scan.py run --touch <key>
-  python3 -I tools/scan.py end <key>
+  python3 -I tools/scan.py run [--mode <mode>] [--session <session key>]
   python3 -I tools/scan.py fetch <capture path> <url>
   python3 -I tools/scan.py capture <capture path> <url> <page.json | text file> [--stand-in <API url> | --pasted]
   python3 -I tools/scan.py state <capture path>
@@ -180,24 +178,17 @@ key is the current one.
   <key>`, `folder:`, `capture:` (`<folder>/%(capture)s`, the run's capture path), `paste:`
   (`<folder>/%(paste)s`, where posting text the user pasted is saved before `capture --pasted`
   reads it) and `sessions: posting-<key>, company-lookup-<key>, lca-<key>` (its Browser sessions'
-  names). It also writes the run's live marker, `<folder>/%(live)s`: `{"start", "mode"}`, `start`
-  the time now (ISO 8601 with its UTC offset, to the second) and `mode` the --mode given (write,
-  fit) or null, and prints `live: <folder>/%(live)s`; with --mode write, its last line is a `next:
-  now, first:` line with the line to tell the user (write.md step 1: the first draft's wait, and
-  that another session in this folder can take the next posting). While the marker was touched in
-  the last %(hours)d hours, tools/check.py counts each uncommitted Log file changed since `start` as
-  this run's (a run in another session) and offers none of them for settle. It deletes each earlier
-  run's folder whose key's date is more than %(keep)d days before --date (no run lasts that long,
-  and the folder holds page text): one `deleted: %(runs)s/<key>/ (older than %(keep)d days)` line
-  each.
-- `run --touch <key>`: the run's heartbeat: sets its live marker's time to now, so the run stays
-  live for %(hours)d more hours; it prints `live: <folder>/%(live)s (touched)`. A run whose marker is
-  gone (ended by hand) gets it back, its `start` the time in its key: `live: <folder>/%(live)s (made
-  again)`.
-- `end <key>`: ends the run: deletes its live marker, `live: <folder>/%(live)s (deleted)`, or `live:
-  none (<key> has no live marker)`. The run's folder stays (the %(keep)d-day rule above deletes it).
-  It is the last step of a run that saved its work, and clears the marker of a session that ended
-  without one.
+  names). With --session <session key> (the `session:` line of tools/check.py), it records that key
+  in `<folder>/%(session)s` and prints `session: <session key>`, so that for one release `--run <key>`
+  on tools/sync.py commit and tools/check_save.py --commit stands for that session. A run marks no
+  Log file as its own: a session's claims do (ADR 0014). With --mode write, its last line is a
+  `next: now, first:` line with the line to tell the user (write.md step 1: the first draft's wait,
+  and that another session in this folder can take the next posting). It deletes each earlier run's
+  folder whose key's date is more than %(keep)d days before --date (no run lasts that long, and the
+  folder holds page text): one `deleted: %(runs)s/<key>/ (older than %(keep)d days)` line each.
+- `run --touch <key>` and `end <key>`: kept for one release, so a mode file's older line still runs;
+  each changes nothing and prints a `live: none (...)` line saying so: a session's claims last until
+  its Next up (tools/check.py done --session) or `tools/sync.py end --session <session key>`.
 - `fetch`: the plain fetch of a posting's own page (browser.md › Fallback order item 1, for scan's
   captures): a GET of <url>, its HTML read as the text a reader sees (no script, style or template).
   It refuses a posting API or JSON endpoint (an `api.` host, an `/api/` path, Workday's `/wday/cxs/`,
@@ -343,7 +334,7 @@ key is the current one.
 Exit 0 on success, 1 when a step refuses (a report name taken, a URL in no report, a file that does
 not parse, no git), 2 on a bad argument. Standard library only, Python 3.11+.
 """
-import argparse, datetime, glob, hashlib, html.parser, json, os, re, shutil, subprocess, sys
+import argparse, datetime, hashlib, json, os, re, shutil, subprocess, sys
 import http.client, urllib.error, urllib.request
 from urllib.parse import parse_qsl, quote, urlsplit
 
@@ -364,13 +355,13 @@ DECLINED = REPORTS + "/scan-declined.jsonl"
 REPORT_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2})-scan(?:-(\d+))?\.md$")
 BRANCH_NAME = re.compile(r"^scan/(\d{4}-\d{2}-\d{2})(?:-(\d+))?$")
 PRUNE_DAYS = 90
-RUN_KEEP_DAYS = 7   # a posting run's folder older than this belongs to no live run (`run` deletes it)
+RUN_KEEP_DAYS = 7   # a posting run's folder older than this belongs to no run still going (`run` deletes it)
 RUN_CAPTURE = "posting.md"   # a run's capture, in its folder (fit.md › Capture a posting)
 RUN_PASTE = "pasted.md"   # the posting text the user pasted, in its folder, before it is captured
 SCREEN_LIST = "screen-list.jsonl"   # a scan run folder's Screen list (`screen`), beside SCREEN_DIR
 SCREEN_DIR = "screen"   # its batch files and Screen results
-__doc__ = __doc__ % {"runs": logfiles.RUNS, "live": logfiles.LIVE, "hours": logfiles.LIVE_HOURS,
-                     "keep": RUN_KEEP_DAYS, "capture": RUN_CAPTURE, "paste": RUN_PASTE}
+__doc__ = __doc__ % {"runs": logfiles.RUNS, "session": logfiles.RUN_SESSION, "keep": RUN_KEEP_DAYS,
+                     "capture": RUN_CAPTURE, "paste": RUN_PASTE}
 PENDING_COLUMNS = [("URL", "url"), ("Company", "company"), ("Role", "role"), ("Status", "status"),
                    ("Draft", "draft"), ("Fit map commit", "fit_commit")]
 STATUSES = ("draft to review", "undecided", "accepted", "declined")
@@ -462,7 +453,7 @@ read = logfiles.read_text
 def reports(root):
     """[(date, n, path)] of the scan reports, oldest first."""
     out = []
-    for p in glob.glob(os.path.join(glob.escape(os.path.join(root, REPORTS)), "*-scan*.md")):
+    for p in logfiles.glob_under(os.path.join(root, REPORTS), "*-scan*.md"):
         m = REPORT_NAME.match(os.path.basename(p))
         if m:
             out.append((m.group(1), int(m.group(2) or 1), p))
@@ -593,7 +584,7 @@ def next_name(root, date):
     for b in scan_branches(root):
         m = BRANCH_NAME.match(b)
         taken.add((m.group(1), int(m.group(2) or 1)))
-    for d in glob.glob(os.path.join(glob.escape(os.path.join(root, ".build", "scan")), "*")):
+    for d in logfiles.glob_under(os.path.join(root, ".build", "scan"), "*"):
         m = BRANCH_NAME.match("scan/" + os.path.basename(d))
         if m and os.path.isdir(d):
             taken.add((m.group(1), int(m.group(2) or 1)))
@@ -761,7 +752,7 @@ def cmd_explore(root, query):
         raise ScanError("explore: no source has a Query: line with %s; nothing written\n%s" % (QUERY_SLOT, "\n".join(lines)))
     name = explore_name(query)
     d = os.path.join(root, ".build", "scan", name)
-    captures = len(glob.glob(os.path.join(glob.escape(os.path.join(d, "postings")), "*.md")))
+    captures = len(logfiles.glob_under(os.path.join(d, "postings"), "*.md"))
     found_results = explore_results(d, screen_key(root)) if os.path.exists(os.path.join(d, SCREEN_DIR, "key")) else {}
     results = len({id(r) for r in found_results.values()})   # a result is found by each of its URL's keys
     os.makedirs(d, exist_ok=True)
@@ -781,7 +772,7 @@ def explore_results(d, key):
     if not os.path.exists(kfile) or read(kfile).strip() != key:
         return {}
     out = {}
-    for path in sorted(glob.glob(os.path.join(glob.escape(os.path.join(d, SCREEN_DIR)), "*.jsonl"))):
+    for path in sorted(logfiles.glob_under(os.path.join(d, SCREEN_DIR), "*.jsonl")):
         for _, r, _ in jsonl_lines(path):
             if r and urls(str(r.get("url") or "")):
                 r = dict(r, url=urls(str(r["url"]))[0])
@@ -844,7 +835,7 @@ def cmd_pending(root):
             state = cmd_fitmap(root, r["url"])[-1][len("fit map: "):]
         except ScanError as e:   # no git: the rows still show
             state = "unknown (%s)" % e
-        out.append("pending: " + " | ".join(str(c).replace("|", "\\|") for c in
+        out.append("pending: " + " | ".join(logfiles.md_cell(c) for c in
                                             (r["url"], r["company"], r["role"], r["status"], r["draft"]))
                    + " | fit map " + state)
     out.append("count: %d pending row(s)" % len(rows) if rows else "pending: none")
@@ -1198,7 +1189,7 @@ def capture_url(path):
 def earlier_captures(root, here):
     """{key: path} of the captures other runs left in .build/scan/*/postings/."""
     out = {}
-    for p in sorted(glob.glob(os.path.join(glob.escape(os.path.join(root, ".build", "scan")), "*", "postings", "*.md"))):
+    for p in sorted(logfiles.glob_under(os.path.join(root, ".build", "scan"), "*", "postings", "*.md")):
         if os.path.dirname(os.path.dirname(os.path.abspath(p))) == os.path.abspath(here):
             continue
         u = capture_url(p)
@@ -1319,7 +1310,7 @@ def screen_prepare(root, date, d, budget):
     write_jsonl(os.path.join(d, "not-screened.jsonl"), postings[budget:])
     sdir = os.path.join(d, SCREEN_DIR)
     os.makedirs(sdir, exist_ok=True)
-    for old in glob.glob(os.path.join(glob.escape(sdir), "*.todo")) + glob.glob(os.path.join(glob.escape(sdir), "*.jsonl")):
+    for old in logfiles.glob_under(sdir, "*.todo") + logfiles.glob_under(sdir, "*.jsonl"):
         os.remove(old)   # results of an earlier prepare may have another key
     with open(os.path.join(sdir, "key"), "w", encoding="utf-8", newline="\n") as f:
         f.write(key + "\n")
@@ -1374,7 +1365,7 @@ def screen_sort(root, date, d, budget, give_up=False):
         raise ScanError("the entry list or direction.md changed since `screen` without --sort ran (key %s):"
                         " run it again, then screen the batches it prints" % key)
     results, tiers = {}, fit.ranks(root)
-    for path in sorted(glob.glob(os.path.join(glob.escape(os.path.join(d, SCREEN_DIR)), "*.jsonl"))):
+    for path in sorted(logfiles.glob_under(os.path.join(d, SCREEN_DIR), "*.jsonl")):
         for r in read_jsonl(path):
             check_result(r, os.path.basename(path), tiers)
             for k in keys(str(r.get("url") or "")):
@@ -1419,44 +1410,12 @@ def screen_sort(root, date, d, budget, give_up=False):
     return out
 
 
-class PageText(html.parser.HTMLParser):
-    """The text a reader sees on an HTML page: no script, style or template, a line per block."""
-    SKIP = {"script", "style", "noscript", "template", "svg", "title"}
-    BLOCK = {"p", "div", "li", "ul", "ol", "br", "tr", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6",
-             "section", "article", "main", "header", "footer", "table", "dd", "dt"}
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.parts, self.skip = [], 0
-
-    def handle_starttag(self, tag, attrs):
-        if tag in self.SKIP:
-            self.skip += 1
-        elif tag in self.BLOCK:
-            self.parts.append("\n")
-
-    def handle_endtag(self, tag):
-        if tag in self.SKIP:
-            self.skip = max(0, self.skip - 1)
-        elif tag in self.BLOCK:
-            self.parts.append("\n")
-
-    def handle_data(self, data):
-        if not self.skip:
-            self.parts.append(data)
-
-    def text(self):
-        lines = (re.sub(r"[ \t ]+", " ", l).strip() for l in "".join(self.parts).split("\n"))
-        return "\n".join(l for l in lines if l)
-
-
 def page_text(body, content_type):
+    """The text a reader sees on a fetched page (logfiles.html_text), a line per block, blank lines dropped."""
     if "html" not in content_type.lower() and not re.match(r"\s*<", body):
         return body.strip()
-    p = PageText()
-    p.feed(body)
-    p.close()
-    return p.text()
+    lines = (re.sub(r"[ \t\xa0]+", " ", l).strip() for l in logfiles.html_text(body).split("\n"))
+    return "\n".join(l for l in lines if l)
 
 
 def http_get(url):
@@ -1558,46 +1517,24 @@ def run_dir(root, key):
     return os.path.join(root, *folder.split("/")), folder
 
 
-def cmd_touch(root, key):
-    path, folder = run_dir(root, key)
-    live = os.path.join(path, logfiles.LIVE)
-    if os.path.isfile(live):
-        os.utime(live)
-        return ["live: %s/%s (touched)" % (folder, logfiles.LIVE)]
-    if not os.path.isdir(path):
-        raise ScanError("run --touch: no run folder %s/" % folder)
-    m = logfiles.RUN_KEY.match(key)
-    start = datetime.datetime.fromisoformat("%sT%s:%s:%s" % m.group("date", "hh", "mm", "ss")).astimezone().isoformat()
-    logfiles.write_live(live, start, None)
-    return ["live: %s/%s (made again)" % (folder, logfiles.LIVE)]
+def cmd_no_marker(root, key, cmd):
+    """`run --touch` and `end`, kept for one release: a run has no live marker any more (ADR 0014)."""
+    run_dir(root, key)   # still a usage error for a key that is no run key
+    return ["live: none (%s changes nothing: a run no longer marks Log files as its own; a session's claims last"
+            " until its Next up or `tools/sync.py end --session <session key>`)" % cmd]
 
 
-def cmd_end(root, key):
-    path, folder = run_dir(root, key)
-    try:
-        os.remove(os.path.join(path, logfiles.LIVE))
-    except FileNotFoundError:
-        return ["live: none (%s has no live marker)" % key]
-    return ["live: %s/%s (deleted)" % (folder, logfiles.LIVE)]
-
-
-def cmd_run(root, date, mode=None):
+def cmd_run(root, date, mode=None, session=None):
     parent = os.path.join(root, *logfiles.RUNS.split("/"))
-    os.makedirs(parent, exist_ok=True)
-    now, n = clock(), 1
-    while True:   # mkdir makes the folder or fails, so two runs started the same second never share one
-        key = logfiles.run_key(date, now, n)
-        try:
-            os.mkdir(os.path.join(parent, key))
-            break
-        except FileExistsError:
-            n += 1
+    now = clock()
+    key = logfiles.make_keyed_folder(parent, lambda n: logfiles.run_key(date, now, n))
     folder = logfiles.run_folder(key)
-    logfiles.write_live(os.path.join(parent, key, logfiles.LIVE),
-                        datetime.datetime.now().astimezone().isoformat(timespec="seconds"), mode)
     out = ["run: %s" % key, "folder: %s" % folder, "capture: %s/%s" % (folder, RUN_CAPTURE),
            "paste: %s/%s" % (folder, RUN_PASTE),
-           "sessions: posting-%s, company-lookup-%s, lca-%s" % (key, key, key), "live: %s/%s" % (folder, logfiles.LIVE)]
+           "sessions: posting-%s, company-lookup-%s, lca-%s" % (key, key, key)]
+    if session:
+        logfiles.write_text(os.path.join(parent, key, logfiles.RUN_SESSION), session + "\n")
+        out.append("session: %s" % session)
     oldest = (datetime.date.fromisoformat(date) - datetime.timedelta(days=RUN_KEEP_DAYS)).isoformat()
     for name in sorted(os.listdir(parent)):
         m = logfiles.RUN_KEY.match(name)
@@ -1800,7 +1737,7 @@ def run_file(d, name):
 def fit_results(root, d):
     """{key: (file, result)} of the fit results in `<dir>/fit/`; ScanError listing every problem."""
     out, bad = {}, []
-    for path in sorted(glob.glob(os.path.join(glob.escape(os.path.join(d, "fit")), "*.jsonl"))):
+    for path in sorted(logfiles.glob_under(os.path.join(d, "fit"), "*.jsonl")):
         name = "fit/" + os.path.basename(path)
         try:
             r = fit.read_result(path)
@@ -2242,7 +2179,7 @@ def cmd_cleanup(root, dry_run):
                 out.append("kept: %s (%s)" % (branch, e))
                 continue
             out.append("deleted: %s (%s)%s" % (branch, ", ".join(done), " (dry run: nothing deleted)" if dry_run else ""))
-    for d in sorted(glob.glob(os.path.join(glob.escape(os.path.join(root, ".build", "scan")), "*"))):
+    for d in sorted(logfiles.glob_under(os.path.join(root, ".build", "scan"), "*")):
         m = BRANCH_NAME.match("scan/" + os.path.basename(d))
         if not (m and os.path.isdir(d)):
             continue
@@ -2586,6 +2523,7 @@ def main(argv):
     sp.add_argument("--batch")
     sp = sub.add_parser("run")
     sp.add_argument("--mode")
+    sp.add_argument("--session", metavar="SESSION_KEY")
     sp.add_argument("--touch", metavar="KEY")
     sp = sub.add_parser("end")
     sp.add_argument("key")
@@ -2663,8 +2601,11 @@ def main(argv):
         if bad:
             print("scan: %s" % bad)
             return 2
-    if a.cmd == "run" and a.touch and a.mode:
+    if a.cmd == "run" and a.touch and (a.mode or a.session):
         print("scan: run --touch <key> takes nothing else")
+        return 2
+    if a.cmd == "run" and a.session is not None and not logfiles.SESSION_KEY.match(a.session):
+        print("scan: run --session needs the key tools/check.py printed on its `session:` line")
         return 2
     if a.cmd == "drafts":
         if a.check:
@@ -2697,11 +2638,11 @@ def main(argv):
         elif a.cmd == "screen":
             lines = cmd_screen(root, a.date, a.dir, a.screen_budget, a.fit_budget, a.sort, a.give_up)
         elif a.cmd == "run" and a.touch:
-            lines = cmd_touch(root, a.touch)
+            lines = cmd_no_marker(root, a.touch, "run --touch")
         elif a.cmd == "run":
-            lines = cmd_run(root, a.date, a.mode)
+            lines = cmd_run(root, a.date, a.mode, a.session)
         elif a.cmd == "end":
-            lines = cmd_end(root, a.key)
+            lines = cmd_no_marker(root, a.key, "end")
         elif a.cmd == "fetch":
             lines = cmd_fetch(root, a.path, a.url)
         elif a.cmd == "capture":

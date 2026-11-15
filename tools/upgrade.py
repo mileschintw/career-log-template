@@ -16,9 +16,9 @@ commit to go back to), one `step: <version>` line per Engine replacement in orde
 release has an upgrade guide, then the target), and the Engine files this Log changed since its
 version: `edited:` (changed), `added:` (the Log's own file, kept), `removed:` (deleted),
 `overwritten:` (the Log's own file at a path a step's release has: replaced), and `dropped:` (an
-Engine file the target no longer has, which a step deletes). A Log
-before 0.1.0 (no stamp, or a commit other than 0.1.0's) gets `stop:` and 0.1.0's guide in
-.build/upgrade/.
+Engine file the target no longer has, which a step deletes). A Log before 0.2.0, the support floor
+(a stamp below it, a commit, or no stamp), gets `stop:` naming v0.3.2, the last release whose tool
+upgrades such a Log.
 engine: replaces the Engine paths with <version>'s (the next step of the plan): checks out its
 files, deletes the Engine files it no longer has unless the Log added them, and puts this Log's
 own .gitignore lines back under `# This Log's own lines`. A front page (README.md, README.zh-TW.md)
@@ -44,8 +44,10 @@ STAMP = "tools/TEMPLATE_VERSION"
 GITIGNORE = ".gitignore"
 OWN_LINES = "# This Log's own lines"
 SKELETON_ENGINE = [".github"]   # Engine paths the export takes from tools/template/, not ALLOW
-# Before semver, the stamp held the exported commit; 0.1.0's is the only one that names a release
-STAMPS = {"e6a5565a4807db1ab30b0eb70f8c2fd1421ac4df": "0.1.0"}
+# The support floor: the oldest release this tool upgrades from (the first with the upgrade mode). An
+# older Log upgrades to BRIDGE first, whose tool still reads the stamps of 0.1.0 and before (ADR 0011)
+FLOOR = "0.2.0"
+BRIDGE = "0.3.2"
 SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 GUIDE = "docs/upgrades/upgrade-%s.%s"
 # The front pages, with the heading of their entries section (tools/config.py reads above it)
@@ -94,7 +96,8 @@ def files(root, rev, paths):
 
 
 def stamped(root):
-    """The Log's version from tools/TEMPLATE_VERSION: a semver, `next`, or None (before 0.1.0)."""
+    """The Log's version from tools/TEMPLATE_VERSION: a semver, `next`, or None (no semver: a stamp of
+    0.1.0 or before, which held a commit, or no stamp)."""
     path = os.path.join(root, *STAMP.split("/"))
     try:
         with open(path, encoding="utf-8-sig") as f:   # -sig: a stamp saved with a BOM
@@ -103,7 +106,7 @@ def stamped(root):
         return None, "no " + STAMP
     if SEMVER.match(first) or first == "next":
         return first, first
-    return STAMPS.get(first), first or "an empty " + STAMP
+    return None, first or "an empty " + STAMP
 
 
 def gitignore_lines(text):
@@ -205,12 +208,9 @@ def plan(root, to=None, url=URL):
     version, seen = stamped(root)
     if version == "next":
         return 1, ["stop: %s says next, an unreleased build: there is no release to upgrade from" % STAMP]
-    if version is None:
-        copied = copy_guide(root, target, "0.1.0")
-        if not copied:
-            return 1, ["stop: this Log is from before 0.1.0 (%s), and v%s has no 0.1.0 guide" % (seen, target)]
-        return 1, ["stop: this Log is from before 0.1.0 (%s): follow %s first, then run this mode again"
-                   % (seen, copied[0].replace(os.sep, "/"))]
+    if version is None or key(version) < key(FLOOR):
+        return 1, ["stop: this Log is from before %s (%s), the oldest release this one upgrades from: upgrade to v%s "
+                   "first, with v%s's tool and mode, then run this mode again" % (FLOOR, seen, BRIDGE, BRIDGE)]
     if version not in tags:
         return 1, ["stop: this Log's version %s has no release tag at %s" % (version, url)]
     if key(target) <= key(version):

@@ -114,13 +114,29 @@ SETUP_HINT = "Run tools\\setup.ps1 first." if WINDOWS else "Run tools/setup.sh f
 APPDATA_STORE = "%LOCALAPPDATA%/Packages/*/LocalCache/Roaming/"
 
 
+_VARIABLE = re.compile(r"\$\w+|\$\{[^}]*\}" + (r"|%[^%]+%" if WINDOWS else ""))
+
+
+def _expand(pattern):
+    """`pattern` with a leading ~ (or ~user) and its $VAR, ${VAR} and, on Windows, %VAR% expanded,
+    what they put in glob-escaped: a home or LOCALAPPDATA holding [ ] * ? (a user name like dev[1])
+    is read literally, and the pattern's own wildcards still match (#747). An unset variable stays
+    as written. expandvars' rarer forms ($$, quotes, a - in a name) are not supported."""
+    def escaped(text, expand):
+        return text if expand(text) == text else glob.escape(expand(text))
+    tilde = re.match(r"~[^\\/]*", pattern)
+    head = escaped(tilde.group(), os.path.expanduser) if tilde else ""
+    rest = pattern[tilde.end():] if tilde else pattern
+    return head + _VARIABLE.sub(lambda m: escaped(m.group(), os.path.expandvars), rest)
+
+
 def _search(name, env_var, patterns, usable=lambda path: True, last=()):
-    """$env_var, then each glob pattern, then PATH, then the folders in `last`; tries Windows
-    extensions too."""
+    """$env_var, then each glob pattern (~ and variables expanded, see _expand), then PATH, then
+    the folders in `last`; tries Windows extensions too."""
     names = [name + ext for ext in (".exe", ".bat", ".cmd")] if WINDOWS else [name]
     dirs = [os.environ[env_var]] if os.environ.get(env_var) else []
     for pattern in patterns:
-        dirs += map(os.path.normpath, sorted(glob.glob(os.path.expandvars(os.path.expanduser(pattern)))))
+        dirs += map(os.path.normpath, sorted(glob.glob(_expand(pattern))))
     dirs += os.environ.get("PATH", "").split(os.pathsep)
     dirs += last
     for d in filter(None, dirs):
@@ -460,13 +476,34 @@ def lines_of(pdf):
     return pages
 
 
+NO_PDFTOTEXT = "no pdftotext (Machine setup installs poppler)"
+
+
+def pdf_text(pdf):
+    """(text, None): a PDF's text layer, through the pdftotext poppler_bin finds; or (None, why not):
+    NO_PDFTOTEXT, or `pdftotext failed: <its first error line>`. The one reader of a PDF's plain text
+    (#791): tools/check_save.py, tools/application.py and --same-text read it here."""
+    exe = poppler_bin("pdftotext")
+    if not exe:
+        return None, NO_PDFTOTEXT
+    no_error_dialogs()
+    try:
+        run = subprocess.run([exe, "-enc", "UTF-8", pdf, "-"], capture_output=True, encoding="utf-8", errors="replace")
+    except OSError as e:
+        return None, "pdftotext failed: %s" % " ".join(str(e).split())
+    if run.returncode:
+        why = next((l.strip() for l in (run.stderr or "").splitlines() if l.strip()), "exit %d" % run.returncode)
+        return None, "pdftotext failed: %s" % why
+    return run.stdout, None
+
+
 def words_of(pdf):
-    run = subprocess.run([find_poppler_bin("pdftotext"), "-enc", "UTF-8", pdf, "-"],
-                         capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if run.returncode != 0:
-        print(f"pdftotext failed on {pdf} (exit {run.returncode}): {run.stderr.strip()[:500]}")
+    find_poppler_bin("pdftotext")   # none: the setup hint, exit 2
+    text, why = pdf_text(pdf)
+    if text is None:
+        print(f"{why} ({pdf})")
         sys.exit(2)
-    return run.stdout.split()
+    return text.split()
 
 
 def compare_text(a, b):
@@ -633,7 +670,7 @@ def check(pdf, log_path=None, png=True, limit=(MAX_PAGES, "default"), outdir=Non
             notes.append(f"text layer: {txt} (read it: the order an ATS reads)")
     if png:
         subprocess.run([find_poppler_bin("pdftoppm"), "-png", "-r", "110", pdf, stem], check=True)
-        notes.append("png: " + ", ".join(sorted(glob.glob(glob.escape(stem) + "-*.png"))))
+        notes.append("png: " + ", ".join(sorted(logfiles.glob_under(os.path.dirname(stem), glob.escape(os.path.basename(stem)) + "-*.png"))))
 
     for n in notes:
         print("note:", n)
@@ -668,38 +705,11 @@ def build_and_check(tex, root, outdir=None, limit=None, install_missing=False, p
     return check(pdf, log, png, limit or page_limit(root), outdir, fails), pdf
 
 
-INPUT = re.compile(r"\\(?:input|include)\s*\{([^{}]+)\}")
-
-
-def local_inputs(tex):
-    """The files beside tex, relative to its folder, that it (or one of them) \\input's or
-    \\include's, the name as given or with .tex added; a name that is no file there (a
-    package's own file), that leaves the folder or that is tex itself is not one."""
-    folder = os.path.dirname(os.path.abspath(tex))
-    own = os.path.normcase(os.path.basename(tex))
-    found, todo = [], [tex]
-    while todo:
-        try:
-            text = logfiles.read_text(todo.pop())
-        except (OSError, UnicodeDecodeError):
-            continue
-        text = "\n".join(map(logfiles.tex_uncomment, text.split("\n")))   # a commented-out \input is not read
-        for name in INPUT.findall(text):
-            for cand in (name.strip(), name.strip() + ".tex"):
-                if os.path.isabs(cand) or os.path.splitdrive(cand)[0]:
-                    break
-                path = os.path.normpath(os.path.join(folder, cand))
-                rel = os.path.relpath(path, folder)
-                if (os.path.isfile(path) and rel != os.pardir and not rel.startswith(os.pardir + os.sep)
-                        and os.path.normcase(rel) != own and rel not in found):
-                    found.append(rel)
-                    todo.append(path)
-                    break
-    return found
+local_inputs = logfiles.local_inputs   # what a part of a resume is: logfiles.targets() reads it too
 
 
 def stale(folder, root):
-    texs = sorted(glob.glob(os.path.join(glob.escape(folder), "*.tex")))
+    texs = sorted(logfiles.glob_under(folder, "*.tex"))
     if not texs:   # a Log with no target resume yet
         print(f"note: no .tex in {folder}, so nothing to compare")
         return True

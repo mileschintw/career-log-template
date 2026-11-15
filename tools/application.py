@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The application folders and the other saved outputs of write (skills/career-log/modes/write.md):
 their names, earlier contact with a company, the starting copy, the save, the level, sent versions,
-a target's staleness, risks and the Past phrasings a save feeds.
+a target's staleness, risks and the Past phrasings a save feeds; and an interview's prep file, practice log
+and recruiter mail.
 
   python3 -I tools/application.py [--root <root>] <command> ...     (Windows: py -3 -I ...)
 
@@ -61,19 +62,36 @@ target's outputs/resumes/<target>.md, or a report outputs/reports/<YYYY-MM-DD>-<
   commit has touched yet (an Archived save's marker, written before that save's commit), it
   prints `not committed: <saved> has no commit yet: ...` in their place. It prints `unchanged:` for an output
   already at that level, and refuses a folder holding the marker's name in another case (Archived.md).
-- `sent <target> [--before <YYYY-MM-DD[ HH:MM]>] [--record <folder>]`: the last commit of
-  outputs/resumes/<target>.*, before that time with --before (a date alone: the end of that day),
+- `sent <target> [--before <when>] [--record <folder>]`: the last commit of
+  outputs/resumes/<target>.*, before that time with --before (a date alone: the end of that day;
+  <when> is YYYY-MM-DD[ HH:MM] in this machine's time zone, or a time with its zone, such as an
+  export's 2025-10-02T06:30:00Z, converted to it),
   as `version: <hash>:outputs/resumes/<target>.tex` and the applications.md cell, `cell:
   [<target> @ <short>](https://github.com/<owner>/<repo>/blob/<hash>/outputs/resumes/<target>.pdf)`
   for a GitHub origin, else the bare short hash. With --before, also `changed that day: 1 commit`
   (`<n> commits` otherwise): for a date given alone, more than 0 means the user is asked which
   version went. Without --before it fails while the target's files have uncommitted changes
   (commit first). --record writes the version to <folder>/sent-version.md.
-- `sent-show <ref> [--target <target>] [--out <file>] [--record <folder>]`: <ref> is an
-  applications.md cell, its permalink, `<hash>:<path>`, a folder with sent-version.md, or a bare
-  hash, alone or in the row's words (with --target). Prints `version: <hash>:<path>` (the path's .pdf read as .tex) and the file
-  at that commit, or writes its bytes to --out; a bare hash whose path is not at that commit prints
-  a `touched:` line per file it changed, and fails. --record as for sent.
+- `sent-candidates --before <when> [--limit <n>]`: for a resume sent before the Log's targets.
+  `before: <date>` (with `(<when> in this machine's time zone)` when <when> had a zone), `targets
+  saved by <date>: <target> (<first save>), ...` or `targets: none saved by <date>`, then one
+  `candidate: <hash>:sources/resumes/<file> | <date>` per file there whose name starts with a date
+  on or before it (newest first, the newest <n>, default 5; `| uncommitted: commit it first` for one
+  not committed as it is), `older: <n> more (--limit <all> shows them)`, then per consecutive pair,
+  older first, `diff: <older> -> <newer>: <n> line(s) differ` and a `- `/`+ ` line per changed line
+  (or `: identical`, `: not text`), and a `next:` line. `none: ...` and exit 1 when no file is that old.
+- `sent-show <ref>... [--target <target>] [--out <file>] [--record <folder>] [--known <text>]
+  [--today YYYY-MM-DD]`: <ref> is an applications.md cell, its permalink, `<hash>:<path>`, a folder
+  with sent-version.md, or a bare hash, alone or in the row's words (with --target). Prints `version:
+  <hash>:<path>` (the path's .pdf read as .tex) and the file at that commit, or writes its bytes to
+  --out; a bare hash whose path is not at that commit prints a `touched:` line per file it changed,
+  and fails. --record as for sent. Several refs (or a folder whose sent-version.md names several
+  candidates): `candidates: <n>`, `known: <text>` (from the folder), each `version:` and its file,
+  then per consecutive pair `differ: <a> -> <b>: ...` with the changed lines as sent-candidates
+  prints them; --out refuses. --record with several takes --known, the user's statement of which
+  went: sent-version.md gets one version per line, a blank line, `Known: <text> (user,
+  <--today>)`, and the `Differ:` lines in a diff block. The same candidates again leave it
+  `unchanged:`; another set is refused. The one-version form reads as before.
 - `stale <target>`: how far a Target version has fallen behind the Log since its last save (the last
   `write(` commit of outputs/resumes/<target>.*, else its last commit); it judges nothing. `saved:
   <short> <date> <subject>`, then `cited changed: <n>` and one `  <entry>: <n> commit(s), last <date>
@@ -89,8 +107,16 @@ target's outputs/resumes/<target>.md, or a report outputs/reports/<YYYY-MM-DD>-<
   another tool.
 - `risks <saved>`: `risks: <where>` and the `## Risks to handle in conversation` section saved with
   the output: an application folder's provenance.md; a folder with sent-version.md, the target's
-  .md at that commit; a target's .md or a report; else `risks: none (saved before the section
-  existed)`.
+  .md at that commit (with several candidates, the first that has the section); a target's .md or
+  a report; else `risks: none (saved before the section
+  existed)`. With several candidates in sent-version.md (provenance.md or not), then `candidates: <n>: ...`, `known: <the Known: line>`,
+  `version <i>: <hash>:<path>` per candidate in the file's order (followed by `missing: version
+  <i>: ...` when the file is not at that commit, or `not text: version <i>: ...` for an imported
+  .pdf, whose claims are read with sent-show --out), then `differ: <n> line(s) not in every version`
+  (`differ: none: ...` when they hold the same lines; `differ: not compared: ...` with fewer than two
+  text versions) and one `line (version <i>): <line>` or `line (versions <i>, <j>): <line>` per such
+  line, in order of first appearance, naming each version that holds it; every version means every
+  text version, and blank lines are left out.
 - `phrasings <saved, or a draft in .build/> --angle <angle> [<entry>...] [--today YYYY-MM-DD]`: the
   bullets of the resume (its .tex's `\\item`s, less those under an Education or Skills heading:
   tools/logfiles.py tex_bullets) or of the `resume bullets` report (its list items; a draft .md's), `bullet <n>: <wording>`, each followed, per
@@ -118,11 +144,126 @@ target's outputs/resumes/<target>.md, or a report outputs/reports/<YYYY-MM-DD>-<
     deletes the rest, printing each.
   Both end with `line: <entry>:<n>: <line>` for each of the entry's lines for the angle as it now
   stands: the line numbers a later --replace or --cap takes.
+- `prep-init <folder> --stage <stage> [--with talk,areas] [--date YYYY-MM-DD] [--mode-start <value>]`:
+  writes <folder>/prep-<stage>.md, the prep file of one interview stage (<stage> a lowercase slug,
+  as in interview-<stage>.md), and prints `wrote: <its path>`; it fails on a folder that does not
+  exist and prints `refused: ...` for a prep file that does. It starts `## Decisions` with the
+  statements SKILL.md's Direction upkeep saved for this application: each line of the folder's
+  `notes.md` (written while it has no prep file) that is not blank, a `#` heading or a `---` rule,
+  less a leading `- ` or `* `; then the value of each row of the Decisions of the folder's other
+  prep files whose decision is `note` (any case) and whose value is not empty, those files in file
+  name order; each text once (exact text), where it was first found. Each is a row `| <n> | note |
+  <the text> | <file name>:<its line number> | |`, and it prints `carried: <count> lines of
+  <folder>/notes.md into ## Decisions` and, per other prep file carried from, `carried: <count>
+  note rows of <folder>/<its file name> into ## Decisions`. Its format, which an agent keeps up to
+  date by hand:
+  - a header: `# Prep: <stage>`, then `stage: <stage>`, `interview: <YYYY-MM-DD, or ?>` (--date),
+    `mode start: <value, or ?>` (--mode-start: the interview mode's first `mode start:` value) and
+    `practice log: practice-<stage>.md`;
+  - `## Items`, `| item | phase | state | where |`, one row per piece of the prep, in phase order.
+    phase: intake, research, align, pack, plan or practise. state: `open`, `done`, `user-only` (a
+    fact or decision only the user can give) or `set aside`. where: empty or `-` until there is a
+    file, else one or more paths relative to the folder, comma-separated, each optionally with a
+    `#section`. prep-init writes the standard items, all `open`: recruiter-mail, posting,
+    sent-version (intake); research, requirement-map, deep-dives (research); user-only-facts,
+    behavioural-leads, areas (--with areas), talk (--with talk) (align); tell-me-about-yourself,
+    why-this-company, awkward-questions (pack); logistics, effort, schedule (plan); practice, mock
+    (practise). The agent adds a row for anything else the recruiter's mail asks for. The items'
+    names are the practice log's items too.
+  - `## Decisions`, `| # | decision | value | source | backup / note |`: one row per decision the
+    user made, source `(user, YYYY-MM-DD)`. A statement that holds for the whole application, not
+    this stage (SKILL.md's Direction upkeep), has the decision `note` and the statement as its
+    value; a row prep-init carried has the source `<file name>:<its line number then>`.
+  - `## Schedule`, `| date | commitments | plan | estimate |`: one row per day or block, its first
+    cell starting with the date (`2026-03-10`, `2026-03-10 am`); commitments are the user's own, each
+    with its clock time; estimate is the block's time, sized from the measured pace. A re-plan edits
+    these rows in place, one table.
+  - `## Pages`, `| page | built from | link | for |`: one row per page built for the run, added
+    when it is built (skills/career-log/pages.md). page: the page's file, a path relative to the
+    folder; built from: the one Log file it is built from, relative to the folder or, with a leading
+    `/`, to the Log's root (`/stories.md`), or `-` when the page is its own source; link: where it
+    is published; for: the device it is for.
+  The file holds state, decisions, the schedule and links only; per-attempt practice results go in
+  the practice log.
+- `prep-status <folder> [--stage <stage>] [--today YYYY-MM-DD]`: reads <folder>/prep-<stage>.md
+  (--stage may be left out when the folder has one prep file) and prints `prep: <its path>`,
+  `today: <date>` (the machine's date in its time zone), `days left: <n>` to the interview date
+  (`days left: unknown (interview: ?)`, or `days left: none (the interview was <date>)` after it),
+  `schedule: <the row's cells>` for each Schedule row dated today (`schedule: nothing for
+  today` with none), then one `<state>: <item>` line per item in file order, with ` (<where>)` when
+  where is set; then, from the practice log's `## Attempts` table (none when the log or the table
+  is missing), `retest: <item>` for each item whose latest attempt's verdict is shaky or again, in
+  the order of those latest attempts, and `not practised: <item>` for each open or user-only practise-phase
+  item with no attempt for it or a sub-item under it (any attempt counts for `practice`); then,
+  while neither effort nor schedule is done, `not diagnosed: <area>` for each area with no
+  `diagnostic` attempt for it or a sub-item under it: `behavioural answers` (with a
+  behavioural-leads item; a `story/<key>` attempt counts), each `areas/<topic>` item (`areas`,
+  with an areas item, while there is no `areas/<topic>` item), `talk` (with a talk item); an area
+  is left out when its item is set aside or a Decisions row's decision is `diagnose: <area>` and
+  its value starts with `set aside`; then, when `days left: 1` (the evening of the final review),
+  `not reviewed: <item>` for each item on a `retest:` or `not practised:` line with no Decisions
+  row whose decision is `final review: <item>` (the user's answer: do it tonight, or drop it),
+  and for each practise-phase item set aside with no Decisions row naming it (its decision `<item>`
+  or `<any>: <item>`); then `next:` lines: after the interview date, while <folder>/interview-<stage>-debrief.md does
+  not exist, `next: close the loop (ask for the questions asked, round by round)`; `next: <item>
+  (user-only)` for each user-only item, then `next: <item> (open, <phase>)` for the first open item
+  of the earliest phase, or `next: nothing open` when there is none of these. It fails, with a
+  `FAIL: <file>:<line>: ...` line per problem and nothing else, on an item row with an unknown
+  state or phase or not four cells, a done row whose where names a path (the part before `#`) the
+  folder lacks, a path outside it, or a `#section` alone, or an attempt row with an unknown verdict
+  or not six cells; and on a page row not of four cells, or whose page or built-from names no
+  file, a missing one, a `#section`, or one outside the folder (outside the Log, for a built-from
+  with a leading `/`). The `stale:` lines come after the item lines and before the `retest:` lines:
+  one `stale: <page> (built from <file>, changed since)` per page whose source changed after it: the
+  source's last commit is one the page's last commit does not contain, or the source has uncommitted
+  changes and the page none (no stale lines outside a git repository). Then, when the folder has
+  `cue-card-<stage>.md` (this prep file's stage) and no `## Pages` row's built from names it (a
+  row whose page is the card itself does not count), `no page: cue-card-<stage>.md (no ## Pages row
+  built from it)`.
+- `practice-add <folder> [--stage <stage>] --item <item> --verdict <verdict> [--kind <kind>]
+  [--weak "<weak spots>"] [--heard <heard>] [--today YYYY-MM-DD]`: appends one attempt, dated
+  today (the machine's date; --today for another), to the prep file's practice log (its header's
+  `practice log:`, practice-<stage>.md in the folder), writing the log first when it does not
+  exist, and prints `added: <the log's path>: <the row>`. --stage as for prep-status. The log is
+  history: rows are added, never rewritten. Its format:
+  - a header: `# Practice: <stage>`, then `prep: prep-<stage>.md`;
+  - `## Attempts`, `| date | item | kind | verdict | weak spots | heard |`, one row per attempt in
+    the order made. item: an item of the prep file, a sub-item under one (`areas/<topic>`,
+    `talk/<part>`) or a told Story (`story/<key>`); kind: what the attempt was, in a word or two
+    (`round` when --kind is left out; `diagnostic`, `mock`, `drill`); verdict: passed, near, shaky or again;
+    weak spots: free text or `-`; heard: typed, recorded, live or `-`.
+  - `## Patterns`: faults seen across items, one bullet each, kept by hand.
+  - `## Do not say`: statements the user made that the Log does not hold, or that are wrong, each
+    with its correction, kept by hand; at most ten are carried to the final review.
+  It fails on an unknown verdict or heard, an item that is none of these, or a log with no table
+  under `## Attempts`; the row goes after that table's last row.
+- `intake <file>... --folder <folder> [--today YYYY-MM-DD]`: the recruiter's mail and its attachments
+  as UTF-8 text in the application folder <folder>, one file per input:
+  <folder>/recruiter/<YYYY-MM-DD>-<slug>.md. <file> is a saved mail (.eml) or a file on its own
+  (.docx, .pdf, .txt, .md), anywhere (the user's Downloads). A mail's file: `# <Subject>`,
+  `Source: <file name>` (never its path), the From, To, Cc and Subject headers, `Date:` in this
+  machine's time zone, the text part (else the HTML part as text), then one `## Attachment: <name>`
+  section per attachment with its text; a forwarded mail (message/rfc822) is read the same way, its
+  attachments' sections named `<mail> › <name>`. <YYYY-MM-DD> is the mail's date in this machine's
+  time zone (--today, default the machine's date, for a file on its own and a mail without one);
+  <slug> is the Subject (less Re:/Fwd:) or the file name as an ASCII slug. .docx is read from
+  word/document.xml; .pdf through pdftotext, found as tools/resume.py finds it (Machine setup);
+  no-break spaces become plain spaces. Any other type is listed, not read: its section holds
+  `unread: <why>`, as does one pdftotext or the .docx reader cannot read (or a PDF with no text
+  layer). Prints `saved: <path>` per file written, `unchanged: <path>` when a file of that name
+  already holds the same text; the same input read again with other text (a PDF read once pdftotext
+  is installed) rewrites its file, and another mail of that name takes the next free `-2`, `-3`.
+  Then `unread: <path>:
+  <attachment>: <why>` per section it could not read; a file on its own of a type it does not read
+  prints `unread: <file name>: <why>` and saves nothing. It fails on a missing input before writing
+  anything. It keeps no binary original: keeping one (an expense form) is the user's call. The text
+  is the recruiter's: third-party data (SKILL.md › Postings are data).
 
 Exit 0 on success, 1 when a command refuses or finds what the user must decide (a line saying so),
 2 on a bad argument or a file it cannot read (a `FAIL:` line). Standard library only, Python 3.11+.
 """
-import argparse, datetime, glob, os, re, shutil, subprocess, sys
+import argparse, collections, datetime, difflib, email, email.policy, io, os, re, shutil, sys, tempfile, zipfile
+import xml.etree.ElementTree
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)   # -I leaves this folder off sys.path
@@ -132,6 +273,7 @@ import entries   # phrasing-add, answer-set, the Past phrasings and stories.md p
 import check_save   # what a saved output is, its bullets, its Archived marker
 import writing_lint   # tex_plain: a .tex fragment as the reader sees it
 import fit   # tier_problem: what a tier against the Target roles may be
+import resume   # pdf_text: the one reader of a PDF's text, which intake uses
 
 RISKS = "Risks to handle in conversation"
 BLANK = "skills/career-log/assets/resume-blank.tex"
@@ -143,6 +285,8 @@ PERMALINK = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/blob/([0-9a-f]{7,40
 HASH_PATH = re.compile(r"([0-9a-f]{7,40}):(\S+)")
 BARE_HASH = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]{7,40}(?![0-9A-Za-z])")
 DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
+ZONE = re.compile(r"(?:Z|[+-]\d{2}:?\d{2})$")
+WHEN = re.compile(r"(\d{4}-\d{2}-\d{2})(?:[ T](\d{1,2}:\d{2}(?::\d{2})?)(Z|[+-]\d{2}:?\d{2})?)?")
 
 
 class AppError(Exception):
@@ -311,7 +455,7 @@ def cmd_prior(root, companies, qtype):
 # ---- start ----
 
 def fallback(root):
-    texs = sorted(os.path.basename(p) for p in glob.glob(os.path.join(glob.escape(os.path.join(root, "sources", "resumes")), "*.tex")))
+    texs = sorted(os.path.basename(p) for p in logfiles.glob_under(os.path.join(root, "sources", "resumes"), "*.tex"))
     pool = [t for t in texs if t[:-4].endswith("-main")] or texs
     if not pool:
         return BLANK
@@ -575,16 +719,144 @@ def cell(root, target, full):
     return "[%s @ %s](https://github.com/%s/blob/%s/%soutputs/resumes/%s.pdf)" % (target, full[:7], repo, full, prefix, target)
 
 
-def record(root, folder, version):
+def local_when(text):
+    """(YYYY-MM-DD, time or None) of a --before value in this machine's time zone. A value with a zone
+    (`Z`, `+05:30`, `-0800`: an export's timestamp) is converted, its time given as HH:MM:SS; one
+    without is taken as local already."""
+    m = WHEN.fullmatch(text.strip())
+    if not m:
+        raise AppError("--before takes YYYY-MM-DD, YYYY-MM-DD HH:MM, or a time with its zone"
+                       " (2025-10-02T06:30:00Z, ...+05:30): %s" % text)
+    day, time, zone = m.groups()
+    h, mi, sec = ([int(x) for x in time.split(":")] + [0])[:3] if time else (0, 0, 0)
+    try:
+        dt = datetime.datetime.fromisoformat(day).replace(hour=h, minute=mi, second=sec)
+        if zone:
+            dt = logfiles.local_time("%sT%02d:%02d:%02d%s" % (day, h, mi, sec, zone))
+    except ValueError as e:
+        raise AppError("--before is not a real date and time: %s (%s)" % (text, e))
+    if not zone:
+        return day, time
+    return dt.date().isoformat(), dt.strftime("%H:%M:%S")
+
+
+def is_binary(blob):
+    """An imported .pdf or .docx, which sent-show and the diffs do not print."""
+    return b"\0" in blob or blob.startswith((b"%PDF", b"PK\x03\x04"))
+
+
+def line_diff(root, a, b, label=""):
+    """`<a> -> <b>: <n> line(s) differ`, then `- <line>` / `+ <line>` per changed line, for two
+    versions (`<hash>:<path>`) or two working-tree files; a non-text file gives one line."""
+    def text(ref):
+        m = HASH_PATH.fullmatch(ref)
+        if m:
+            blob = logfiles.git_blob(root, m.group(1), m.group(2))
+        else:
+            with open(at(root, ref), "rb") as f:
+                blob = f.read()
+        return None if blob is None or is_binary(blob) else blob.decode("utf-8", "replace").splitlines()
+    path_of = lambda ref: HASH_PATH.fullmatch(ref).group(2) if HASH_PATH.fullmatch(ref) else ref
+    head = "%s%s -> %s" % (label, path_of(a), path_of(b))
+    old, new = text(a), text(b)
+    if old is None or new is None:
+        return ["%s: not text" % head]
+    changed, n = [], 0
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
+        if tag != "equal":
+            n += max(i2 - i1, j2 - j1)
+            changed += ["- " + x for x in old[i1:i2]] + ["+ " + x for x in new[j1:j2]]
+    if not n:
+        return ["%s: identical" % head]
+    return ["%s: %s %s" % (head, logfiles.plural(n, "line"), "differs" if n == 1 else "differ")] + changed
+
+
+def cmd_sent_candidates(root, before, limit):
+    day, _ = local_when(before)
+    out = ["before: %s" % day + (" (%s in this machine's time zone)" % before.strip() if ZONE.search(before.strip()) else "")]
+    firsts = {}
+    saved_on = None
+    for line in git(root, "log", "--before=%s 23:59:59" % day, "--format=@%cd", "--date=format-local:%Y-%m-%d",
+                    "--name-only", "--", "outputs/resumes/*.tex").splitlines():
+        if line.startswith("@"):
+            saved_on = line[1:]
+        elif line.strip():
+            target = os.path.basename(line.strip())[:-4]
+            if logfiles.is_target_name(target):
+                firsts[target] = saved_on   # newest first: the last one seen is the first save
+    out.append("targets saved by %s: %s" % (day, ", ".join("%s (%s)" % kv for kv in sorted(firsts.items())))
+               if firsts else "targets: none saved by %s" % day)
+    files = []
+    for path in logfiles.glob_under(os.path.join(root, "sources", "resumes"), "*"):
+        base = os.path.basename(path)
+        m = DAY.match(base)
+        if os.path.isfile(path) and m and m.group(0) <= day:
+            files.append((m.group(0), base))
+    files.sort(reverse=True)
+    if not files:
+        return out + ["none: no file in sources/resumes/ dated on or before %s: ask the user which file went, or"
+                      " import it first (import mode)" % day], 1
+    shown, refs = files[:max(limit, 1)], []
+    for date, base in shown:
+        rel = "sources/resumes/" + base
+        full = git(root, "log", "-1", "--format=%H", "--", rel).strip()
+        if not full or git(root, "status", "--porcelain", "--", rel).strip():
+            out.append("candidate: %s | %s | uncommitted: commit it first" % (rel, date))
+            refs.append(rel)
+        else:
+            out.append("candidate: %s:%s | %s" % (full, rel, date))
+            refs.append("%s:%s" % (full, rel))
+    if len(files) > len(shown):
+        out.append("older: %d more (--limit %d shows them)" % (len(files) - len(shown), len(files)))
+    for newer, older in zip(refs, refs[1:]):
+        out += line_diff(root, older, newer, "diff: ")
+    out.append("next: show the user each candidate and diff, and ask which went (an imported file may be an"
+               " older copy than they recall); sure of one: sent-show <its version> --record <folder>; one of"
+               " several: sent-show <version> <version>... --record <folder> --known \"<what the user knows>\"")
+    return out
+
+
+def sent_file(root, rel):
+    """(versions, known) of a sent-version.md naming several candidates; None for the one-version form."""
+    lines = read(root, rel + "/sent-version.md").splitlines()
+    versions = []
+    for line in lines:
+        if not HASH_PATH.fullmatch(line.strip()):
+            break
+        versions.append(line.strip())
+    if len(versions) < 2:
+        return None
+    known = next((l[len("Known: "):].strip() for l in lines if l.startswith("Known: ")), None)
+    return versions, known
+
+
+def record(root, folder, version, known=None, day=None):
+    """Write <folder>/sent-version.md: one version, or (several, with known) the candidates."""
     rel = rel_of(root, folder)
     if not check_save.APPLICATION.match(rel):
         raise AppError("--record takes an application folder, outputs/applications/<folder>: %s" % folder)
     path = at(root, rel + "/sent-version.md")
-    if os.path.exists(path) and read(root, rel + "/sent-version.md").strip() != version:
-        return ["refused: %s/sent-version.md names another version: %s" % (rel, read(root, rel + "/sent-version.md").strip())], 1
+    several = isinstance(version, list)
+    if os.path.exists(path):
+        have = sent_file(root, rel)
+        same = sorted(have[0]) == sorted(version) if several and have else read(root, rel + "/sent-version.md").strip() == version
+        if not same:
+            return ["refused: %s/sent-version.md names another version: %s"
+                    % (rel, " ".join(have[0]) if have else read(root, rel + "/sent-version.md").strip())], 1
+        if several:
+            return ["unchanged: %s/sent-version.md names these candidates; its Known: line stays: %s" % (rel, have[1])]
     os.makedirs(at(root, rel), exist_ok=True)
-    logfiles.write_text(path, version + "\n")
-    return ["recorded: %s/sent-version.md: %s" % (rel, version)]
+    if not several:
+        logfiles.write_text(path, version + "\n")
+        return ["recorded: %s/sent-version.md: %s" % (rel, version)]
+    known = one_line(known)
+    if not re.search(r"\(user, \d{4}-\d{2}-\d{2}\)$", known):
+        known += " (user, %s)" % day
+    diffs = []
+    for a, b in zip(version, version[1:]):
+        diffs += line_diff(root, a, b)   # no label: the file's `Differ:` heading names them
+    logfiles.write_text(path, "\n".join(version) + "\n\nKnown: %s\n\nDiffer:\n```diff\n%s\n```\n" % (known, "\n".join(diffs)))
+    return ["recorded: %s/sent-version.md: %d candidates" % (rel, len(version))]
 
 
 def cmd_sent(root, target, before, folder):
@@ -598,13 +870,11 @@ def cmd_sent(root, target, before, folder):
             return ["refused: %s has uncommitted changes: commit them first (write step 10), then run it again" % spec], 1
         full = git(root, "log", "-1", "--format=%H", "--", spec).strip()
     else:
-        m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})(?:[ T](\d{1,2}:\d{2}(?::\d{2})?))?", before.strip())
-        if not m:
-            raise AppError("--before takes YYYY-MM-DD or YYYY-MM-DD HH:MM: %s" % before)
-        until = "%s %s" % (m.group(1), m.group(2) or "23:59:59")
+        day, time = local_when(before)
+        until = "%s %s" % (day, time or "23:59:59")
         full = git(root, "log", "-1", "--format=%H", "--before=%s" % until, "--", spec).strip()
-        that_day = git(root, "log", "--format=%H", "--since=%s 00:00:00" % m.group(1),
-                       "--until=%s 23:59:59" % m.group(1), "--", spec).split()
+        that_day = git(root, "log", "--format=%H", "--since=%s 00:00:00" % day,
+                       "--until=%s 23:59:59" % day, "--", spec).split()
         out.append("changed that day: %s" % logfiles.plural(len(that_day), "commit"))
     if not full:
         return out + ["none: no commit touched %s%s" % (spec, " before %s" % before if before else "")], 1
@@ -645,10 +915,52 @@ def resolve(root, ref, target):
             break
     else:
         raise AppError("no such commit in this clone: %s (git fetch, then run it again)" % ", ".join(hashes))
+    if not path.startswith("outputs/"):   # an imported resume (sources/resumes/) has only the file it was imported as
+        return full, path
     return full, re.sub(r"\.pdf$", ".tex", path)
 
 
-def cmd_sent_show(root, ref, target, dest, folder):
+def shown(blob, version):
+    """A version's text as sent-show prints it; a binary file (an imported .pdf) as one line."""
+    if is_binary(blob):
+        return "binary: %d bytes: open it with sent-show %s --out <file>" % (len(blob), version)
+    return blob.decode("utf-8", "replace").rstrip("\n")
+
+
+def cmd_sent_show(root, refs, target, dest, folder, known, day):
+    known_line = None
+    if len(refs) == 1 and os.path.isdir(at(root, refs[0])) and os.path.isfile(at(root, refs[0]) + "/sent-version.md"):
+        several = sent_file(root, rel_of(root, refs[0]))
+        if several:
+            refs, known_line = several
+    if len(refs) == 1:
+        return sent_show_one(root, refs[0], target, dest, folder)
+    if dest:
+        raise AppError("--out takes one version; give one ref")
+    if folder and not known_line and not one_line(known):
+        raise AppError("--record with several versions takes --known \"<what the user knows of which went>\"")
+    versions = []
+    for ref in refs:
+        full, path = resolve(root, ref, target)
+        versions.append("%s:%s" % (full, path))
+    out = ["candidates: %d" % len(versions)] + (["known: %s" % known_line] if known_line else [])
+    for v in versions:
+        full, path = v.split(":", 1)
+        blob = logfiles.git_blob(root, full, path)
+        if blob is None:
+            return out + ["missing: %s at %s" % (path, full[:7])], 1
+        out += ["version: %s" % v, shown(blob, v)]
+    for a, b in zip(versions, versions[1:]):
+        out += line_diff(root, a, b, "differ: ")
+    if folder:
+        res = record(root, folder, versions, one_line(known) or known_line, day)
+        if isinstance(res, tuple):
+            return out + res[0], 1
+        out += res
+    return out
+
+
+def sent_show_one(root, ref, target, dest, folder):
     full, path = resolve(root, ref, target)
     blob = logfiles.git_blob(root, full, path)
     if blob is None:
@@ -663,7 +975,7 @@ def cmd_sent_show(root, ref, target, dest, folder):
             raise AppError("cannot write %s: %s" % (dest, e))
         out.append("wrote: %s" % dest)
     else:
-        out.append(blob.decode("utf-8", "replace").rstrip("\n"))
+        out.append(shown(blob, "%s:%s" % (full, path)))
     if folder:
         res = record(root, folder, "%s:%s" % (full, path))
         if isinstance(res, tuple):
@@ -746,21 +1058,63 @@ def stale_verdict(res):
 def cmd_risks(root, saved):
     rel = rel_of(root, saved)
     kind = saved_kind(root, rel)
+    sent = kind == "application" and os.path.isfile(at(root, rel + "/sent-version.md"))
+    several = sent_file(root, rel) if sent else None   # (versions, known) when it names several candidates
     if kind == "application":
         if os.path.isfile(at(root, rel + "/provenance.md")):
             where, text = rel + "/provenance.md", read(root, rel + "/provenance.md")
-        elif os.path.isfile(at(root, rel + "/sent-version.md")):
-            full, path = resolve(root, rel, None)
-            where = "%s:%s" % (full, path[:-4] + ".md")
-            text = (logfiles.git_blob(root, full, path[:-4] + ".md") or b"").decode("utf-8", "replace")
+        elif sent:
+            refs = several[0] if several else [rel]
+            where, text = rel + "/sent-version.md", ""
+            for ref in refs:   # the first candidate with the section (an imported resume has none)
+                full, path = resolve(root, ref, None)
+                found = (logfiles.git_blob(root, full, os.path.splitext(path)[0] + ".md") or b"").decode("utf-8", "replace")
+                if (logfiles.section(found, RISKS) or "").strip():
+                    where, text = "%s:%s" % (full, os.path.splitext(path)[0] + ".md"), found
+                    break
+                if not several:
+                    where = "%s:%s" % (full, os.path.splitext(path)[0] + ".md")
         else:
             where, text = rel, ""
     else:
         where, text = rel, read(root, rel)
     body = logfiles.section(text, RISKS)
     if body is None or not body.strip():
-        return ["risks: none (saved before the section existed): find the risks from its claims (%s)" % where]
-    return ["risks: %s" % where, body.strip("\n")]
+        out = ["risks: none (saved before the section existed): find the risks from its claims (%s)" % where]
+    else:
+        out = ["risks: %s" % where, body.strip("\n")]
+    return out + (candidate_lines(root, *several) if several else [])
+
+
+def candidate_lines(root, versions, known):
+    """Each line that is not in every one of several sent candidates, with the versions that hold it."""
+    out = ["candidates: %d: the brief covers each `line` below, with the versions that hold it" % len(versions)]
+    out += ["known: %s" % known] if known else []
+    texts = {}
+    for n, ref in enumerate(versions, 1):
+        full, path = resolve(root, ref, None)
+        version = "%s:%s" % (full, path)
+        out.append("version %d: %s" % (n, version))
+        blob = logfiles.git_blob(root, full, path)
+        if blob is None:
+            out.append("missing: version %d: %s at %s" % (n, path, full[:7]))
+        elif is_binary(blob):
+            out.append("not text: version %d: read its claims from sent-show %s --out <file>" % (n, version))
+        else:
+            texts[n] = blob.decode("utf-8", "replace").splitlines()
+    if len(texts) < 2:
+        return out + ["differ: not compared: fewer than two versions are text"]
+    held, order = {}, []
+    for n, lines in texts.items():
+        for line in lines:
+            if line.strip() and n not in held.setdefault(line, []):
+                order += [line] if not held[line] else []
+                held[line].append(n)
+    differ = [l for l in order if len(held[l]) < len(texts)]
+    out.append("differ: %s not in every version" % logfiles.plural(len(differ), "line") if differ
+               else "differ: none: the versions hold the same lines")
+    return out + ["line (%s %s): %s" % ("version" if len(held[l]) == 1 else "versions",
+                                         ", ".join(map(str, held[l])), l) for l in differ]
 
 
 # ---- phrasings ----
@@ -942,6 +1296,623 @@ def now_lines(root, erels, angle):
     return ["line: %s:%d: %s" % (e, n, line) for e in erels for n, _, _, line in entry_lines(root, e, angle)]
 
 
+# ---- prep ----
+
+PHASES = ("intake", "research", "align", "pack", "plan", "practise")
+STATES = ("done", "open", "user-only", "set aside")
+ITEMS = (   # (item, phase, the --with value it needs or None), in phase order
+    ("recruiter-mail", "intake", None), ("posting", "intake", None), ("sent-version", "intake", None),
+    ("research", "research", None), ("requirement-map", "research", None), ("deep-dives", "research", None),
+    ("user-only-facts", "align", None), ("behavioural-leads", "align", None), ("areas", "align", "areas"),
+    ("talk", "align", "talk"),
+    ("tell-me-about-yourself", "pack", None), ("why-this-company", "pack", None), ("awkward-questions", "pack", None),
+    ("logistics", "plan", None), ("effort", "plan", None), ("schedule", "plan", None),
+    ("practice", "practise", None), ("mock", "practise", None))
+WITH = tuple(need for _, _, need in ITEMS if need)
+SLUG = logfiles.SLUG
+STAGE = re.compile(SLUG + "$")
+PREP = re.compile(r"prep-%s\.md$" % SLUG)
+NOTES = "notes.md"   # the folder's statements for this application (SKILL.md › Direction upkeep)
+NOTE = "note"   # the Decisions decision of a statement for the whole application
+NOT_A_NOTE =re.compile(r"#+(\s|$)|([-*_]\s*){3,}$")   # a notes.md line that is a heading or a rule
+PRACTICE = re.compile(r"practice-%s\.md$" % SLUG)
+VERDICTS = ("passed", "near", "shaky", "again")
+RETEST = ("shaky", "again")
+HEARD = ("typed", "recorded", "live")
+ATTEMPT = "| date | item | kind | verdict | weak spots | heard |"
+TABLES = (   # (section, header row), in file order
+    ("Items", "| item | phase | state | where |"),
+    ("Decisions", "| # | decision | value | source | backup / note |"),
+    ("Schedule", "| date | commitments | plan | estimate |"),
+    ("Pages", "| page | built from | link | for |"))
+
+
+def app_folder(root, folder):
+    rel = rel_of(root, folder)
+    if not os.path.isdir(at(root, rel)):
+        raise AppError("no folder %s" % rel)
+    return rel
+
+
+def cmd_prep_init(root, folder, stage, with_, date, mode_start):
+    rel = app_folder(root, folder)
+    if not STAGE.match(stage or ""):
+        raise AppError("--stage takes a lowercase slug (final, technical-1): %s" % stage)
+    extra = [w.strip() for w in (with_ or "").split(",") if w.strip()]
+    for w in extra:
+        if w not in WITH:
+            raise AppError("--with takes %s: %s" % (", ".join(WITH), w))
+    try:
+        day = "?" if date is None else datetime.date.fromisoformat(date).isoformat()
+    except ValueError:
+        raise AppError("--date takes YYYY-MM-DD: %s" % date)
+    path = "%s/prep-%s.md" % (rel, stage)
+    if os.path.exists(at(root, path)):
+        return ["refused: %s exists; edit it instead" % path], 1
+    out = ["# Prep: %s" % stage, "", "stage: %s" % stage, "interview: %s" % day,
+           "mode start: %s" % one_line(mode_start or "?"), "practice log: practice-%s.md" % stage]
+    carried = carried_notes(root, rel)   # [(the file carried from, its line, the note)]
+    for section, header in TABLES:
+        out += ["", "## " + section, "", header, "|" + "---|" * (header.count("|") - 1)]
+        if section == "Items":
+            out += ["| %s | %s | open | |" % (item, phase) for item, phase, need in ITEMS if need is None or need in extra]
+        if section == "Decisions":
+            out += [logfiles.md_row([i, NOTE, text, "%s:%d" % (name, line), ""]) for i, (name, line, text) in enumerate(carried, 1)]
+    with open(at(root, path), "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(out) + "\n")
+    counts = collections.Counter(name for name, _, _ in carried)   # in the order first carried
+    return ["wrote: %s" % path] + ["carried: %d %s of %s/%s into ## Decisions" % (
+        count, "lines" if name == NOTES else "note rows", rel, name) for name, count in counts.items()]
+
+
+def carried_notes(root, rel):
+    """The statements for this application a new prep file starts with, as [(file name, line, text)]:
+    the lines of the folder's notes.md, then each `note` row of the folder's prep files' Decisions
+    (SKILL.md's Direction upkeep writes it there once the folder has one), in file name order, each
+    text once."""
+    carried = [(NOTES, n, text) for n, text in folder_notes(root, rel)]
+    for name in sorted(n for n in os.listdir(at(root, rel)) if PREP.match(n)):
+        for n, cells in parse_prep(read(root, "%s/%s" % (rel, name)))["tables"].get("Decisions", []):
+            if len(cells) > 2 and cells[1].lower() == NOTE and cells[2]:
+                carried.append((name, n, cells[2]))
+    first = {}   # each text -> where it was first found
+    for name, n, text in carried:
+        first.setdefault(text, (name, n, text))
+    return list(first.values())
+
+
+def folder_notes(root, rel):
+    """The statements in <folder>/notes.md (SKILL.md's Direction upkeep writes them there when the
+    folder has no prep file) as [(line number, text)]: each line that is not blank, a `#` heading or
+    a `---` rule, less a leading `- ` or `* `."""
+    path = "%s/%s" % (rel, NOTES)
+    if not os.path.isfile(at(root, path)):
+        return []
+    notes = []
+    for n, line in enumerate(read(root, path).splitlines(), 1):
+        text = one_line(re.sub(r"^\s*[-*]\s+", "", line))
+        if text and not NOT_A_NOTE.match(text):
+            notes.append((n, text))
+    return notes
+
+
+def prep_path(root, rel, stage):
+    if stage is not None and not STAGE.match(stage):
+        raise AppError("--stage takes a lowercase slug (final, technical-1): %s" % stage)
+    if stage:
+        path = "%s/prep-%s.md" % (rel, stage)
+        if not os.path.isfile(at(root, path)):
+            raise AppError("no %s (prep-init writes it)" % path)
+        return path
+    found = sorted(n for n in os.listdir(at(root, rel)) if PREP.match(n))
+    if len(found) != 1:
+        raise AppError("%s has %s; name one with --stage" % (
+            rel, "no prep-<stage>.md (prep-init writes it)" if not found else "several prep files: " + ", ".join(found)))
+    return "%s/%s" % (rel, found[0])
+
+
+def parse_prep(text):
+    """A prep file as {"header": {key: value}, "tables": {section: [(line number, [cells])]}}: the
+    `key: value` lines above the first `## `, and the rows of each `## <section>`'s table, less its
+    header row and divider row, as logfiles.md_tables reads them (cells stripped, `\\|` read as `|`).
+    A command that reads another section of the prep file reads it here."""
+    header, tables = {}, {}
+    for line in text.lstrip("﻿").splitlines():
+        h = re.match(r"##[ \t]+(.*)", line)   # logfiles.md_tables' heading form
+        if h:
+            tables.setdefault(h.group(1).strip(), [])
+        elif not tables:
+            k, sep, v = line.strip().partition(":")
+            if sep and k and not k.startswith("#"):
+                header.setdefault(k.strip().lower(), v.strip())
+    for table in logfiles.md_tables(text):
+        if table.section is not None:
+            tables[table.section] += table.rows
+    return {"header": header, "tables": tables}
+
+
+def where_problems(root, rel, where):
+    """Why a done row's where fails: a path (the part before #) the folder lacks or that is not in it."""
+    out = []
+    for part in (p.strip() for p in where.split(",")):
+        p = part.split("#", 1)[0].strip()
+        if part in ("", "-"):
+            continue
+        if not p:
+            out.append("%s names no file" % part)
+        elif os.path.isabs(p) or ".." in p.replace("\\", "/").split("/"):
+            out.append("%s is not a path in the folder" % p)
+        elif not os.path.exists(at(root, rel + "/" + p)):
+            out.append("%s/%s does not exist" % (rel, p))
+    return out
+
+
+def log_file(root, base, cell, within):
+    """(the Log path of the file a Pages cell names, relative to base; None and why it fails): a
+    path, without `#section`, to a file inside base (the folder, or "" for the Log's root)."""
+    norm = cell.replace("\\", "/")
+    if not norm or norm == "-" or "#" in norm:
+        return None, "%r names no file" % cell
+    if os.path.isabs(cell) or norm.startswith("/") or ".." in norm.split("/"):
+        return None, "%s is not a path in %s" % (cell, within)
+    rel_path = base + "/" + norm if base else norm
+    if not os.path.isfile(at(root, rel_path)):
+        return None, "%s does not exist" % rel_path
+    return rel_path, None
+
+
+def page_stale(root, page, source):
+    """Whether source changed after page was built: source has uncommitted changes and page none, or
+    source's last commit is one page's last commit does not contain. False outside a git repository
+    or when git cannot tell."""
+    try:
+        dirty = [bool(git(root, "status", "--porcelain", "--", f).strip()) for f in (source, page)]
+        if dirty[0] or dirty[1]:
+            return dirty[0] and not dirty[1]
+        source_commit, page_commit = (git(root, "log", "-1", "--format=%H", "--", f).strip() for f in (source, page))
+        if not source_commit or not page_commit or source_commit == page_commit:
+            return False
+        return logfiles.git_run(root, "merge-base", "--is-ancestor", source_commit, page_commit).returncode == 1
+    except (AppError, logfiles.LogError):
+        return False
+
+
+def stage_of(path):
+    return os.path.basename(path)[len("prep-"):-len(".md")]
+
+
+def after_interview(header, day):
+    try:
+        return datetime.date.fromisoformat(day) > datetime.date.fromisoformat(header.get("interview", "?"))
+    except ValueError:
+        return False
+
+
+def days_left(header, day):
+    """Days from <day> to the header's interview date, or None when either is not a date."""
+    try:
+        return (datetime.date.fromisoformat(header.get("interview", "?")) - datetime.date.fromisoformat(day)).days
+    except ValueError:
+        return None
+
+
+def prep_date_lines(header, day):
+    lines = ["today: %s" % day]
+    raw = header.get("interview", "?")
+    left = days_left(header, day)
+    if left is None:
+        return lines + ["days left: unknown (interview: %s)" % (raw or "?")]
+    return lines + ["days left: %d" % left if left >= 0 else "days left: none (the interview was %s)" % raw]
+
+
+def practice_path(rel, path, prep):
+    """The prep file's practice log: its header's `practice log:` file, else practice-<stage>.md."""
+    name = prep["header"].get("practice log", "")
+    if not PRACTICE.match(name):
+        name = "practice-%s.md" % stage_of(path)
+    return "%s/%s" % (rel, name)
+
+
+def practice_rows(root, log):
+    """The practice log's attempts as [(line number, [cells])], and a FAIL line per bad row."""
+    if not os.path.isfile(at(root, log)):
+        return [], []
+    rows, problems = parse_prep(read(root, log))["tables"].get("Attempts", []), []
+    for n, cells in rows:
+        if len(cells) != 6:
+            problems.append("FAIL: %s:%d: an attempt row has 6 cells (%s): %d here" % (log, n, ATTEMPT[2:-2].replace(" | ", ", "), len(cells)))
+        elif cells[3] not in VERDICTS:
+            problems.append("FAIL: %s:%d: %s: unknown verdict %r (%s)" % (log, n, cells[1], cells[3], ", ".join(VERDICTS)))
+    return [(n, cells) for n, cells in rows if len(cells) == 6], problems
+
+
+def cmd_practice_add(root, folder, stage, item, verdict, kind, weak, heard, day):
+    rel = app_folder(root, folder)
+    path = prep_path(root, rel, stage)
+    prep = parse_prep(read(root, path))
+    if verdict not in VERDICTS:
+        raise AppError("--verdict takes %s: %s" % (", ".join(VERDICTS), verdict))
+    if heard is not None and heard not in HEARD:
+        raise AppError("--heard takes %s: %s" % (", ".join(HEARD), heard))
+    names = {cells[0] for _, cells in prep["tables"].get("Items", []) if cells} | {"story"}
+    top, slash, sub = item.partition("/")
+    if top not in names or (slash or top == "story") and not sub.strip() or "|" in item:
+        raise AppError("--item takes an item of %s, `story/<key>` or `<item>/<sub-item>`: %s" % (path, item))
+    log = practice_path(rel, path, prep)
+    cells = [day, item, one_line(kind) or "round", verdict, one_line(weak) or "-", heard or "-"]
+    row = logfiles.md_row(cells)
+    if os.path.exists(at(root, log)):
+        lines = read(root, log).splitlines()
+        heads = [i for i, l in enumerate(lines) if re.match(r"##[ \t]+", l)]   # parse_prep's heading form
+        start = next((i for i in heads if lines[i][2:].strip() == "Attempts"), None)
+        end = next((i for i in heads if start is not None and i > start), len(lines))
+        rows = [i for i in range(end) if start is not None and i > start and lines[i].strip().startswith("|")]
+        if not rows:
+            raise AppError("%s has no `## Attempts` table (%s); add it" % (log, ATTEMPT))
+        lines.insert(rows[-1] + 1, row)   # after the table's last row, blank lines inside it included
+    else:
+        lines = ["# Practice: %s" % stage_of(path), "",
+                 "prep: %s" % os.path.basename(path), "", "## Attempts", "", ATTEMPT,
+                 "|" + "---|" * 6, row, "", "## Patterns", "", "## Do not say"]
+    with open(at(root, log), "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+    return ["added: %s: %s" % (log, row)]
+
+
+def practice_items(items, attempts):
+    """(the retest items in the order of each item's latest attempt, the not-practised items in item order)."""
+    latest = {}
+    for _, cells in attempts:
+        latest.pop(cells[1], None)   # a later attempt moves the item to its place in the file
+        latest[cells[1]] = cells[3]
+    retest = [item for item, verdict in latest.items() if verdict in RETEST]
+    untried = []
+    for item, phase, state, _ in items:
+        tried = any(t == item or t.startswith(item + "/") for t in latest) or (item == "practice" and latest)
+        if phase == "practise" and state in ("open", "user-only") and not tried:
+            untried.append(item)
+    return retest, untried
+
+
+def practice_lines(retest, untried):
+    return ["retest: %s" % item for item in retest] + ["not practised: %s" % item for item in untried]
+
+
+PLAN_AFTER_DIAGNOSE = ("effort", "schedule")   # the plan items Diagnose's rounds size
+
+
+def diagnose_lines(prep, items, attempts):
+    """not diagnosed: lines, one per area with no diagnostic attempt and nothing setting it aside,
+    while neither plan item sized from the rounds is done: behavioural answers, each areas/<topic>
+    row (the areas item while it has none), the talk."""
+    states = {item: state for item, _, state, _ in items}
+    if any(states.get(item) == "done" for item in PLAN_AFTER_DIAGNOSE):
+        return []
+    tried = [cells[1] for _, cells in attempts if cells[2].lower() == "diagnostic"]
+
+    def has(*tops):
+        return any(t == top or t.startswith(top + "/") for t in tried for top in tops)
+    areas = []   # (the area as printed, its item, whether a diagnostic round covers it)
+    if "behavioural-leads" in states:
+        areas.append(("behavioural answers", "behavioural-leads", has("story", "behavioural-leads")))
+    topics = [item for item, _, _, _ in items if item.startswith("areas/")]
+    areas += [(t, t, has(t)) for t in topics] or ([("areas", "areas", has("areas"))] if "areas" in states else [])
+    if "talk" in states:
+        areas.append(("talk", "talk", has("talk")))
+    aside = {cells[1].partition(":")[2].strip().lower() for _, cells in prep["tables"].get("Decisions", [])
+             if len(cells) > 2 and cells[1].lower().startswith("diagnose:") and cells[2].lower().startswith("set aside")}
+    return ["not diagnosed: %s" % area for area, item, covered in areas
+            if not covered and states.get(item) != "set aside" and area.lower() not in aside]
+
+
+def review_lines(prep, items, retest, untried, day):
+    """not reviewed: lines on the evening before the interview (days left: 1): each retest or
+    not-practised item with no Decisions row `final review: <item>` (the user's keep or drop), then
+    each practise-phase item set aside with no Decisions row naming it (`<item>` or `<any>: <item>`)."""
+    if days_left(prep["header"], day) != 1:
+        return []
+    named = {}   # each Decisions row's decision, lowercased -> the item it names after its prefix
+    for _, cells in prep["tables"].get("Decisions", []):
+        if len(cells) > 1:
+            decision = cells[1].strip().lower()
+            named[decision] = decision.partition(":")[2].strip() if ":" in decision else decision
+    asked = {item for decision, item in named.items() if decision.startswith("final review:")}
+    lines = [item for item in dict.fromkeys(retest + untried) if item.lower() not in asked]
+    lines += [item for item, phase, state, _ in items if phase == "practise" and state == "set aside"
+              and item.lower() not in named.values() and item not in lines]
+    return ["not reviewed: %s" % item for item in lines]
+
+
+def cmd_prep_status(root, folder, stage, day):
+    rel = app_folder(root, folder)
+    path = prep_path(root, rel, stage)
+    prep = parse_prep(read(root, path))
+    attempts, bad_rows = practice_rows(root, practice_path(rel, path, prep))
+    items, problems = [], []
+    for n, cells in prep["tables"].get("Items", []):
+        if len(cells) != 4:
+            problems.append("FAIL: %s:%d: an item row has 4 cells (item | phase | state | where): %d here" % (path, n, len(cells)))
+            continue
+        item, phase, state, where = cells
+        if state not in STATES:
+            problems.append("FAIL: %s:%d: %s: unknown state %r (%s)" % (path, n, item, state, ", ".join(STATES)))
+        if phase not in PHASES:
+            problems.append("FAIL: %s:%d: %s: unknown phase %r (%s)" % (path, n, item, phase, ", ".join(PHASES)))
+        if state == "done":
+            problems += ["FAIL: %s:%d: %s is done but %s" % (path, n, item, why) for why in where_problems(root, rel, where)]
+        items.append((item, phase, state, where))
+    pages = []
+    for n, cells in prep["tables"].get("Pages", []):
+        if len(cells) != 4:
+            problems.append("FAIL: %s:%d: a page row has 4 cells (page | built from | link | for): %d here" % (path, n, len(cells)))
+            continue
+        page, source = cells[0], cells[1]
+        page_path, why = log_file(root, rel, page, "the folder")
+        whys = [why] if why else []
+        source_path = None
+        if source not in ("", "-"):   # else the page is its own source
+            source_path, why = (log_file(root, "", source[1:], "the Log") if source.startswith("/")
+                                else log_file(root, rel, source, "the folder"))
+            whys += [why] if why else []
+        problems += ["FAIL: %s:%d: page %s: %s" % (path, n, page, why) for why in whys]
+        pages.append((page, source, page_path, source_path))
+    problems += bad_rows
+    if problems:
+        return problems, 2
+    lines = ["prep: %s" % path] + prep_date_lines(prep["header"], day)
+    rows = [cells for _, cells in prep["tables"].get("Schedule", []) if cells and cells[0].startswith(day)]
+    lines += ["schedule: %s" % " | ".join(cells) for cells in rows] or ["schedule: nothing for today"]
+    lines += ["%s: %s%s" % (state, item, " (%s)" % where if where not in ("", "-") else "") for item, _, state, where in items]
+    lines += ["stale: %s (built from %s, changed since)" % (page, source) for page, source, page_path, source_path in pages
+              if source_path and page_stale(root, page_path, source_path)]
+    card = "cue-card-%s.md" % stage_of(path)
+    same = lambda p: os.path.normcase(os.path.normpath(at(root, p)))
+    if os.path.isfile(at(root, "%s/%s" % (rel, card))) and same("%s/%s" % (rel, card)) not in {same(s) for _, _, _, s in pages if s}:
+        lines.append("no page: %s (no ## Pages row built from it)" % card)
+    retest, untried = practice_items(items, attempts)
+    lines += practice_lines(retest, untried)
+    lines += diagnose_lines(prep, items, attempts)
+    lines += review_lines(prep, items, retest, untried, day)
+    # A later status line goes here, after the stale and retest lines and before the next: lines; a
+    # next: line that outranks the user-only ones goes first in nexts.
+    nexts = []
+    if after_interview(prep["header"], day) and not os.path.exists(at(root, "%s/interview-%s-debrief.md" % (rel, stage_of(path)))):
+        nexts.append("next: close the loop (ask for the questions asked, round by round)")
+    nexts += ["next: %s (user-only)" % item for item, _, state, _ in items if state == "user-only"]
+    open_ = [(PHASES.index(phase), i, item, phase) for i, (item, phase, state, _) in enumerate(items) if state == "open"]
+    if open_:
+        _, _, item, phase = min(open_)
+        nexts.append("next: %s (open, %s)" % (item, phase))
+    return lines + (nexts or ["next: nothing open"])
+
+
+# ---- intake ----
+
+RECRUITER = "recruiter"
+FILE_TYPES = (".docx", ".pdf", ".txt", ".md")   # what file_text reads; any other type is listed, not read
+REPLY = re.compile(r"^\s*(?:(?:re|fw|fwd|aw|wg|sv|tr|vs)\s*[:：]\s*)+", re.I)   # Re:, Fwd:, AW:, RE： name no mail
+WORD = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+SPACES = str.maketrans({"\xa0": " ", " ": " ", " ": " ", "​": ""})   # no-break and zero-width spaces
+BY_TYPE = {"application/pdf": ".pdf", "message/rfc822": ".eml", "text/plain": ".txt", "text/html": ".html",
+           "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx"}
+
+
+def html_text(markup):
+    """An HTML mail part as its reader sees it: logfiles.html_text with head hidden, `- ` per list
+    item and a row's cells joined by tabs."""
+    return logfiles.html_text(markup, hide=("head",), marks=True)
+
+
+def tidy(text):
+    """Text as saved: UTF-8 with \\n, no-break spaces as spaces, no trailing spaces, at most one blank line in a row."""
+    text = text.translate(SPACES).replace("\r\n", "\n").replace("\r", "\n").replace("\f", "\n")   # \f: pdftotext's page break
+    lines = [line.rstrip() for line in text.split("\n")]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip("\n")
+
+
+def docx_text(data):
+    """(text, None) from word/document.xml, a line per paragraph, or (None, why not)."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            tree = xml.etree.ElementTree.fromstring(z.read("word/document.xml"))
+    except (zipfile.BadZipFile, KeyError, xml.etree.ElementTree.ParseError, OSError) as e:
+        return None, "not a readable .docx (%s)" % one_line(str(e) or type(e).__name__)
+    paras = []
+    for p in tree.iter(WORD + "p"):
+        buf = []
+        for el in p.iter():
+            if el.tag == WORD + "t":
+                buf.append(el.text or "")
+            elif el.tag == WORD + "tab":
+                buf.append("\t")
+            elif el.tag in (WORD + "br", WORD + "cr"):
+                buf.append("\n")
+        paras.append("".join(buf))
+    return "\n".join(paras), None
+
+
+def pdf_text(data):
+    """(text, None) through resume.pdf_text, Machine setup's pdftotext, or (None, why not)."""
+    fd, path = tempfile.mkstemp(suffix=".pdf")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        text, why = resume.pdf_text(path)
+    except OSError as e:
+        return None, "pdftotext failed: %s" % one_line(str(e))
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    if text is None:
+        return None, why
+    if not text.strip():
+        return None, "no text layer (a scanned PDF?): ask the user for the text"
+    return text, None
+
+
+def file_text(name, data):
+    """(text, None) for a file intake reads (.docx, .pdf, .txt, .md), or (None, why not)."""
+    ext = os.path.splitext(name)[1].lower()
+    if ext == ".docx":
+        return docx_text(data)
+    if ext == ".pdf":
+        return pdf_text(data)
+    if ext in (".txt", ".md"):
+        try:
+            return data.decode("utf-8-sig"), None
+        except UnicodeDecodeError:
+            return None, "not UTF-8 text"
+    return None, "not read (%s files are listed, not read)" % (ext or "extensionless")
+
+
+def mail_date(msg):
+    """The mail's Date in this machine's time zone, as a datetime; None without a readable one."""
+    try:
+        when = msg["Date"].datetime if msg["Date"] is not None else None
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if when is None:
+        return None
+    if when.tzinfo is None:   # -0000: UTC, zone unknown
+        when = when.replace(tzinfo=datetime.timezone.utc)
+    return logfiles.local_time(when)
+
+
+def header(msg, name):
+    try:
+        return one_line(str(msg.get(name, "") or ""))
+    except (TypeError, ValueError):
+        return one_line(str(msg.get_all(name, [""])[0]))
+
+
+def part_text(part):
+    try:
+        text = part.get_content()
+    except (LookupError, ValueError):
+        text = (part.get_payload(decode=True) or b"").decode("utf-8", "replace")
+    return html_text(text) if part.get_content_subtype() == "html" else text
+
+
+def mail_sections(msg, prefix, unread):
+    """A mail as lines: its headers, its body (the text part, else the HTML part as text), then each
+    attachment as a `## Attachment: <prefix><name>` section, a forwarded mail's read the same way."""
+    when = mail_date(msg)
+    out = []
+    for name in ("From", "To", "Cc", "Subject"):
+        if header(msg, name):
+            out.append("%s: %s" % (name, header(msg, name)))
+    out.append("Date: %s" % (when.strftime("%Y-%m-%d %H:%M") + " (this machine's time zone)" if when
+                             else header(msg, "Date") or "unknown"))
+    body = msg.get_body(preferencelist=("plain", "html"))
+    out += ["", tidy(part_text(body)) if body is not None else "(no text part)"]
+    for n, part in enumerate(msg.iter_attachments(), 1):
+        ctype = part.get_content_type()
+        inner = part.get_content() if ctype == "message/rfc822" else None
+        if isinstance(inner, list):   # a message/rfc822 part holds its message as a one-item list in some forms
+            inner = inner[0] if inner else None
+        name = part.get_filename() or (header(inner, "Subject") if inner is not None else "") or "attachment-%d" % n
+        name = one_line(name)
+        if inner is not None and not os.path.splitext(name)[1]:
+            name += ".eml"
+        elif not os.path.splitext(name)[1]:
+            name += BY_TYPE.get(ctype, "")
+        label = prefix + name
+        out += ["", "## Attachment: " + label, ""]
+        if inner is not None:
+            out += mail_sections(inner, label + " › ", unread)
+            continue
+        if ctype.startswith("text/") and os.path.splitext(name)[1].lower() in (".txt", ".md", ".html", ".htm", ""):
+            text, why = part_text(part), None
+        else:
+            text, why = file_text(name, part.get_payload(decode=True) or b"")
+        if text is None:
+            out.append("unread: " + why)
+            unread.append((label, why))
+        else:
+            out.append(tidy(text) or "(empty)")
+    return out
+
+
+def intake_one(path, day, unread):
+    """(base name, text) of the saved file for one input, or (None, None) for a file intake does not read."""
+    with open(path, "rb") as f:
+        data = f.read()
+    source = os.path.basename(path)
+    stem, ext = os.path.splitext(source)
+    if ext.lower() == ".eml":
+        msg = email.message_from_bytes(data, policy=email.policy.default)
+        when = mail_date(msg)
+        title = header(msg, "Subject") or "(no subject)"
+        base = "%s-%s" % (when.date().isoformat() if when else day, slug(header(msg, "Subject"), "mail"))
+        lines = ["# " + title, "", "Source: " + source] + mail_sections(msg, "", unread)
+        return base, "\n".join(lines)
+    text, why = file_text(source, data)
+    if ext.lower() not in FILE_TYPES:
+        unread.append((None, why))
+        return None, None
+    body = "unread: " + why if text is None else tidy(text) or "(empty)"
+    if text is None:
+        unread.append((source, why))
+    return "%s-%s" % (day, slug(stem, "file")), "\n".join(["# " + one_line(source), "", "Source: " + source, "", body])
+
+
+def slug(text, fallback):
+    s = logfiles.ascii_slug(REPLY.sub("", text or ""))
+    if len(s) > 60:
+        s = s[:60].rsplit("-", 1)[0]
+    return s or fallback
+
+
+def save_text(root, rel, base, text):
+    """Write text to <rel>/<base>.md, or <base>-2.md ... when a file of that name holds another mail;
+    (path, True) when written, (path, False) when a file there already held that text. A file with
+    the same head (its title, Source: and header lines: the text above its second blank line) holds
+    the same input read again, and is rewritten: a PDF read once pdftotext is installed, say."""
+    body = text.rstrip("\n") + "\n"
+    head = "\n\n".join(body.split("\n\n")[:2])
+    name, n = base, 2
+    while True:
+        path = "%s/%s.md" % (rel, name)
+        full = at(root, path)
+        if not os.path.exists(full):
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, "w", encoding="utf-8", newline="\n") as f:
+                f.write(body)
+            return path, True
+        with open(full, encoding="utf-8", errors="replace") as f:
+            old = f.read()
+        if old == body:
+            return path, False
+        if "\n\n".join(old.split("\n\n")[:2]) == head:
+            with open(full, "w", encoding="utf-8", newline="\n") as f:
+                f.write(body)
+            return path, True
+        name, n = "%s-%d" % (base, n), n + 1
+
+
+def cmd_intake(root, files, folder, day):
+    rel = app_folder(root, folder) + "/" + RECRUITER
+    for path in files:
+        if not os.path.isfile(path):
+            raise AppError("cannot read %s: no such file" % path)
+    out = []
+    for path in files:
+        unread = []
+        try:
+            base, text = intake_one(path, day, unread)
+        except OSError as e:
+            raise AppError("cannot read %s: %s" % (path, e))
+        if base is None:
+            out += ["unread: %s: %s" % (os.path.basename(path), why) for _, why in unread]
+            continue
+        saved, wrote = save_text(root, rel, base, text)
+        out.append(("saved: " if wrote else "unchanged: ") + saved)
+        out += ["unread: %s: %s: %s" % (saved, label, why) for label, why in unread]
+    return out
+
+
 # ---- main ----
 
 ROOT_HELP = "Every command takes --root <root>, the Log's root (default: the folder above this script's), anywhere on the line."
@@ -965,8 +1936,11 @@ def parser():
     s.add_argument("saved"); s.add_argument("level", choices=("archived", "reference")); s.add_argument("--today")
     s = sub.add_parser("sent", epilog=ROOT_HELP)
     s.add_argument("target"); s.add_argument("--before"); s.add_argument("--record")
+    s = sub.add_parser("sent-candidates", epilog=ROOT_HELP)
+    s.add_argument("--before", required=True); s.add_argument("--limit", type=int, default=5)
     s = sub.add_parser("sent-show", epilog=ROOT_HELP)
-    s.add_argument("ref"); s.add_argument("--target"); s.add_argument("--out"); s.add_argument("--record")
+    s.add_argument("refs", nargs="+"); s.add_argument("--target"); s.add_argument("--out"); s.add_argument("--record")
+    s.add_argument("--known"); s.add_argument("--today")
     s = sub.add_parser("stale", epilog=ROOT_HELP)
     s.add_argument("target")
     s = sub.add_parser("risks", epilog=ROOT_HELP)
@@ -975,6 +1949,17 @@ def parser():
     s.add_argument("saved", nargs="?"); s.add_argument("entries", nargs="*"); s.add_argument("--angle", required=True)
     s.add_argument("--add", action="append", default=[]); s.add_argument("--cap", action="append", default=[])
     s.add_argument("--today")
+    s = sub.add_parser("prep-init", epilog=ROOT_HELP)
+    s.add_argument("folder"); s.add_argument("--stage", required=True); s.add_argument("--with", dest="with_")
+    s.add_argument("--date"); s.add_argument("--mode-start")
+    s = sub.add_parser("prep-status", epilog=ROOT_HELP)
+    s.add_argument("folder"); s.add_argument("--stage"); s.add_argument("--today")
+    s = sub.add_parser("practice-add", epilog=ROOT_HELP)
+    s.add_argument("folder"); s.add_argument("--stage"); s.add_argument("--item", required=True)
+    s.add_argument("--verdict", required=True); s.add_argument("--kind"); s.add_argument("--weak")
+    s.add_argument("--heard"); s.add_argument("--today")
+    s = sub.add_parser("intake", epilog=ROOT_HELP)
+    s.add_argument("files", nargs="+"); s.add_argument("--folder", required=True); s.add_argument("--today")
     return p
 
 
@@ -992,7 +1977,9 @@ def run(root, a):
     if a.cmd == "sent":
         return cmd_sent(root, a.target, a.before, a.record)
     if a.cmd == "sent-show":
-        return cmd_sent_show(root, a.ref, a.target, a.out, a.record)
+        return cmd_sent_show(root, a.refs, a.target, a.out, a.record, a.known, today(a.today))
+    if a.cmd == "sent-candidates":
+        return cmd_sent_candidates(root, a.before, a.limit)
     if a.cmd == "stale":
         return cmd_stale(root, a.target)
     if a.cmd == "risks":
@@ -1003,6 +1990,14 @@ def run(root, a):
         if not a.saved:
             raise AppError("phrasings takes <saved> (or --cap)")
         return cmd_phrasings(root, a.saved, a.angle, a.entries, a.add, [], today(a.today))
+    if a.cmd == "prep-init":
+        return cmd_prep_init(root, a.folder, a.stage, a.with_, a.date, a.mode_start)
+    if a.cmd == "prep-status":
+        return cmd_prep_status(root, a.folder, a.stage, today(a.today))
+    if a.cmd == "practice-add":
+        return cmd_practice_add(root, a.folder, a.stage, a.item, a.verdict, a.kind, a.weak, a.heard, today(a.today))
+    if a.cmd == "intake":
+        return cmd_intake(root, a.files, a.folder, today(a.today))
 
 
 def main(argv):

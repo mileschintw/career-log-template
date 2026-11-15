@@ -701,23 +701,79 @@ class CheckSave(unittest.TestCase):
                       "left: profile.md: differs from HEAD, not written by this save: not committed\ncommitted: ", out)
         self.assertTrue(out.endswith("sync: ok\n"), out)
 
-    def test_left_lines_name_only_log_files_no_live_run_wrote(self):
-        """#662 (B5): an Engine file and another session's live-run file get no `left:` line, as the
-        Trigger check lists them."""
+    def session(self, *claims):
+        """A session of this Log (ADR 0014) that claimed these paths; its key."""
+        key = check_save.logfiles.new_session(self.root, {})
+        record = check_save.logfiles.read_session(self.root, key)
+        record["claims"] = list(claims)
+        check_save.logfiles.write_session(self.root, key, record)
+        return key
+
+    def claims(self, key):
+        return check_save.logfiles.read_session(self.root, key)["claims"]
+
+    def test_left_lines_name_only_log_files_no_other_session_claimed(self):
+        """#662 (B5): an Engine file and a file another session claimed get no `left:` line, as the Trigger
+        check lists them; the save's own folder commits all the same, and the other session's file stays."""
         self.commit_setup()
-        self.write("direction.md", "# Direction\n\n## Constraints\nNone.\n")
-        os.utime(os.path.join(self.root, "direction.md"), (time.time() - 3600,) * 2)   # an earlier session's
+        self.write("direction.md", "# Direction\n\n## Constraints\nNone.\n")   # an earlier session's
         self.write("tools/new_tool.py", "x\n")   # the Engine
-        live = os.path.join(self.root, ".build", "runs", "2031-01-02-100000", "live")
-        os.makedirs(os.path.dirname(live))
-        start = datetime.datetime.fromtimestamp(int(time.time() - 600)).astimezone().isoformat()
-        with open(live, "w", encoding="utf-8") as f:
-            json.dump({"start": start, "mode": "write"}, f)
-        self.write("profile.md", "# Profile\n\n## Skills\nGo, Rust.\n\n## Education\nBSc.\n")   # the live run's
-        code, out = self.run_tool(FOLDER, "--humanizer", "none", "--commit", "write(example): Engineer")
+        other = self.session("profile.md")
+        self.write("profile.md", "# Profile\n\n## Skills\nGo, Rust.\n\n## Education\nBSc.\n")   # the other session's
+        mine = self.session()
+        code, out = self.run_tool(FOLDER, "--humanizer", "none", "--commit", "write(example): Engineer",
+                                  "--session", mine)
         self.assertEqual(code, 0, out)
         self.assertEqual([l for l in out.splitlines() if l.startswith("left: ")],
                          ["left: direction.md: differs from HEAD, not written by this save: not committed"])
+        self.assertEqual(self.head(), "write(example): Engineer")
+        self.assertIn(" M profile.md", self.status())
+        self.assertEqual(self.claims(other), ["profile.md"])
+
+    def test_the_save_claims_its_outputs_and_holds_a_file_another_session_claimed(self):
+        """#732, by claims: the save holds only a file another session claimed, never its own outputs, which
+        it claims for this session."""
+        self.commit_setup()
+        report = "outputs/reports/2026-02-01-scan.md"
+        other = self.session(report)
+        self.write(report, "| https://example.com/jobs/1 | accepted | %s/ |\n" % FOLDER)
+        mine = self.session()
+        code, out = self.run_tool(FOLDER, "--humanizer", "none", "--commit", "write(example): Engineer",
+                                  "--session", mine)
+        self.assertEqual(code, 1, out)
+        self.assertIn("held: %s (session %s)" % (report, other), out)
+        self.assertNotIn("held: " + FOLDER, out)
+        self.assertEqual(self.head(), "base")
+        self.assertEqual(self.claims(mine), [])   # a held commit claims nothing
+        check_save.logfiles.release_claims(self.root, other)   # the user said that session has ended
+        code, out = self.run_tool(FOLDER, "--humanizer", "none", "--commit", "write(example): Engineer",
+                                  "--session", mine)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.status(), "")
+        claimed = self.claims(mine)
+        self.assertIn(report, claimed)
+        self.assertTrue(any(p.startswith(FOLDER + "/") for p in claimed), claimed)
+
+    def test_without_session_it_stops_while_another_session_holds_claims(self):
+        self.commit_setup()
+        other = self.session("profile.md")
+        code, out = self.run_tool(FOLDER, "--humanizer", "none", "--commit", "write(example): Engineer")
+        self.assertEqual(code, 1, out)
+        self.assertIn("session: none given (session %s holds claims in this Log)" % other, out)
+        self.assertEqual(self.head(), "base")
+
+    def test_run_stands_for_the_session_its_run_recorded(self):
+        """For one release write.md's `--run <run>` still saves: it stands for the session `scan.py run
+        --session` recorded."""
+        self.commit_setup()
+        self.session("profile.md")   # another session holds claims: a commit needs its own session
+        mine = self.session()
+        self.write(".build/runs/2031-01-02-100000/session", mine + "\n")
+        code, out = self.run_tool(FOLDER, "--humanizer", "none", "--commit", "write(example): Engineer",
+                                  "--run", "2031-01-02-100000")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.head(), "write(example): Engineer")
+        self.assertTrue(any(p.startswith(FOLDER + "/") for p in self.claims(mine)), self.claims(mine))
 
     def test_commit_refuses_a_subject_the_mode_does_not_give(self):
         """#518 (2): a fix-up subject of the run's own is a failing line, and nothing is committed."""
@@ -796,6 +852,15 @@ class CheckSave(unittest.TestCase):
                                        "--commit", "write(example): Engineer")[0], 2)
         self.assertEqual(self.run_tool(FOLDER, "--humanizer", "none", "--checked")[0], 2)
         self.assertEqual(self.run_tool("--audit", "--commit", "x")[0], 2)
+        self.assertEqual(self.run_tool(FOLDER, "--humanizer", "none", "--run", "2031-01-02-100000")[0], 2)
+        self.assertEqual(self.run_tool(FOLDER, "--humanizer", "none", "--session", "2031-01-02-100000")[0], 2)
+        for flags in (("--session", "k"), ("--run", "k"),
+                      ("--session", "2031-01-02-100000", "--run", "2031-01-02-100000")):
+            self.assertEqual(self.run_tool(FOLDER, "--humanizer", "none", "--commit", "write(example): Engineer",
+                                           *flags)[0], 2, flags)
+        with self.assertRaises(SystemExit) as e, contextlib.redirect_stderr(io.StringIO()):   # --take went with time attribution
+            self.run_tool(FOLDER, "--humanizer", "none", "--commit", "write(example): Engineer", "--take", FOLDER)
+        self.assertEqual(e.exception.code, 2)
 
     # ---- the save's files only (#521) ----
 

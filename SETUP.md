@@ -108,14 +108,21 @@ New-Item -ItemType Junction -Path "$HOME\.gemini\antigravity-cli\skills\career-l
 
 ## 5. Machine setup
 
-Installs Python 3.11+ when `python3` (`py -3` on Windows) is older, TinyTeX with poppler, and the optional tool if the user wants it on this machine. Everything installs for this user only, with no administrator dialog and no password. On Linux, a step that needs sudo (Chromium's system libraries, for the optional tool) is printed for the user instead. The user's yes or no for the optional tool is kept in `~/.career-log/machine.toml` ([Machine setup](GLOSSARY.md)), so the skill never asks again on this machine.
+Installs Python 3.11+ when `python3` (`py -3` on Windows) is older, TinyTeX with poppler, and the optional tools the user wants on this machine. Everything installs for this user only, with no administrator dialog and no password. On Linux, a step that needs sudo (Chromium's system libraries, for the optional tool) is printed for the user instead. The user's yes or no for each optional tool is kept in `~/.career-log/machine.toml` ([Machine setup](GLOSSARY.md)), so the skill never asks again on this machine.
 
 | Tool | What it installs | Needed for |
 |---|---|---|
 | TinyTeX (required) | TinyTeX (`~/Library/TinyTeX` on macOS, `~/.TinyTeX` on Linux, `%APPDATA%\TinyTeX` on Windows) with the packages in `tools/tex-packages.txt`, and poppler: a poppler the user already has (found as *How `tools/resume.py` finds its tools* below says) is used as it is; otherwise the script downloads micromamba (one program, into `~/.career-log/micromamba`), which installs conda-forge's poppler into `~/.career-log/poppler`, and a rerun of the script updates it there; once the script finds the user's own poppler and no working poppler of its own, it removes micromamba and what is left of `~/.career-log/poppler`. About 130 MB to download, 300–400 MB on disk, plus, when the user has no poppler, about 70 MB to download for micromamba and poppler, about 250 MB on disk; the largest package, `cm-super`, is about 63 MB, and tlmgr's time estimate for it is meaningless | Building and checking resume PDFs |
 | `playwright-cli` (optional) | Node 18+ when none is installed (nvm into `~/.nvm` on macOS and Linux; winget's per-user zip on Windows), [`playwright-cli`](https://github.com/microsoft/playwright-cli) in npm's global folder, its skill in this checkout (`.claude/skills/`, ignored by git), and, when Chrome and Edge are both missing (on macOS, one in `~/Applications` counts as missing: playwright-cli looks only in `/Applications`), Chromium in Playwright's cache in the home folder. About 400 MB; about 150 MB with Chrome or Edge, which playwright-cli uses instead | A Browser capture ([GLOSSARY.md](GLOSSARY.md)): a page a plain fetch cannot read |
+| `tools/speech.py` (optional) | Its own Python environment in `~/.career-log/speech/venv` with the pinned packages of `tools/speech-requirements.txt` (faster-whisper on Windows, Linux and x86-64 Macs, with NVIDIA's cuBLAS and cuDNN wheels only when an NVIDIA GPU is found; mlx-whisper on Apple Silicon, macOS 14 or later; PyAV, whose wheels bundle FFmpeg, for decoding), and two Whisper models in `~/.career-log/speech/models`. About 2.3 GB; about 3.5 GB with the GPU libraries. Removing `~/.career-log/speech` removes all of it | Transcribing a spoken practice answer with its times: length, pace, pauses, part timings (`python3 -I tools/speech.py --help`) |
 
-1. Ask the user whether they want `playwright-cli` on this machine, with what it installs and its size (the table above). TinyTeX needs no question. Skipping `playwright-cli` is fine: the skill offers it the first time a mode needs it.
+1. Ask the user whether they want `playwright-cli` on this machine, with what it installs and its size (the table above). TinyTeX needs no question. Skipping `playwright-cli` is fine: the skill offers it the first time a mode needs it. `tools/speech.py` is not asked about here, and the script does not install it: the skill offers it the first time a mode takes a spoken answer. To set it up by hand:
+
+   | macOS and Linux | Windows (PowerShell) |
+   |---|---|
+   | `python3 -I tools/speech.py setup` | `py -3 -I tools\speech.py setup` |
+
+   It states the backend and the download and installs nothing. Then, on the user's yes, the same command with `--yes`, as a background command (done when it ends with `speech: ok`); on a no, with `--no`, which only records the answer.
 2. Run the script with their answer, as a background command (Claude Code: the shell tool's background option), and wait for it to end: TinyTeX takes 5–20 minutes, longer than a shell tool's usual time limit.
 
    | macOS and Linux | Windows (PowerShell) |

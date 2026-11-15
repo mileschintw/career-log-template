@@ -142,7 +142,7 @@ class Typical(unittest.TestCase):
     def test_scan(self):
         self.assertEqual(scripts(runs(["tools/scan.py"])),
                          ["tools/export-template.sh", "tools/tests/test_scan.py", "tools/tests/test_fit.py",
-                          "tools/tests/test_dashboard.py"])
+                          "tools/tests/test_dashboard.py", "tools/tests/test_logfiles.py"])
 
     def test_entries(self):
         # tools/logfiles.py is imported by every tool tools/entries.py is, and by tools/sync.py and
@@ -157,7 +157,7 @@ class Typical(unittest.TestCase):
             "tools/tests/test_fit.py", "tools/tests/test_dashboard.py", "tools/tests/test_writing_lint.py",
             "tools/tests/test_application.py"])
         self.assertEqual(scripts(runs(["tools/logfiles.py"])), ["tools/export-template.sh", "tools/tests/test_chat_export.py"] + both + [
-            "tools/tests/test_config.py", "tools/tests/test_check.py",
+            "tools/tests/test_config.py", "tools/tests/test_check.py", "tools/tests/test_speech.py",   # speech.py imports logfiles (#773)
             "tools/tests/test_resume.py", "tools/tests/test_guide.py", "tools/tests/test_skill_lint.py", "tools/skill_lint.py", "tools/tests/test_scan.py",
             "tools/tests/test_fit.py", "tools/tests/test_dashboard.py", "tools/tests/test_sponsorship.py", "tools/tests/test_perplexity.py",
             "tools/tests/test_upgrade.py", "maintainer/tests/test_harness.py",
@@ -190,9 +190,9 @@ class Typical(unittest.TestCase):
     def test_chat_export_and_check_run_apart(self):
         # check_run.py imports chat_export.py; chat_export.py imports neither of them
         self.assertEqual(scripts(runs(["tools/check_run.py"]))[1:],
-                         ["tools/tests/test_check_run.py", "tools/tests/test_check_save.py"])
+                         ["tools/tests/test_check_run.py", "tools/tests/test_check_save.py", "tools/tests/test_logfiles.py"])
         self.assertEqual(scripts(runs(["tools/tests/fixtures/x.json"])),
-                         ["tools/export-template.sh", "tools/tests/test_chat_export.py"])
+                         ["tools/export-template.sh", "tools/tests/test_chat_export.py", "tools/tests/test_logfiles.py"])
         self.assertEqual(scripts(runs(["tools/chat_export.py"]))[:4],
                          ["tools/export-template.sh", "tools/tests/test_chat_export.py",
                           "tools/tests/test_check_run.py", "tools/tests/test_check_save.py"])
@@ -203,6 +203,12 @@ class Typical(unittest.TestCase):
             got = scripts(runs([path]))
             self.assertIn("tools/tests/test_check_run.py", got, path)
             self.assertIn("tools/tests/test_check_save.py", got, path)
+
+    def test_sync_runs_check_save(self):
+        # #732: check_save.py --commit calls tools/sync.py commit
+        got = scripts(runs(["tools/sync.py"]))
+        self.assertIn("tools/tests/test_sync.py", got)
+        self.assertIn("tools/tests/test_check_save.py", got)
 
     def test_closing_refs_apart(self):
         self.assertNotIn("maintainer/tests/test_closing_refs.py", scripts(runs(["tools/deny_coverage.py"])))

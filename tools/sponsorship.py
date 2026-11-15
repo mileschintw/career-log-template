@@ -150,8 +150,7 @@ def employer_key(name):
     return " ".join(words)
 
 
-def cell(text):
-    return str(text).replace("|", "\\|")
+cell = logfiles.md_cell   # each output field, `|` escaped as a table cell's
 
 
 def kinds_for(root, given=None):

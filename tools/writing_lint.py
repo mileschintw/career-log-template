@@ -461,7 +461,7 @@ class Lint:
                     unposted.append('"%s"%s' % (item, " (the posting writes %s)" % ", ".join(near[:3]) if near else ""))
             if unposted:
                 self.check(where, "%s: not in the posting; write each the way the posting does, or keep it only as a "
-                                  "tool the posting's role uses (writing.md › Skills: Names follow postings)"
+                                  "tool the posting's role uses (writing.md › Skills section › Names follow postings)"
                            % ", ".join(unposted))
             if unshown:
                 self.check(where, "%s: in no bullet; show each in one where the log has a use of it, or, when none "

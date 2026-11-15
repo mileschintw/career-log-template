@@ -775,6 +775,99 @@ class Transcript(Base):
         self.assertNotEqual(code, 0)
         self.assertIn("another session", err)
 
+    def line_of_work(self):
+        """A parent and two forks in one project folder: each fork copies the parent's opening (same uuids) and
+        goes on with turns of its own; fork-a is the newest file by modification time."""
+        folder = os.path.dirname(self.jsonl)
+        opening = [line("user", "open the plum ledger", 40, turnOrigin="human"), line("assistant", "Opened.", 41)]
+        files = {"parent": opening + [line("user", "parent goes on with pears", 42, turnOrigin="human")],
+                 "fork-a": opening + [line("user", "fork a weighs the apricots", 43, turnOrigin="human")],
+                 "fork-b": opening + [line("user", "fork b counts quinces", 44, turnOrigin="human"),
+                                      line("assistant", "Counted.", 45),
+                                      line("user", "fork b settles on quinces", 46, turnOrigin="human")]}
+        paths = {}
+        for n, (name, lines) in enumerate(files.items()):
+            paths[name] = os.path.join(folder, name + ".jsonl")
+            with open(paths[name], "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+            os.utime(paths[name], (2_000_000_000 + n * 60,) * 2)
+        os.utime(paths["fork-a"], (2_000_001_000,) * 2)
+        os.utime(self.jsonl, (1_900_000_000,) * 2)
+        return paths
+
+    def cwd_projects(self):
+        cwd = self.path("work", "repo")
+        folder = self.path("projects", re.sub(r"[^A-Za-z0-9]", "-", cwd))
+        os.rename(os.path.dirname(self.jsonl), folder)
+        self.jsonl = os.path.join(folder, "sess-1.jsonl")
+        return ["--cwd", cwd, "--projects", self.path("projects")]
+
+    def test_turns_current_picks_the_file_with_the_words(self):
+        """`--current`: the newest transcript holding the words, though another fork is newer by modification time."""
+        self.line_of_work()
+        where = self.cwd_projects()
+        code, out, err = run("turns", "--current", "Fork B   SETTLES", *where)
+        self.assertEqual(code, 0, err)
+        self.assertRegex(out.splitlines()[0], r"^transcript: .*fork-b\.jsonl \(the newest .* holding those words; 0 others")
+        self.assertIn("U3\t2030-01-02T03:46\tfork b settles on quinces", out)
+        code, out, err = run("turns", "--current", "plum ledger", *where)  # the shared opening: three hold it
+        self.assertEqual(code, 0, err)
+        self.assertRegex(out.splitlines()[0], r"fork-a\.jsonl \(the newest .* holding those words; 2 others")
+        code, out, err = run("turns", "--current", "no such words anywhere", *where)
+        self.assertNotEqual(code, 0)
+        self.assertIn("pass the transcript's path", err)
+        code, _, err = run("turns", self.jsonl, "--current", "plum ledger")
+        self.assertNotEqual(code, 0)
+        self.assertIn("not both", err)
+
+    def test_forks_lists_the_line_from_any_of_its_files(self):
+        paths = self.line_of_work()
+        for name in paths:
+            code, out, err = run("forks", paths[name])
+            self.assertEqual(code, 0, err)
+            self.assertIn("3 transcripts share their opening", out.splitlines()[0])
+            body = out.splitlines()[1:]
+            rows = {os.path.basename(r.split("\t")[0]).replace(" (this one)", ""): r.split("\t") for r in body}
+            self.assertEqual(set(rows), {"parent.jsonl", "fork-a.jsonl", "fork-b.jsonl"}, out)  # sess-1 shares nothing
+            self.assertEqual([r for r in body if "(this one)" in r.split("\t")[0]], ["\t".join(rows[name + ".jsonl"])])
+            self.assertTrue(rows[name + ".jsonl"][0].endswith(name + ".jsonl (this one)"), out)
+            self.assertEqual(rows["fork-b.jsonl"][1:], ["2030-01-02T03:40", "2030-01-02T03:46", "3",
+                                                        "U2 fork b counts quinces", "fork b settles on quinces"])
+            self.assertEqual(rows["parent.jsonl"][4], "U2 parent goes on with pears")
+            self.assertEqual(rows["fork-a.jsonl"][4], "U2 fork a weighs the apricots")
+            self.assertFalse(any("main" in c.lower() for r in body for c in r.split("\t")[1:]), out)  # no file is called the main line
+
+    def test_forks_on_a_chain(self):
+        """Each continuation copies the file before it whole: a file's split is where it left its closest
+        relative that does not hold all of it, not a turn no other file has."""
+        folder = os.path.dirname(self.jsonl)
+        a = [line("user", "chain one", 50, turnOrigin="human"), line("user", "two in a", 51, turnOrigin="human")]
+        b = a[:1] + [line("user", "three in b", 52, turnOrigin="human"), line("user", "four in b", 53, turnOrigin="human")]
+        c = b + [line("user", "five in c", 54, turnOrigin="human")]
+        for name, lines in (("a", a), ("b", b), ("c", c)):
+            with open(os.path.join(folder, name + ".jsonl"), "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+        code, out, err = run("forks", os.path.join(folder, "b.jsonl"))
+        self.assertEqual(code, 0, err)
+        rows = {os.path.basename(r.split("\t")[0]).split(" ")[0]: r.split("\t") for r in out.splitlines()[1:]}
+        self.assertEqual({k: v[4] for k, v in rows.items()},
+                         {"a.jsonl": "U2 two in a", "b.jsonl": "U2 three in b", "c.jsonl": "U4 five in c"})
+
+    def test_help_names_both_commands(self):
+        code, out, _ = run("--help")
+        self.assertEqual(code, 0)
+        self.assertIn("chat_export.py turns [<transcript> | --current <words>]", out)
+        self.assertIn("chat_export.py forks [<transcript> | --current <words>]", out)
+
+    def test_one_file_is_one_session(self):
+        """An excerpt never takes turns from a fork's file, even one that shares its opening."""
+        paths = self.line_of_work()
+        code, _, err = run("excerpt", paths["parent"], "--keep", "U1", "--slug", "plum-ledger", "--out", self.path("sources"))
+        self.assertEqual(code, 0, err)
+        code, _, err = run("excerpt", paths["fork-a"], "--keep", "U2", "--slug", "plum-ledger", "--out", self.path("sources"))
+        self.assertNotEqual(code, 0)
+        self.assertIn("another session", err)
+
     def test_bad_keep_refused(self):
         for keep, says in (("U1:1", "kept whole"), ("U9", "not in this transcript"), ("A1:5", "paragraphs 1-4"), ("X1", "cannot read")):
             code, _, err = self.excerpt(keep)

@@ -20,3 +20,19 @@ plan-previews/
 # Raw chat exports stay local; only picked threads move to sources/<origin>/
 sources/inbox/*
 !sources/inbox/.gitkeep
+
+# Recordings of spoken practice stay local: tools/speech.py reads them where they are, and the
+# practice log keeps only what the transcript gave
+*.m4a
+*.mp3
+*.wav
+# Test fixtures are tracked audio, not recordings (#754)
+!tools/tests/fixtures/**/*.wav
+*.aac
+*.ogg
+*.opus
+*.flac
+*.webm
+*.caf
+*.aif
+*.aiff

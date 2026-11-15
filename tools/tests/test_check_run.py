@@ -478,6 +478,27 @@ class Transcript(unittest.TestCase):
         self.assertEqual(grade, "FAIL")
         self.assertIn("printed bad: lines", ev)
 
+    # #805: a later fit.py map run redirected into a file and cat-ed back prints its Map line with
+    # neither `map: ok` nor `bad:` lines, so it does not stand for the tool's verdict
+    REDIRECTED = [bash("{ py -3 -I tools/fit.py map m.jsonl --show; } > a/requirement-map-final.md && cat a/requirement-map-final.md"),
+                  result("%s\n%s\n\n%s" % (COURSE, MAP, TABLE))]
+
+    def test_map_run_redirected_and_cat_after_a_pass_passes(self):
+        grade, ev = self.map_count([*fit_map(cmd="py -3 -I tools/fit.py map m.jsonl --show"), *self.REDIRECTED, SHOWN])
+        self.assertEqual(grade, "PASS", ev)
+
+    def test_map_run_only_redirected_fails(self):
+        """With no call that printed a verdict, the Map line has no tool output to stand on."""
+        self.assertEqual(self.map_count([*self.REDIRECTED, SHOWN])[0], "FAIL")
+
+    def test_map_run_redirected_after_a_bad_run_fails(self):
+        bad = [bash("py -3 -I tools/fit.py map m.jsonl"),
+               result("%s\n%s\n\n%s\n\nbad: rows[1].category: covered, but written by unknown; at most shallow"
+                      % (COURSE, MAP, TABLE), error=True)]
+        grade, ev = self.map_count([*fit_map(), *bad, *self.REDIRECTED, SHOWN])
+        self.assertEqual(grade, "FAIL")
+        self.assertIn("printed bad: lines", ev)
+
     def test_map_run_output_with_crlf_lines(self):
         """Windows: the tool's lines end in CRLF in the tool result."""
         out = "%s\n%s\n\n%s\n\nmap: ok\nexit 0" % (COURSE, MAP, TABLE)
@@ -709,6 +730,32 @@ class Copy(CopyBase):
         grade, ev = check_run.check_provenance(self.copy, self.saved())
         self.assertEqual(grade, "FAIL")
         self.assertIn("has no provenance.md", ev)
+
+    def interview_save(self, folder="outputs/applications/2026-03-01-other-engineer"):
+        """An interview run's save: only intake and prep files in a new application folder."""
+        for f in ("posting.md", "prep-phone.md", "talk.md", "recruiter/mail.md"):
+            self.write(folder + "/" + f, "x\n")
+        self.commit("interview(other): phone screen")
+        return folder
+
+    def test_interview_only_folder_skips(self):
+        self.interview_save()
+        grade, ev = check_run.check_provenance(self.copy, self.saved())
+        self.assertEqual(grade, "SKIP", ev)
+
+    def test_interview_folder_beside_a_passing_write_folder_passes(self):
+        self.interview_save()
+        self.save()
+        grade, ev = check_run.check_provenance(self.copy, self.saved())
+        self.assertEqual(grade, "PASS", ev)
+
+    def test_write_output_and_interview_files_in_one_folder_still_require_provenance(self):
+        self.interview_save(FOLDER)
+        self.write(FOLDER + "/answers.md", "## Why us? (100 words)\nType: motivation\n\nBecause.\n")
+        self.commit()
+        grade, ev = check_run.check_provenance(self.copy, self.saved())
+        self.assertEqual(grade, "FAIL")
+        self.assertIn("%s has no provenance.md" % FOLDER, ev)
 
     def printed(self, blocks):
         os.makedirs(os.path.join(self.copy, ".build"), exist_ok=True)

@@ -35,7 +35,7 @@ regenerate the page themselves (write()).
 Exit 0 on success, 1 on --check's stale or missing, or a file that does not parse, 2 on a bad
 argument. Standard library only, Python 3.11+.
 """
-import argparse, glob, html, importlib.util, json, os, re, sys
+import argparse, html, importlib.util, json, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -123,7 +123,7 @@ def markdown(text):
             while i < len(lines) and lines[i].strip().startswith("|"):
                 block.append(scan.cells(lines[i]))
                 i += 1
-            body = [r for r in block[1:] if not all(re.fullmatch(r":?-+:?", c) for c in r)]
+            body = block[2:] if len(block) > 1 and scan.logfiles.is_rule(block[1]) else block[1:]
             out.append(table_html(block[0], [[inline(c) for c in r] for r in body]))
             continue
         m = re.match(r"(#{1,6})\s+(.*)", s)
@@ -212,7 +212,7 @@ def declined(root):
 
 def applications(root):
     out = []
-    for d in sorted(glob.glob(os.path.join(glob.escape(os.path.join(root, "outputs", "applications")), "*")), reverse=True):
+    for d in sorted(scan.logfiles.glob_under(os.path.join(root, "outputs", "applications"), "*"), reverse=True):
         if not os.path.isdir(d):
             continue
         name = os.path.basename(d)

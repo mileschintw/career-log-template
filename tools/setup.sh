@@ -57,8 +57,9 @@ fi
 set_machine() {   # set_machine <key> <TOML value>: one `<key> = <value>` line in machine.toml
   mkdir -p "$(dirname "$MACHINE")"
   [ -f "$MACHINE" ] || printf '%s\n' "# career-log Machine setup: the optional tools the user wants on this machine" \
-    "# (true) or declined (false), and where poppler came from. Written by tools/setup.sh and" \
-    "# tools/setup.ps1; whether a tool is installed is detected on every run (tools/check.py)." > "$MACHINE"
+    "# (true) or declined (false), and where poppler came from. Written by tools/setup.sh," \
+    "# tools/setup.ps1 and tools/speech.py (its setup); whether a tool is installed is detected" \
+    "# on every run (tools/check.py)." > "$MACHINE"
   grep -v "^$1 *=" "$MACHINE" > "$MACHINE.tmp" || true
   echo "$1 = $2" >> "$MACHINE.tmp"
   mv "$MACHINE.tmp" "$MACHINE"

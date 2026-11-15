@@ -69,7 +69,8 @@ call's description.
   from that call's output (its tool result; a command split over lines with a backslash or a backtick is
   read as one line). The last line each posting's label has across those outputs must say `no row:
   none` and have m >= n, and the output it is in must hold a line `map: ok` (a run that printed
-  `bad:` lines has none). A map
+  `bad:` lines has none). An output with neither a `map: ok` nor a `bad:` line (fit.py's output
+  redirected into a file and cat-ed back, or cut by a filter) is left out. A map
   shown in the reply (a text message with a `Course work:` line and a table below it, or, once a
   fit.py map call has no --category and no --several, a message with a table whose first header
   cell is `Requirement`, as fit.py's is; the last such message counts, or the last message with a
@@ -115,7 +116,8 @@ Save checks, on the changes between <sha> and the copy's HEAD:
 - resume-identical: every saved resume `.tex` under outputs/ is byte-identical to a `.tex` under
   the copy's .build/ (the drafts), or to a `.tex` under outputs/ at <sha> (an approved version saved
   unchanged). Otherwise FAIL.
-- provenance: every application folder saved has a provenance.md, and every row of a provenance
+- provenance: every application folder a save wrote a write output in (resume.tex, resume.pdf,
+  answers.md or provenance.md; interview files alone need none) has a provenance.md, and every row of a provenance
   table in a saved provenance file (an application's provenance.md, outputs/resumes/*.md,
   outputs/reports/*.md) passes write step 10's rule, the one tools/check_save.py prints (its --help
   gives it): no entry section naming a file other than an entry, profile.md or direction.md, or a
@@ -192,7 +194,7 @@ from entries import ENTRY_PATH   # what an entry's path is
 from entries import SIMILAR, phrasings, similar, words   # the Past phrasings parser (its docstring's *Past phrasings*)
 import logfiles   # git with a timeout, UTF-8 reads
 from logfiles import provenance_rows   # a provenance table's rows
-from check_save import PROVENANCE_FILE, report_marks, row_problem   # write step 10's provenance rule; a report's Archived line
+from check_save import APPLICATION_FILES, PROVENANCE_FILE, report_marks, row_problem   # write step 10's provenance rule; a report's Archived line
 import fit   # the map table's headers (COLUMNS)
 
 
@@ -507,7 +509,9 @@ def one_line(text):
 def fit_map_lines(evs):
     """([(Map line match, whether its output says `map: ok`)], last Course work line, whether a call
     builds a map to show: one with no --category or --several, which interview and several postings
-    add) in the outputs of the run's fit.py map calls."""
+    add) in the outputs of the run's fit.py map calls. A call whose output has neither `map: ok` nor a
+    `bad:` line gives no verdict (its output went into a file and was cat-ed back, #805): its lines
+    are left out."""
     results = {e[2]: e[1] for e in evs if e[0] == "result"}
     maps, course, to_show = [], None, False
     for e in evs:
@@ -516,6 +520,8 @@ def fit_map_lines(evs):
             to_show = to_show or not re.search(r"\s--(?:category|several)\b", cmd)
             out = results.get(e[3]) or ""
             ok = bool(re.search(r"^map: ok[ \t\r]*$", out, re.M))
+            if not ok and not re.search(r"^bad: ", out, re.M):
+                continue
             maps += [(m, ok) for m in MAP_RE.finditer(out)]
             found = COURSE_WORK.findall(out)
             course = one_line(found[-1]) if found else course
@@ -842,8 +848,15 @@ def check_resume(copy, saved, base):
     return ("FAIL", "; ".join(bad)) if bad else ("PASS", "; ".join(ok))
 
 
+# The files a write save puts in an application folder besides posting.md (write step 10; check_save.py's
+# APPLICATION_FILES plus answers.md and provenance.md); interview files there (prep-, practice-, the
+# pack, talk.md, recruiter/) carry no provenance.md, and an interview run writes posting.md too.
+WRITE_FILES = tuple(f for f in APPLICATION_FILES if f != "posting.md") + ("answers.md", "provenance.md")
+
+
 def check_provenance(copy, saved):
-    folders = sorted({"/".join(p.split("/")[:3]) for p in saved if p.startswith("outputs/applications/") and p.count("/") >= 3})
+    folders = sorted({"/".join(p.split("/")[:3]) for p in saved if p.startswith("outputs/applications/")
+                      and p.count("/") == 3 and p.split("/")[3] in WRITE_FILES})
     files = [p for p in saved if PROVENANCE_FILE.match(p)]
     if not folders and not files:
         return "SKIP", "no output with a provenance table saved"

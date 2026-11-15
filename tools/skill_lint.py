@@ -20,6 +20,9 @@ Fails (exit 1, one line per problem) when, in any .md file under skills/career-l
   docstring is not one), from a word's start in the literal, with the label's colon literal
   text and each `%s`, `{...}` or f-string field standing for any text. A label naming a tool
   (`sync: ok`) checks that tool too, and a line naming several passes when any of them prints it.
+It checks the same two references in the string literals of tools/*.py (docstrings included; this
+lint's own left out), resolved as the skill's are, where a bare mode name also counts as its file
+(`write step 10`, `fit › Save`) and a section that is a field (`%s`, `{x}`, `<section>`) is skipped.
 It also fails when tools/check.py's mode lists disagree with the skill: MODES is the modes table but
 NO_CHECK (the modes with no Trigger check), and NEEDS's modes with playwright-cli, but setup (which
 installs it) and browser (browser.md's own check), are the modes whose files link browser.md (a file
@@ -61,6 +64,11 @@ ALIAS = re.compile(r"`<([a-z_]+)>`(?: below)? is `[^`]*\btools/([a-z_][a-z0-9_]*
 PRINTED = re.compile(r"`([A-Za-z][\w'’ /.-]*:(?: [^`]*)?)`")
 PRINT_VERB = re.compile(r"\bprint(?:s|ed|ing)?\b")
 FIELD = re.compile(r"%(?:\([^)]*\))?[-#0 +]*(?:\d+|\*)?(?:\.\d+)?[sdifrxgc]")
+# Pointers in a tool's strings: a mode named bare before › or "step N", and a field: %-format,
+# {...}, or a <placeholder>
+BARE_MODE = re.compile(r"(?<![\w./`-])([a-z][a-z-]*)(?= › | step \d)")
+FORMAT_FIELD = re.compile(FIELD.pattern + r"|\{[^{}]*\}|<[^<>\s]+>")
+FIELD_MARK = "\0"   # what check_tool writes in place of each field
 MODE_CONTEXT = [
     re.compile(r"(?:`|\*\*)([a-z][a-z-]*)(?:`|\*\*) modes?\b"),
     re.compile(r"\bmodes? (?:`|\*\*)([a-z][a-z-]*)(?:`|\*\*)"),
@@ -212,30 +220,7 @@ class Linter:
                         anchor = href.split("#", 1)[1]
                         if anchor not in self.doc(p).anchors:
                             self.add(path, lineno, "link %s: no heading with that anchor" % href)
-            # file.md › Section, written as a link: check its text against the file
-            for m in LINKED_SECTION.finditer(line):
-                p = self.resolve_href(here, m.group("href"), path)
-                if p and os.path.exists(p) and p.endswith(".md") and not self.doc(p).has_label(m.group("rest"), exact=True):
-                    self.add(path, lineno, "%s › %s: no such section" % (m.group("name"), m.group("rest")))
-            # file.md › Section, bare or after a link
-            # (a reference's text runs to the next reference on the line, or the line's end)
-            text = LINKED_SECTION.sub(" ", line)
-            refs = list(SECTION_REF.finditer(text))
-            for i, m in enumerate(refs):
-                p = self.target(here, path, lineno, m)
-                if p and os.path.exists(p) and p.endswith(".md"):
-                    rest = text[m.end():refs[i + 1].start() if i + 1 < len(refs) else len(text)]
-                    exact = bool(m.group("open")) and not m.group("close")
-                    if exact:
-                        rest = rest.split("`", 1)[0]
-                    if not self.doc(p).has_label(rest, exact):
-                        shown = rest if exact else re.split(r"[.,;:()]\s", rest + " ", maxsplit=1)[0].strip()
-                        self.add(path, lineno, "%s › %s: no such section" % (m.group("name") or m.group("href"), shown))
-            # file.md step N
-            for m in STEP_REF.finditer(line):
-                p = self.target(here, path, lineno, m)
-                if p and os.path.exists(p) and p.endswith(".md") and int(m.group("n")) not in self.doc(p).steps:
-                    self.add(path, lineno, "%s step %s: no such step" % (m.group("name") or m.group("href"), m.group("n")))
+            self.check_pointers(here, path, lineno, line)
             if not fenced:
                 self.check_printed(path, lineno, line)
             # Mode names
@@ -251,6 +236,58 @@ class Linter:
                         seen.add(name)
             for name in sorted(seen):
                 self.add(path, lineno, "mode %s: not in SKILL.md's modes table" % name)
+
+    def check_pointers(self, here, path, lineno, line):
+        """The `file.md › Section` and `file.md step N` references on line, resolved from here."""
+        # file.md › Section, written as a link: check its text against the file
+        for m in LINKED_SECTION.finditer(line):
+            p = self.resolve_href(here, m.group("href"), path)
+            if p and os.path.exists(p) and p.endswith(".md") and not self.doc(p).has_label(m.group("rest"), exact=True):
+                self.add(path, lineno, "%s › %s: no such section" % (m.group("name"), m.group("rest")))
+        # file.md › Section, bare or after a link
+        # (a reference's text runs to the next reference on the line, or the line's end)
+        text = LINKED_SECTION.sub(" ", line)
+        refs = list(SECTION_REF.finditer(text))
+        for i, m in enumerate(refs):
+            p = self.target(here, path, lineno, m)
+            if p and os.path.exists(p) and p.endswith(".md"):
+                rest = text[m.end():refs[i + 1].start() if i + 1 < len(refs) else len(text)]
+                exact = bool(m.group("open")) and not m.group("close")
+                if exact:
+                    rest = rest.split("`", 1)[0]
+                if FIELD_MARK in rest:   # a tool string's section stops at its first field (check_tool)
+                    rest = rest.split(FIELD_MARK, 1)[0]
+                    if not rest.strip():
+                        continue
+                if not self.doc(p).has_label(rest, exact):
+                    shown = rest if exact else re.split(r"[.,;:()]\s", rest + " ", maxsplit=1)[0].strip()
+                    self.add(path, lineno, "%s › %s: no such section" % (m.group("name") or m.group("href"), shown))
+        # file.md step N
+        for m in STEP_REF.finditer(line):
+            p = self.target(here, path, lineno, m)
+            if p and os.path.exists(p) and p.endswith(".md") and int(m.group("n")) not in self.doc(p).steps:
+                self.add(path, lineno, "%s step %s: no such step" % (m.group("name") or m.group("href"), m.group("n")))
+
+    def check_tool(self, path):
+        """The pointers in tools/<x>.py's string literals, docstrings included, resolved as the
+        skill's own are. A bare mode name counts as its file (`write step 10`, `fit › Save`); a
+        section that is a field (`applications.md › %s`, an f-string's `{x}`, a `<section>`) is
+        not checked. A problem's line is the literal's first line plus the newlines before it."""
+        here = os.path.join(self.skill, "SKILL.md")
+        names = self.modes | self.subfiles
+        tree = ast.parse(read(path))
+        parts = {id(v) for n in ast.walk(tree) if isinstance(n, ast.JoinedStr) for v in n.values}
+        for n in ast.walk(tree):
+            if isinstance(n, ast.JoinedStr):
+                value = "".join(v.value if isinstance(v, ast.Constant) else FIELD_MARK for v in n.values)
+            elif isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in parts:
+                value = n.value
+            else:
+                continue
+            text = FORMAT_FIELD.sub(FIELD_MARK, value.replace("%%", "%"))
+            text = BARE_MODE.sub(lambda m: "modes/%s.md" % m.group(1) if m.group(1) in names else m.group(0), text)
+            for k, line in enumerate(text.split("\n")):
+                self.check_pointers(here, path, n.lineno + k, line)
 
     def check_printed(self, path, lineno, line):
         """Each tool line `line` says a tool prints, against the tools' literals."""
@@ -373,6 +410,9 @@ class Linter:
             for f in sorted(files):
                 if f.endswith(".md"):
                     self.check_file(os.path.join(d, f))
+        # The pointers in the tools' strings (tools/*.py, this lint and its examples left out)
+        for t in sorted(self.tools - {"skill_lint"}):
+            self.check_tool(os.path.join(tools_dir, t + ".py"))
         # The guide and the Template's front page, where they exist: their links and references,
         # and the guide's generated blocks and flows table (tools/guide.py)
         for f in ("README.md", "README.zh-TW.md"):

@@ -395,35 +395,39 @@ form); `none yet` and `GAP:` lines are not wordings.
 
 Stories (the Story index, Talking points and wordings files, and the Application questions table):
 
-  python3 -I tools/entries.py story-coverage [--type <question type>]... [--talking-points]
-      [--application-questions]
+  python3 -I tools/entries.py story-coverage [--type <question type>]... [--interviewers <n>]
+      [--talking-points] [--application-questions]
   python3 -I tools/entries.py story-candidates <question type>
-  python3 -I tools/entries.py story-leads --type <question type>... | --check <pack>
+  python3 -I tools/entries.py story-leads [--brief] --type <question type>... | --check <pack>
+  python3 -I tools/entries.py story-card --type <question type>[=<key>]... | --check <cue card>
+      | --confirm <cue card>
   python3 -I tools/entries.py story-stale <talking points file>
   python3 -I tools/entries.py story-wording-add <question type> <wording>
   python3 -I tools/entries.py story-wordings [--type <question type>]...
   python3 -I tools/entries.py story-finish <entry>
   python3 -I tools/entries.py story-type-add <question type>
   python3 -I tools/entries.py story-add <question type> <target> [--marker raw|pending|core]...
-      [--label <label>] [--summary <summary>]
+      [--label <label>] [--summary <summary>] [--story <name>]
+  python3 -I tools/entries.py story-name <question type> <key> <name>
   python3 -I tools/entries.py story-core <entry> on|off
   python3 -I tools/entries.py story-confirm <talking points file> [--type <question type>]
   python3 -I tools/entries.py answer-row <question type> [--angle <angle>]
   python3 -I tools/entries.py answer-row-add <question type> --scope shared|per-angle|per-company
   python3 -I tools/entries.py answer-set <question type> [--angle <angle>] [--remove] <path>
 
-They read three formats, and write them as below: the Story index rows and items (story-type-add,
-story-add, story-core, story-finish), a Talking points file's `confirmed:` line and its row's link
-(story-confirm; the rest of the file is the `stories` mode's, as given here), and the wordings
-files (story-wording-add):
+They read four formats, and write them as below: the Story index rows and items (story-type-add,
+story-add, story-name, story-core, story-finish), a Talking points file's `confirmed:` line and its row's link
+(story-confirm; the rest of the file is the `stories` mode's, as given here), the wordings
+files (story-wording-add), and a cue card's `confirmed:` line (story-card --confirm; the rest is the
+`stories` mode's):
 
 - The Story index is the first table of stories.md, before any `## ` heading (not the Application
   questions table), with the header `| Question type | Stories |`. One row per question
   type, each type in one row only: `| <question type> | <story>; <story> |`, or, once the type has a
   Talking points file, `| [<question type>](stories/<slug>.md) | <story>; <story> |`. A question
   type holds no `|`, `;` or `]`. A story is
-  `*(<marker>)* [<label>](entries/<file>.md#<section anchor>) — <one-line summary>`; the markers
-  and the summary are optional, and stories are separated by `; `. Markers: `raw` (imported facts
+  `*(<marker>)* [<label>](entries/<file>.md#<section anchor> "<name>") — <one-line summary>`; the
+  markers, the name and the summary are optional, and stories are separated by `; `. Markers: `raw` (imported facts
   not consolidated yet), `pending` (facts still in the entry's `## Pending`), `core` (the entry is
   one of the user's core Stories; one item of the experience marked anywhere in the index is
   enough);
@@ -432,12 +436,16 @@ files (story-wording-add):
   counts too. A story starts at the cell's start or at a `; ` followed by `*(` or `[`, so a summary
   may hold `;` but no `; [` or `; *(`. An item with no link, or one that links a file outside
   entries/, is kept but is not a Story. A Story is named by its key: `entries/<file>.md#<anchor>`,
-  or the path alone when the link has no anchor: one point of an experience (GLOSSARY.md), and a
-  long experience holds many. An experience is an entry, or a whole series (named by its first part).
+  or the path alone when the link has no anchor, then `~<name>` when the link has a name: one point
+  of an experience (GLOSSARY.md), and a long experience holds many, often in one section. The name
+  is the link's title, a slug (lowercase letters and digits joined by `-`; a title that is not one
+  is no name), and tells apart the Stories of one section: `#sec`, `#sec~a` and `#sec~b` are three
+  keys, and a key with no name means the whole section. An experience is an entry, or a whole series (named by its first part).
   Core Stories and the type count per experience count by experience (its types are every type
   any of its keys is listed under); the other checks count by key. `log` indexes every pending
   Story of an entry as `entries/<file>.md#pending`, so that key names several Stories until
-  `consolidate` gives each its own section; the two per-Story findings below skip it until then.
+  `consolidate` gives each its own section; the two per-Story findings below skip it until then (a
+  named `#pending~<name>` key is one Story, and counts).
 - A Talking points file is `stories/<slug>.md`, where <slug> is the question type lowercased with
   each run of characters other than letters and digits replaced by `-` (`Disagreement / conflict`:
   `disagreement-conflict`); the row's link, not the slug, says which file is the type's:
@@ -452,7 +460,7 @@ files (story-wording-add):
 
     ## Stories
     1. [<label>](../entries/<file>.md#<anchor>) — <when to lead with it>
-    2. [<label>](../entries/<file>.md#<anchor>) — <when to lead with it>
+    2. [<label>](../entries/<file>.md#<anchor> "<name>") — <when to lead with it>
 
     ## Opening
     <the one full sentence>
@@ -464,8 +472,8 @@ files (story-wording-add):
     - [Likely questions](../entries/<file>.md#likely-questions)
 
   The tools read `type`, `confirmed`, the numbered `## Stories` list in order (the first is the
-  lead Story) and every link to an entry anywhere in the file outside HTML comments (the entries
-  it points at). `confirmed:` is the local date and time the user last confirmed the file; the time
+  lead Story; a `## Stories` link names its Story by its title, as an index item does) and every
+  link to an entry anywhere in the file outside HTML comments (the entries it points at). `confirmed:` is the local date and time the user last confirmed the file; the time
   is optional (`YYYY-MM-DD` alone reads as 00:00), but story-confirm writes it at every save and
   reconfirm, so that the line changes even when the date does not.
 - A wordings file is `stories/wordings/<slug>.md` (the slug as above, `-2`, `-3`, ... added when
@@ -482,6 +490,45 @@ files (story-wording-add):
 
   The tools read `type` and, after the front matter, every line that starts with `- ` outside
   HTML comments, in order.
+- A cue card is `cue-card-<stage>.md` in an application folder (outputs/applications/<folder>/):
+  one interview's Stories, one row each, with the facts to tell them from; its links are relative
+  to that folder:
+
+    ---
+    stage: <stage>
+    confirmed: YYYY-MM-DD HH:MM
+    ---
+
+    # Cue card: <stage>
+
+    <the answer order, then the standing reminders, in one line>
+
+    ## Card
+
+    | Story | Leads | Key facts | Task | I did | Result |
+    |---|---|---|---|---|---|
+    | <Story> | <question>; <question> | <fact> (<caveat>); ... | <one sentence> | <actions> | <result> (<caveat>) |
+
+    ## Finder
+
+    | Story | Question types | Key words |
+    |---|---|---|
+    | <Story> | <type>; <type> | <word>, <word> |
+    | gap | <a common type of the stage with no Story> | - |
+
+    ## Self-drill
+
+    - "<a reworded question>" → <Story>
+
+    ## Provenance
+
+    | Story | Sections |
+    |---|---|
+    | <Story> | [<label>](../../../entries/<file>.md#<anchor>); ... |
+
+  The tools read `confirmed` (as in a Talking points file), the first cell of each row of the
+  first table under `## Card`, and, in the first table under `## Provenance`, each row's first
+  cell (the Story, matched exactly to a Card row's) and every link to an entry in its other cells.
 
 In the output below, `-` stands for an empty field, a list of question types is separated by
 ` | `, and a line's last field is free text (it may hold `; `).
@@ -498,14 +545,19 @@ In the output below, `-` stands for an empty field, a list of question types is 
   - `type with only raw or pending stories:` every Story in its row is marked `raw` or `pending`;
   - `index names a missing entry: <question type>: <path>`;
   - `story under too many types: <key> in <n> types (more than MAX_TYPES_PER_STORY): <types>` (a
-    `#pending` key is skipped);
+    `#pending` key is skipped); for a key with no name the line ends `; if the section holds
+    different Stories, name each with story-name` (the name hint);
   - `core stories outside 3–5: <n>` (CORE_RANGE);
   - `row links a missing talking points file: <question type>: <path>`, `talking points file no
     row links: <path>`, `talking points type differs from its row: <path>: type <t>, row <t>`,
     `talking points with no readable confirmed date: <path> <value>`;
   - with `--type`: `interview type not in stories.md: <question type>`, `interview type with no
     story: <question type>`, and `story carries too many questions in one interview: <key> leads
-    <n> (more than MAX_PER_INTERVIEW): <types>` (a `#pending` key is skipped).
+    <n> (more than <m>): <types>` (a `#pending` key is skipped; the name hint ends it as above),
+    where <m> is `--interviewers <n>` (the stage's interviewers, 1 or more; default
+    MAX_PER_INTERVIEW, 1): one Story may lead a question for each interviewer; when five or more
+    questions have a lead (PLAN_MIN_QUESTIONS), also `interview plan leads with fewer than 3 stories:
+    <k> stories lead <n> questions` (PLAN_MIN_STORIES; a `#pending` key counts as one).
   - with `--talking-points`, for each Talking points file: `talking points sections out of order:
     <file>: <its sections, as they come>` (Stories, Opening, Cue lines, Follow-ups is the order),
     and `talking points over MAX_CUE_LINES cue lines: <file>: <n>`;
@@ -515,9 +567,30 @@ In the output below, `-` stands for an empty field, a list of question types is 
     `per-angle pointer with no angle: <pointer>`, `per-angle row with <n> pointers for <angle>`.
   `--type` is given once per question of a pasted list for one interview: the question type the
   question maps to, written exactly as the index writes it, or `<question type>=<key>` when the
-  user chose a Story other than the lead. The lead is the Talking points file's first Story, else
+  user chose a Story other than the lead (its key as story-candidates prints it, the name included). The lead is the Talking points file's first Story, else
   the row's first Story. Exit 1 when it prints a finding, else `OK: <n> question types, no
   findings` and exit 0.
+- `story-card --type <question type>[=<key>]...` (stories step 8): the scaffold of one interview's
+  cue card, from the merge plan's leads, the --type values as story-coverage takes them. Lines:
+  `question <n>: <question type>: leads with <key>` per question; `story <n>: <Story>; key <key>;
+  leads <question type> | ...` per Story that leads one, where <Story> is the key's name, else its
+  index label, else the key (the key when two Stories would show the same); `finder: <Story>:
+  <question type> | ...`, the types the index lists it under and the ones it leads, each followed by
+  that type's `wording: <Story>: <question type> | <wording>` lines; `section: <Story>:
+  <entry>#<anchor>`; the `interview type ...` findings as story-coverage prints them; then
+  `scaffold:` and the card's Markdown, one row per Story in the Card, Finder and Provenance tables,
+  each Provenance row linking the Story's section. Exit 1 when it printed a finding, else 0.
+- `story-card --check <cue card>`: one `FAIL: ` line for each `no ## Card table: <file>`, `card with
+  no rows: <file>`, `no ##
+  Provenance table: <file>`, `card with no readable confirmed date: <value>`, `row with no
+  provenance: <Story>` (a Card row with no Provenance row, or one with no link to an entry),
+  `missing entry: <Story>: <entry>`, `anchor the entry lacks: <Story>: <entry>#<anchor>`, and
+  `entry changed since confirmed: <entry> <commit> <committer date> <subject>` or `... <entry>
+  uncommitted` (the change since the card was confirmed, read as story-stale reads it; an
+  uncommitted change counts only once a commit wrote the card's confirmed: line), exit 1;
+  or `card: ok, <n> stories, <k> entries unchanged since the confirmed card`, exit 0.
+- `story-card --confirm <cue card>`: writes `confirmed: <now>` in the card's front matter, as
+  story-confirm does, and prints `confirmed: <file>: <now>`.
 - `story-candidates <question type>` (matched exactly, case included), lines in this order:
   - `type: <question type>`, then `type not in stories.md: <question type> (...)` for a new type,
     whose candidates are then every entry;
@@ -534,11 +607,19 @@ In the output below, `-` stands for an empty field, a list of question types is 
   - `pending: <path>: <bullet>`: each `- ` line of each entry's `## Pending`, entry by entry, cut
     to 300 characters with ` ...` (read the entry for the rest).
   Exit 0.
-- `story-leads --type <question type>...` (interview step 3): for each `--type`, one predicted
+- `story-leads --type <question type>...` (interview-pack.md › Stories): for each `--type`, one predicted
   question each, a `question <n>: <question type>` line, then story-candidates' lines for that type; then one
   `next: now, ...` line: show them, ask the user to confirm each type and pick each lead that
   confirmed Talking points do not give, and end the turn; it ends with the three forms of a pack's
   Lead: line that `--check` reads. Exit 0.
+- `story-leads --brief --type <question type>...`: one line per `--type`, `question <n>: <question
+  type>[ (a new type)]; <pick>; candidates: [<n> in talking points, ]<n> indexed, <n> not yet
+  indexed`, where <pick> is `lead: <key> (<Talking points file>, confirmed <date>)`, the first Story
+  of a Talking points file with a confirmed date, else `top candidate: <key> (talking points, not
+  confirmed)`, the first Story of one without, else `top candidate: <key> (indexed)`, the type's
+  first indexed Story, or `top candidate: none indexed`; then one `next:` line: run the full form
+  for each question whose lead is asked (a `top candidate:`, or a `lead:` whose Talking points
+  stories step 3 did not find confirmed), then ask once, as the full form does. Exit 0.
 - `story-leads --check <pack>`: the interview pack's `## Stories` section, one `### <question>`
   heading per question, each with a `Type: <question type>` line and one Lead: line (a leading `- `
   and bold labels are read too): `Lead: <the Story, or set aside> (user, YYYY-MM-DD)` for the user's
@@ -606,10 +687,15 @@ that gives it.
   `--label`; a link with a space or parenthesis is refused (rename the file). The label is the
   entry's title, then ` › <the section's heading>` when the target has an anchor, with `|` and
   `]` written `\\|` and `\\]`; `--label` replaces it. `--marker` (once per marker) adds `raw`,
-  `pending` or `core`; a `#pending` target always carries `pending`. `--summary` is one line,
+  `pending` or `core`; a `#pending` target always carries `pending`. `--story <name>` writes the
+  Story's name as the link's title (`[<label>](<target> "<name>")`, a slug). `--summary` is one line,
   without `; [` or `; *(` (its `|` is written `\\|`). Prints `added: <question type>: <item>`, or
   `already linked: <question type>: <item>`, writing nothing, when the row has an item that
-  links the same file and anchor (the anchor's case aside).
+  links the same file and anchor (the anchor's case aside) with the same name, or none for both.
+- `story-name <question type> <key> <name>`: names the row's first item whose key is <key> (as
+  story-candidates prints it; the anchor's case aside): writes `"<name>"`, a slug, as its link's
+  title, in place of any title it had. Prints `named: <question type>: <item>`, or `already named: ...` when it has that name.
+  Exit 2, writing nothing, when no item of the row has <key>, or another has the key it would get.
 - `story-core <entry> on|off`: `on` adds `core` to one item of the experience (the first that
   links <entry>, else the first that links another part of its series): into its first `*(...)*`
   (`*(raw, core)*`), else as `*(core)* ` before it. Prints `core on: <question type>: <item>`;
@@ -654,7 +740,6 @@ Standard library only, Python 3.11+.
 """
 import datetime
 import difflib
-import glob
 import hashlib
 import os
 import posixpath
@@ -683,7 +768,9 @@ MD_TARGET = re.compile(r"\]\(([^)\s]+)\)")
 PERIOD = re.compile(r"(\d{4}-\d{2}(?:-\d{2})?)(?: – (ongoing|\d{4}-\d{2}(?:-\d{2})?))?", re.I)
 MAX_TYPES_PER_STORY = 3   # a Story (entry#anchor) under more types than this is told for too many questions
 CORE_RANGE = (3, 5)       # how many core Stories (experiences marked core) a Log should have
-MAX_PER_INTERVIEW = 1     # questions one Story (entry#anchor) may lead in one interview
+MAX_PER_INTERVIEW = 1     # questions one Story (entry#anchor) may lead in one interview, unless --interviewers says more
+PLAN_MIN_QUESTIONS = 5    # an interview plan of this many led questions or more ...
+PLAN_MIN_STORIES = 3      # ... should be led by at least this many Stories
 WORDINGS = "stories/wordings"
 UNFINISHED = ("raw", "pending")
 MARKERS = ("raw", "pending", "core")   # the markers story-add writes
@@ -691,7 +778,8 @@ TALKING_SECTIONS = ("Stories", "Opening", "Cue lines", "Follow-ups")   # a Talki
 MAX_CUE_LINES = 7         # a Talking points file's cue lines; detail beyond them goes to Likely questions
 STORY_SPLIT = re.compile(r";\s+(?=\*\(|\[)")
 MARKER = re.compile(r"\*\(([^)*]+)\)\*\s*")
-LINK = re.compile(r"\[((?:[^\]\\]|\\.)*)\]\(([^)\s]+)\)")
+LINK = re.compile(r'\[((?:[^\]\\]|\\.)*)\]\(([^)\s]+)(?:[ \t]+"([^"\n]*)")?\)')   # label, target, title
+STORY_NAME = re.compile(logfiles.SLUG)   # a Story's name: its link's title, a slug
 # An entry's shape (entries/_template.md)
 TYPES = ("work", "internship", "project", "research", "course", "leadership", "award", "other")
 VISIBILITIES = ("public", "private", "nda")
@@ -1134,7 +1222,7 @@ def unresolved_keys(root, line):
             continue
         parts = p.rstrip("/").split("/")
         if "*" in p:
-            found = glob.glob(os.path.join(glob.escape(root), *parts))
+            found = logfiles.glob_under(root, *parts)
         else:
             found = os.path.exists(os.path.join(root, *parts))
         if not found:
@@ -1236,7 +1324,7 @@ def cmd_refs(root, path):
         if path not in tp.entries:
             continue
         bare = re.sub(r"<!--.*?-->", "", tp.text, flags=re.S)
-        pending = [t for _, t in LINK.findall(bare) if link_path("stories", t) == (path, "pending")]
+        pending = [m.group(2) for m in LINK.finditer(bare) if link_path("stories", m.group(2)) == (path, "pending")]
         print("talking points: %s: type %s%s" % (rel, tp.type or "-", "; links #pending" if pending else ""))
     return 0
 
@@ -1544,9 +1632,19 @@ def link_path(base, target):
     return posixpath.normpath(posixpath.join(base, path)), anchor
 
 
+def link_label(text):
+    """text as a Markdown link's label inside a table cell: `]` and `|` escaped."""
+    return re.sub(r"([\]|])", r"\\\1", text)
+
+
+def story_key(path, anchor, name):
+    """A Story's key, `<path>#<anchor>~<name>`; the anchor and the name are each left off when empty."""
+    return path + ("#" + anchor if anchor else "") + ("~" + name if name else "")
+
+
 class Story:
     """One item of an index cell or a Talking points file: kind `entry`, `other` (links a file
-    outside entries/) or `unlinked`."""
+    outside entries/) or `unlinked`. Its name is its link's title when that is a slug, else ''."""
     def __init__(self, text, base):
         self.text = text.strip()
         rest = self.text
@@ -1556,10 +1654,11 @@ class Story:
             self.markers += [v.strip() for v in m.group(1).split(",") if v.strip()]
             rest = rest[m.end():]
         m = LINK.match(rest)
-        self.label, self.path, self.anchor, self.summary = "", None, "", rest
+        self.label, self.path, self.anchor, self.name, self.summary = "", None, "", "", rest
         if m:
             self.label = m.group(1).replace("\\|", "|")
             self.path, self.anchor = link_path(base, m.group(2))
+            self.name = m.group(3) if m.group(3) and STORY_NAME.fullmatch(m.group(3)) else ""
             rest = rest[m.end():].lstrip()
             while MARKER.match(rest):   # a marker written after the link
                 n = MARKER.match(rest)
@@ -1568,7 +1667,7 @@ class Story:
             self.summary = re.sub(r"^\s*[—–-]+\s*", "", rest).strip()
         self.kind = ("entry" if self.path and ENTRY_PATH.fullmatch(self.path)
                      else "other" if self.path else "unlinked")
-        self.key = (self.path + ("#" + self.anchor if self.anchor else "")) if self.path else self.text
+        self.key = story_key(self.path, self.anchor, self.name) if self.path else self.text
 
     def unfinished(self):
         return any(m.lower() in UNFINISHED for m in self.markers)
@@ -1609,12 +1708,13 @@ def first_rows(rows):
     return out
 
 
-class TalkingPoints:
+class Confirmed:
+    """A file the user confirms (Talking points, a cue card): its `confirmed:` value, its day (None when
+    unreadable), its time (`00:00` when only a date is given) and the line as written."""
     def __init__(self, root, path):
         self.path = path
         self.text = read(os.path.join(root, path))
         fields = front_matter(self.text)
-        self.type = fields.get("type") or ""
         self.confirmed = fields.get("confirmed") or ""
         m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})(?: (\d{2}:\d{2}))?", self.confirmed)
         self.day, self.time = None, (m and m.group(2)) or "00:00"
@@ -1626,12 +1726,19 @@ class TalkingPoints:
             pass
         m = re.search(r"^confirmed:.*$", self.text, re.M)
         self.confirmed_line = m.group(0).rstrip("\r") if m else ""
+        self.fields = fields
+
+
+class TalkingPoints(Confirmed):
+    def __init__(self, root, path):
+        super().__init__(root, path)
+        self.type = self.fields.get("type") or ""
         base = posixpath.dirname(path)
         stories = logfiles.section(self.text, "Stories")
         listed = re.findall(r"^\s*\d+\.\s+(.*\S)", logfiles.strip_comments(stories), re.M) if stories else []
         self.stories = [s for s in (Story(t, base) for t in listed) if s.kind == "entry"]
         bare = re.sub(r"<!--.*?-->", "", self.text, flags=re.S)
-        self.entries = sorted({p for p in (link_path(base, t)[0] for _, t in LINK.findall(bare))
+        self.entries = sorted({p for p in (link_path(base, m.group(2))[0] for m in LINK.finditer(bare))
                                if p and ENTRY_PATH.fullmatch(p)})
 
 
@@ -1644,8 +1751,25 @@ def talking_points_files(root):
 
 
 def pending_key(key):
-    """True for a key that links an entry's `## Pending` section, shared by all its pending Stories."""
+    """True for a key that links an entry's `## Pending` section, shared by all its pending Stories; a
+    named one (`#pending~<name>`) is one Story, so not."""
     return key.partition("#")[2] == "pending"
+
+
+NAME_HINT = "; if the section holds different Stories, name each with story-name"
+
+
+def split_key(key):
+    """(path, anchor, name) of a Story's key, `<path>#<anchor>~<name>`; '' for a part it lacks."""
+    m = re.fullmatch(r"(.*?)~(%s)" % STORY_NAME.pattern, key)
+    rest, name = (m.group(1), m.group(2)) if m else (key, "")
+    path, _, anchor = rest.partition("#")
+    return path, anchor, name
+
+
+def name_hint(key):
+    """The hint a too-many finding ends with for an unnamed key: one section may hold several Stories."""
+    return "" if split_key(key)[2] else NAME_HINT
 
 
 def lead_story(root, row):
@@ -1673,7 +1797,27 @@ def experiences(root):
     return out
 
 
-def cmd_story_coverage(root, questions, talking=False, applications=False):
+def interview_leads(root, rows, questions):
+    """([(question type, its lead's key)], findings) for one interview's --type values: `<question type>`
+    takes the type's lead, `<question type>=<key>` the Story the user chose."""
+    by_type = {row.type: row for row in rows}
+    leads, out = [], []
+    for q in questions:
+        m = re.fullmatch(r"(.*?)=(entries/\S+)", q)
+        qtype, chosen = (m.group(1).strip(), m.group(2)) if m else (q.strip(), None)
+        row = by_type.get(qtype)
+        if row is None:
+            out.append("interview type not in stories.md: %s" % qtype)
+            continue
+        key = chosen or lead_story(root, row)
+        if key is None:
+            out.append("interview type with no story: %s" % qtype)
+            continue
+        leads.append((qtype, key))
+    return leads, out
+
+
+def cmd_story_coverage(root, questions, talking=False, applications=False, interviewers=MAX_PER_INTERVIEW):
     rows = story_index(root)
     out = []
     if rows is None:
@@ -1706,8 +1850,8 @@ def cmd_story_coverage(root, questions, talking=False, applications=False):
                 out.append("index names a missing entry: %s: %s" % (row.type, s.path))
     for key, types in key_types.items():
         if len(types) > MAX_TYPES_PER_STORY:
-            out.append("story under too many types: %s in %d types (more than %d): %s"
-                       % (key, len(types), MAX_TYPES_PER_STORY, " | ".join(types)))
+            out.append("story under too many types: %s in %d types (more than %d): %s%s"
+                       % (key, len(types), MAX_TYPES_PER_STORY, " | ".join(types), name_hint(key)))
     if not CORE_RANGE[0] <= len(core) <= CORE_RANGE[1]:
         out.append("core stories outside %d–%d: %d" % (CORE_RANGE[0], CORE_RANGE[1], len(core)))
     linked = {}
@@ -1727,26 +1871,21 @@ def cmd_story_coverage(root, questions, talking=False, applications=False):
                        % (path, tp.type, linked[path].type))
         if not tp.day:
             out.append("talking points with no readable confirmed date: %s %s" % (path, tp.confirmed or "-"))
-    by_type = {row.type: row for row in rows}
+    pairs, found = interview_leads(root, rows, questions)
+    out += found
     leads = {}
-    for q in questions:
-        m = re.fullmatch(r"(.*?)=(entries/\S+)", q)
-        qtype, chosen = (m.group(1).strip(), m.group(2)) if m else (q.strip(), None)
-        row = by_type.get(qtype)
-        if row is None:
-            out.append("interview type not in stories.md: %s" % qtype)
-            continue
-        key = chosen or lead_story(root, row)
-        if key is None:
-            out.append("interview type with no story: %s" % qtype)
-            continue
+    for qtype, key in pairs:
         print("interview: %s: leads with %s" % (qtype, key))
         if not pending_key(key):
             leads.setdefault(key, []).append(qtype)
     for key, types in leads.items():
-        if len(types) > MAX_PER_INTERVIEW:
-            out.append("story carries too many questions in one interview: %s leads %d (more than %d): %s"
-                       % (key, len(types), MAX_PER_INTERVIEW, " | ".join(types)))
+        if len(types) > interviewers:
+            out.append("story carries too many questions in one interview: %s leads %d (more than %d): %s%s"
+                       % (key, len(types), interviewers, " | ".join(types), name_hint(key)))
+    stories = len({key for _, key in pairs})
+    if len(pairs) >= PLAN_MIN_QUESTIONS and stories < PLAN_MIN_STORIES:
+        out.append("interview plan leads with fewer than %d stories: %d stories lead %d questions"
+                   % (PLAN_MIN_STORIES, stories, len(pairs)))
     if talking:
         out += talking_points_findings(root)
     if applications:
@@ -1821,21 +1960,63 @@ NAMES_USER = re.compile(r"\buser\b", re.I)
 NONE_PREDICTED = re.compile(r"^None predicted\.?[ \t]*$", re.M | re.I)
 
 
-def cmd_story_leads(root, types):
-    """interview step 3's candidates, one block per predicted question, and the ask that waits for the pick."""
+def story_brief(root, rows, entries, question_type):
+    """`--brief`'s one line for a type: its lead from Talking points with a confirmed date, else its first
+    indexed Story, and how many candidates the full form lists."""
+    row = next((r for r in rows if r.type == question_type), None)
+    talking = row.talking if row else None
+    tp = TalkingPoints(root, talking) if talking and os.path.isfile(os.path.join(root, talking)) else None
+    stories = row.stories if row else []
+    indexed = {s.path for s in stories}
+    if tp and tp.day and tp.stories:
+        pick = "lead: %s (%s, confirmed %s)" % (tp.stories[0].key, talking, tp.confirmed)
+    elif tp and tp.stories:   # lead_story's order: the Talking points' first Story, then the index's
+        pick = "top candidate: %s (talking points, not confirmed)" % tp.stories[0].key
+    elif stories:
+        pick = "top candidate: %s (indexed)" % stories[0].key
+    else:
+        pick = "top candidate: none indexed"
+    counts = ["%d indexed" % len(stories), "%d not yet indexed" % len([p for p in entries if p not in indexed])]
+    if tp:
+        counts.insert(0, "%d in talking points" % len(tp.stories))
+    return "%s%s; %s; candidates: %s" % (question_type, "" if row else " (a new type)", pick, ", ".join(counts))
+
+
+LEADS_ASK_TAIL = (" the pack's Lead: lines are their answers and the leads taken, and `story-leads --check <pack>`"
+                  " runs before its commit; each question's one Lead: line is `Lead: <the Story's key, as this command"
+                  " printed it> (user, <the date of their answer>)` for a lead the user picked, `Lead: set aside (user,"
+                  " <that date>)`, or `Lead: <the Story's key> (<the Talking points file>, confirmed <the date on its"
+                  " talking points: line>)` for a lead taken from confirmed Talking points the user did not change")
+
+
+def cmd_story_leads(root, types, brief=False):
+    """The candidates for interview-pack.md › Stories, one block per predicted question (with --brief, one
+    line), and the ask that waits for the pick."""
+    if brief:
+        rows = list(first_rows(story_index(root) or []).values())
+        entries = [e.path for e in load(root)]
+        for n, question_type in enumerate(types, 1):
+            print("question %d: %s" % (n, story_brief(root, rows, entries, question_type)))
+        print("next: now, for each question with a `top candidate:`, and each with a `lead:` whose type does not"
+              " have confirmed Talking points (interview-pack.md › Stories: stories step 3 found the file changed"
+              " and the user did not reconfirm it), run `python3 -I <root>/tools/entries.py story-leads --type"
+              " \"<its type>\" --root <root>` for its candidates; its own next: line asks what this one does, so"
+              " ask once, as this line says. A `lead:` of a type with confirmed Talking points is the lead you take:"
+              " that Story, or another of that file whose reason fits this posting better. Show the user each"
+              " question's proposed type, the leads taken in one short list they may change, and each other"
+              " question's candidates as stories step 4 shows them, with the one you recommend for this posting."
+              " Ask them to confirm each type and pick each of those other leads (one of these, another story,"
+              " talk it through, or set the question aside), then end your turn:" + LEADS_ASK_TAIL)
+        return 0
     for n, question_type in enumerate(types, 1):
         print("question %d: %s" % (n, question_type))
         cmd_story_candidates(root, question_type)
     print("next: now, show the user each question's proposed type; for a question whose type has confirmed"
-          " Talking points (interview step 3), the lead you take from that file, in one short list they may"
+          " Talking points (interview-pack.md › Stories), the lead you take from that file, in one short list they may"
           " change; for each other question, its candidates as stories step 4 shows them, with the one you"
           " recommend for this posting. Ask them to confirm each type and pick each of those other leads"
           " (one of these, another story, talk it through, or set the question aside), then end your turn:"
-          " the pack's Lead: lines are their answers and the leads taken, and `story-leads --check <pack>`"
-          " runs before its commit; each question's one Lead: line is `Lead: <the Story's key, as this command"
-          " printed it> (user, <the date of their answer>)` for a lead the user picked, `Lead: set aside (user,"
-          " <that date>)`, or `Lead: <the Story's key> (<the Talking points file>, confirmed <the date on its"
-          " talking points: line>)` for a lead taken from confirmed Talking points the user did not change")
+          + LEADS_ASK_TAIL)
     return 0
 
 
@@ -1870,7 +2051,7 @@ def cmd_story_leads_check(root, path):
         return 0
     if not blocks:
         print("FAIL: %s: %s" % ("no ## Stories section" if body is None else "no ### question under ## Stories", path))
-        print("next: write the pack's ## Stories as interview step 3 says, one ### heading per question (or the"
+        print("next: write the pack's ## Stories as interview-pack.md › Stories says, one ### heading per question (or the"
               " line `None predicted.` for a stage with no behavioural question), then run this again")
         return 1
     out, ok = [], []
@@ -1913,16 +2094,22 @@ def cmd_story_leads_check(root, path):
     return 0
 
 
-def talking_points_arg(root, arg):
+def log_file_arg(root, arg, form, what):
+    """arg (relative to root, then to the current folder) as a /-separated path relative to root, when
+    it names a file there whose path fullmatches form; else Error, naming what it should be."""
     for base in (root, os.getcwd()):
         full = os.path.abspath(os.path.join(base, arg))
         try:
             rel = os.path.relpath(full, os.path.abspath(root)).replace(os.sep, "/")
         except ValueError:   # another drive (Windows)
             continue
-        if os.path.isfile(full) and re.fullmatch(r"stories/[^/]+\.md", rel):
+        if os.path.isfile(full) and re.fullmatch(form, rel):
             return rel
-    raise Error("not a Talking points file of %s: %s (one is stories/<slug>.md)" % (root, arg))
+    raise Error("not %s of %s: %s" % (what, root, arg))
+
+
+def talking_points_arg(root, arg):
+    return log_file_arg(root, arg, r"stories/[^/]+\.md", "a Talking points file (stories/<slug>.md)")
 
 
 def entry_changes(root, path, span):
@@ -1935,33 +2122,47 @@ def entry_changes(root, path, span):
     return [tuple(c.split("|", 2)) for c in log if c], bool(git(root, "status", "--porcelain", "--", path).strip())
 
 
+def confirmed_since(root, path, f):
+    """(since, its line, git log's span, whether a commit wrote the line) for the file at path, a
+    Confirmed with a readable day: from the last commit that wrote its current confirmed: line, else
+    from its confirmed date and time."""
+    # Counts whole lines: a plain -S would miss `confirmed: D` written over `confirmed: D HH:MM`, and -G
+    # would take a commit that only changed the line's trailing space or line ending, or moved it.
+    exact = "^%s[[:space:]]*$" % re.sub(r"([.\[\]()*+?{}|^$\\])", r"\\\1", f.confirmed_line.rstrip())
+    sha = git(root, "log", "-1", "--format=%H %s", "--pickaxe-regex", "-S" + exact, "--", path).strip()
+    if sha:
+        sha, _, subject = sha.partition(" ")
+        return sha[:12], "since: %s %s" % (sha[:12], subject), ["%s..HEAD" % sha], True
+    since = "%s %s" % (f.day.isoformat(), f.time)
+    return (since, "since: %s (no commit wrote %s's %r)" % (since, path, f.confirmed_line),
+            ["--since=%s:00" % since], False)
+
+
+def changes_since(root, paths, span):
+    """[(entry, 'changed', its commit's fields) | (entry, 'uncommitted', None) | (entry, 'missing', None)]
+    for the entries at paths, since span (confirmed_since's)."""
+    out = []
+    for entry in paths:
+        changes = entry_changes(root, entry, span)
+        if changes is None:
+            out.append((entry, "missing", None))
+            continue
+        out += [(entry, "changed", " ".join(c)) for c in changes[0]]
+        if changes[1]:
+            out.append((entry, "uncommitted", None))
+    return out
+
+
 def cmd_story_stale(root, path):
     tp = TalkingPoints(root, path)
     if not tp.day:
         raise Error("%s has no readable confirmed: date (YYYY-MM-DD, or YYYY-MM-DD HH:MM): %r"
                     % (path, tp.confirmed))
-    # Counts whole lines: a plain -S would miss `confirmed: D` written over `confirmed: D HH:MM`, and -G
-    # would take a commit that only changed the line's trailing space or line ending, or moved it.
-    exact = "^%s[[:space:]]*$" % re.sub(r"([.\[\]()*+?{}|^$\\])", r"\\\1", tp.confirmed_line.rstrip())
-    sha = git(root, "log", "-1", "--format=%H %s", "--pickaxe-regex", "-S" + exact, "--", path).strip()
-    if sha:
-        sha, _, subject = sha.partition(" ")
-        since = sha[:12]
-        print("since: %s %s" % (since, subject))
-        span = ["%s..HEAD" % sha]
-    else:
-        since = "%s %s" % (tp.day.isoformat(), tp.time)
-        print("since: %s (no commit wrote %s's %r)" % (since, path, tp.confirmed_line))
-        span = ["--since=%s:00" % since]
-    out = []
-    for entry in tp.entries:
-        changes = entry_changes(root, entry, span)
-        if changes is None:
-            out.append("missing entry: %s" % entry)
-            continue
-        out += ["changed: %s %s" % (entry, " ".join(c)) for c in changes[0]]
-        if changes[1]:
-            out.append("uncommitted: %s" % entry)
+    since, line, span, _ = confirmed_since(root, path, tp)
+    print(line)
+    out = ["changed: %s %s" % (entry, commit) if kind == "changed" else
+           ("missing entry: %s" if kind == "missing" else "uncommitted: %s") % entry
+           for entry, kind, commit in changes_since(root, tp.entries, span)]
     for line in out:
         print(line)
     if out:
@@ -1969,6 +2170,155 @@ def cmd_story_stale(root, path):
     print("OK: %d entries unchanged since %s" % (len(tp.entries), since))
     return 0
 
+
+# ---- Cue cards ----
+
+CARD_COLUMNS = ("Story", "Leads", "Key facts", "Task", "I did", "Result")
+
+
+class CueCard(Confirmed):
+    """A cue card, `cue-card-<stage>.md` in an application folder: its confirmed: line, the Story cell of
+    each row of the first table under `## Card` (None with no such table), and {Story: [(entry path,
+    anchor)]} from the first table under `## Provenance` (None with no such table): each entry link of a
+    row's other cells, read relative to the card's folder."""
+    def __init__(self, root, path):
+        super().__init__(root, path)
+        tables = {}
+        for t in logfiles.md_tables(logfiles.strip_comments(self.text)):
+            tables.setdefault(t.section, t)
+        card, prov = tables.get("Card"), tables.get("Provenance")
+        self.rows = [cells[0].strip() for _, cells in card.rows if cells and cells[0].strip()] if card else None
+        self.provenance = None
+        if prov:
+            base = posixpath.dirname(path)
+            self.provenance = {}
+            for _, cells in prov.rows:
+                if not cells or not cells[0].strip():
+                    continue
+                links = [link_path(base, m.group(2)) for m in LINK.finditer(" ".join(cells[1:]))]
+                self.provenance.setdefault(cells[0].strip(), []).extend(
+                    (p, a) for p, a in links if p and ENTRY_PATH.fullmatch(p))
+
+
+def card_arg(root, arg):
+    return log_file_arg(root, arg, r"outputs/applications/[^/]+/cue-card-[^/]+\.md",
+                        "a cue card (outputs/applications/<folder>/cue-card-<stage>.md)")
+
+
+def section_label(root, path, anchor):
+    """`<entry title> › <the anchor's heading>` (the title alone without an anchor or a heading for it),
+    with `|` and `]` escaped for a table cell's link."""
+    full = os.path.join(root, path)
+    text = read(full) if os.path.isfile(full) else ""
+    title = (front_matter(text).get("title") or "") if text else ""
+    heading = logfiles.heading_names(text).get(anchor, "") if anchor else ""
+    return link_label(" › ".join(p for p in (title or path, heading) if p))
+
+
+def cmd_story_card(root, questions):
+    """A cue card's scaffold for one interview's plan: its questions, one Story per lead, each Story's
+    finder types and wordings and its section, then the Markdown to fill."""
+    rows = list(first_rows(story_index(root) or []).values())
+    pairs, out = interview_leads(root, rows, questions)
+    items, types_of = {}, {}
+    for row in rows:
+        for s in row.stories:
+            items.setdefault(s.key, s)
+            types_of.setdefault(s.key, [])
+            if row.type not in types_of[s.key]:
+                types_of[s.key].append(row.type)
+    leads = {}
+    for n, (qtype, key) in enumerate(pairs, 1):
+        print("question %d: %s: leads with %s" % (n, qtype, key))
+        leads.setdefault(key, []).append(qtype)
+
+    def shown(key):
+        name = split_key(key)[2]
+        return name or (items[key].label if key in items and items[key].label else key)
+
+    names = {key: shown(key) for key in leads}
+    twice = {v for v in names.values() if list(names.values()).count(v) > 1}
+    names = {key: key if v in twice else v for key, v in names.items()}
+    wordings = {}
+    for _, qtype, lines in wordings_files(root):
+        wordings.setdefault(qtype, []).extend(lines)
+    finder = {key: list(dict.fromkeys(types_of.get(key, []) + types)) for key, types in leads.items()}
+    for n, (key, types) in enumerate(leads.items(), 1):
+        print("story %d: %s; key %s; leads %s" % (n, names[key], key, " | ".join(types)))
+    for key in leads:
+        print("finder: %s: %s" % (names[key], " | ".join(finder[key])))
+        for qtype in finder[key]:
+            for w in wordings.get(qtype, []):
+                print("wording: %s: %s | %s" % (names[key], qtype, w))
+    sections = {key: story_key(*split_key(key)[:2], "") for key in leads}
+    for key in leads:
+        print("section: %s: %s" % (names[key], sections[key]))
+    for line in out:
+        print(line)
+
+    print("scaffold:")
+    print("---\nstage: <stage>\nconfirmed:\n---\n\n# Cue card: <stage>\n\n"
+          "<the answer order, then the standing reminders, in one line>\n\n## Card\n")
+    print("%s\n|%s" % (logfiles.md_row(CARD_COLUMNS), "---|" * len(CARD_COLUMNS)))
+    for key, types in leads.items():
+        print(logfiles.md_row([names[key], "; ".join(types)] + [""] * (len(CARD_COLUMNS) - 2)))
+    print("\n## Finder\n\n| Story | Question types | Key words |\n|---|---|---|")
+    for key in leads:
+        print(logfiles.md_row([names[key], "; ".join(finder[key]), ""]))
+    print("\n## Self-drill\n\n- \"<a reworded question>\" → <Story>\n\n## Provenance\n\n| Story | Sections |\n|---|---|")
+    for key in leads:
+        path, anchor, _ = split_key(key)
+        print("%s [%s](../../../%s) |" % (logfiles.md_row([names[key]]), section_label(root, path, anchor),
+                                          sections[key]))
+    return 1 if out else 0
+
+
+def cmd_story_card_check(root, path):
+    card = CueCard(root, path)
+    out, checked = [], []
+    if card.rows is None:
+        out.append("no ## Card table: %s" % path)
+    elif not card.rows:
+        out.append("card with no rows: %s" % path)
+    if card.provenance is None:
+        out.append("no ## Provenance table: %s" % path)
+    if not card.day:
+        out.append("card with no readable confirmed date: %s" % (card.confirmed or "-"))
+    for story in card.rows or []:
+        links = (card.provenance or {}).get(story, [])
+        if not links:
+            out.append("row with no provenance: %s" % story)
+        for entry, anchor in links:
+            if not os.path.isfile(os.path.join(root, entry)):
+                out.append("missing entry: %s: %s" % (story, entry))
+                continue
+            if anchor and anchor.lower() not in logfiles.heading_anchors(read(os.path.join(root, entry))):
+                out.append("anchor the entry lacks: %s: %s#%s" % (story, entry, anchor))
+            checked.append(entry)
+    checked = list(dict.fromkeys(checked))
+    if card.day and checked:
+        _, _, span, committed = confirmed_since(root, path, card)
+        # Until the confirmed: line is committed, the run that wrote the card still has its own entry
+        # edits uncommitted; a change after confirming shows once committed, by its date.
+        out += ["entry changed since confirmed: %s %s" % (entry, commit or kind)
+                for entry, kind, commit in changes_since(root, checked, span) if committed or kind != "uncommitted"]
+    for line in out:
+        print("FAIL: %s" % line)
+    if out:
+        return 1
+    print("card: ok, %d stories, %d entries unchanged since the confirmed card" % (len(card.rows), len(checked)))
+    return 0
+
+
+def cmd_story_card_confirm(root, path, now):
+    full = os.path.join(root, path)
+    bom, lines = read_lines(full)
+    if not front_matter_span(lines)[1]:
+        raise Error("%s has no front matter (--- lines) to hold confirmed:" % path)
+    set_field(lines, "confirmed", now)
+    write_lines(full, bom, lines)
+    print("confirmed: %s: %s" % (path, now))
+    return 0
 
 def wordings_files(root):
     """[(path, question type, [wording, ...])] for each file in stories/wordings/, by path."""
@@ -2109,20 +2459,19 @@ def cmd_story_finish(root, path):
                     break
                 header = None
                 continue
-            cells = [c.strip() for c in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
+            cells = logfiles.md_cells(line)
             if header is None:
-                header = [c.strip("*` ").lower() for c in cells]
+                header, header_at = [c.strip("*` ").lower() for c in cells], i
                 found = found or header[:2] == ["question type", "stories"]
                 continue
-            if set("".join(cells)) <= set("-: ") or header[:2] != ["question type", "stories"]:
+            if i == header_at + 1 and logfiles.is_rule(cells) or header[:2] != ["question type", "stories"]:
                 continue
             in_rows = True
-            bounds = [m.start() for m in re.finditer(r"(?<!\\)\|", line)]
-            if len(bounds) < 2:
+            spans = logfiles.md_cell_spans(line)
+            if len(spans) < 2:
                 continue
             row = Row(cells[0], "")
-            start = bounds[1] + 1
-            end = bounds[2] if len(bounds) > 2 else len(line.rstrip())   # a row may leave off its last |
+            start, end = spans[1]
             cell = line[start:end]
             pieces = re.split(r"(;\s+(?=\*\(|\[))", cell)
             for n in range(0, len(pieces), 2):
@@ -2224,8 +2573,15 @@ def index_row(sf, question_type):
                 " row from story-type-add)" % question_type)
 
 
-def same_link(path, anchor, s):
-    return s.path == path and urllib.parse.unquote(s.anchor).lower() == urllib.parse.unquote(anchor).lower()
+def same_link(path, anchor, s, name=""):
+    """True when the item s links path at anchor (the anchor's case aside) with the Story name name."""
+    return (s.path == path and urllib.parse.unquote(s.anchor).lower() == urllib.parse.unquote(anchor).lower()
+            and s.name == name)
+
+
+def name_ok(name):
+    if not STORY_NAME.fullmatch(name):
+        raise Error("a Story's name is a slug, lowercase letters and digits joined by -: %s" % name)
 
 
 def question_type_ok(question_type, taken):
@@ -2255,8 +2611,9 @@ def cmd_story_type_add(root, question_type):
     return 0
 
 
-def story_item(root, target, markers, label, summary):
-    """(path, anchor, the index item to write) for a Story that links target; Error on a bad one."""
+def story_item(root, target, markers, label, summary, name=""):
+    """(path, anchor, the index item to write) for a Story that links target, named name when given;
+    Error on a bad one."""
     path, anchor = link_path("", target)
     if path is None or path.startswith(".."):
         raise Error("a Story links a file of the Log: %s" % target)
@@ -2287,22 +2644,24 @@ def story_item(root, target, markers, label, summary):
         raise Error("a Story links an entry (entries/<file>.md#<anchor>) or a source (sources/...): %s" % target)
     if summary and (summary != one_line(summary) or STORY_SPLIT.search(summary)):
         raise Error("a summary is one line, with no `; [` or `; *(` (they start the next Story): %r" % summary)
-    label = re.sub(r"([\]|])", r"\\\1", one_line(label).replace("\\", ""))
-    item = "%s[%s](%s)%s" % ("*(%s)* " % ", ".join(markers) if markers else "", label,
-                             path + ("#" + anchor if anchor else ""),
-                             " — " + summary.replace("|", "\\|") if summary else "")
+    label = link_label(one_line(label).replace("\\", ""))
+    item = "%s[%s](%s%s)%s" % ("*(%s)* " % ", ".join(markers) if markers else "", label,
+                               story_key(path, anchor, ""), ' "%s"' % name if name else "",
+                               " — " + logfiles.md_cell(summary) if summary else "")
     return path, anchor, item
 
 
-def cmd_story_add(root, question_type, target, markers, label, summary):
+def cmd_story_add(root, question_type, target, markers, label, summary, name=None):
     for m in markers:
         if m not in MARKERS:
             raise Error("--marker takes raw, pending or core: %s" % m)
-    path, anchor, item = story_item(root, target, list(dict.fromkeys(markers)), label, summary)
+    if name is not None:
+        name_ok(name)
+    path, anchor, item = story_item(root, target, list(dict.fromkeys(markers)), label, summary, name or "")
     sf = StoriesFile(root)
     n, row = index_row(sf, question_type)
     for s in row.items:
-        if same_link(path, anchor, s):
+        if same_link(path, anchor, s, name or ""):
             print("already linked: %s: %s" % (row.type, s.text))
             return 0
     cell = re.sub(r"(?<=[)\s]);\s*$", "", sf.cell(n, 1)).rstrip()   # a stray separator, not an entity's `;`
@@ -2319,6 +2678,34 @@ def index_pieces(sf):
     if table is None:
         raise Error("stories.md has no table headed | Question type | Stories | (the Story index)")
     return [(n, Row(cells[0], ""), re.split("(%s)" % STORY_SPLIT.pattern, sf.cell(n, 1))) for n, cells in table.rows]
+
+
+def cmd_story_name(root, question_type, key, name):
+    """Name the row's first item whose key is key: its link gets the title "<name>"."""
+    name_ok(name)
+    path, anchor, old = split_key(key)
+    sf = StoriesFile(root)
+    n, row = index_row(sf, question_type)
+    pieces = next(p for m, _, p in index_pieces(sf) if m == n)
+    story = {k: Story(pieces[k].strip().rstrip(";"), "") for k in range(0, len(pieces), 2)}
+    found = [k for k, s in story.items() if same_link(path, anchor, s, old)]
+    if not found:
+        raise Error("no item of %s has the key %s (its keys: %s)"
+                    % (row.type, key, ", ".join(s.key for s in row.stories) or "none"))
+    k = found[0]
+    taken = [j for j, s in story.items() if same_link(path, anchor, s, name)]
+    if taken:
+        if taken[0] == k:
+            print("already named: %s: %s" % (row.type, pieces[k].strip()))
+            return 0
+        raise Error("%s has an item with the key %s already: %s"
+                    % (row.type, story_key(path, anchor, name), pieces[taken[0]].strip()))
+    m = LINK.search(pieces[k])
+    pieces[k] = pieces[k][:m.start()] + '[%s](%s "%s")' % (m.group(1), m.group(2), name) + pieces[k][m.end():]
+    sf.set_cell(n, 1, "".join(pieces).strip())
+    sf.save()
+    print("named: %s: %s" % (row.type, pieces[k].strip()))
+    return 0
 
 
 def add_core(item):
@@ -2394,7 +2781,7 @@ def cmd_story_confirm(root, path, question_type, now):
         if row.talking == path:
             print("row already links: %s: %s" % (question_type, path))
         else:
-            sf.set_cell(n, 0, "[%s](%s)" % (re.sub(r"([\]|])", r"\\\1", question_type), path))
+            sf.set_cell(n, 0, "[%s](%s)" % (link_label(question_type), path))
             sf.save()
             print("row linked: %s: %s" % (question_type, path))
     return 0
@@ -2583,7 +2970,7 @@ NEW_FIELDS = {"title": None, "type": "GAP: type", "period": None, "org": "GAP: o
               "my_role": "GAP: role title", "collaborators": "GAP: collaborators", "tags": [],
               "visibility": "GAP", "links": [], "series": ""}   # None: new requires it
 SOURCED = ("org", "my_role", "collaborators", "tags", "visibility")   # the fields new's --field-source cites
-SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+SLUG = re.compile(logfiles.SLUG)
 ANGLE = re.compile(r"[a-z0-9][a-z0-9-]*")
 NEW_PERIOD = re.compile(r"(GAP|%s) – (GAP|ongoing|%s)|%s" % (DATE, DATE, DATE), re.I)
 GAP_WORD = re.compile(r"(?<![\w-])GAP(?![\w-])")
@@ -4155,18 +4542,19 @@ def list_extras(entries, series, date, window, course_work, today):
     return out
 
 
-VALUE_FLAGS = ("--series", "--today", "--type", "--month", "--status", "--field", "--field-source",
+VALUE_FLAGS = ("--series", "--today", "--type", "--interviewers", "--month", "--status", "--field", "--field-source",
                "--visibility-source", "--angle",
-               "--source", "--replace", "--cover", "--date", "--window", "--marker", "--label", "--summary", "--scope",
+               "--source", "--replace", "--cover", "--date", "--window", "--marker", "--label", "--summary", "--story", "--scope",
                "--phase", "--cut", "--reason")
-SWITCHES = ("--consolidated", "--check", "--distinct", "--ongoing", "--course-work", "--remove", "--talking-points",
-            "--application-questions", "--undo", "--paste", "--review")
+SWITCHES = ("--consolidated", "--check", "--confirm", "--brief", "--distinct", "--ongoing", "--course-work", "--remove",
+            "--talking-points", "--application-questions", "--undo", "--paste", "--review")
 REPEATED = ("--type", "--field", "--field-source", "--marker", "--cut")
 FLAGS = {   # each subcommand's flags; --root is every one's
     "list": {"--series", "--date", "--window", "--course-work", "--today"}, "check": {"--consolidated", "--today"},
-    "story-coverage": {"--type", "--talking-points", "--application-questions"}, "story-wordings": {"--type"},
-    "story-leads": {"--type", "--check"},
-    "story-add": {"--marker", "--label", "--summary"}, "story-confirm": {"--type"}, "answer-row": {"--angle"},
+    "story-coverage": {"--type", "--talking-points", "--application-questions", "--interviewers"},
+    "story-wordings": {"--type"}, "story-leads": {"--type", "--check", "--brief"},
+    "story-card": {"--type", "--check", "--confirm"},
+    "story-add": {"--marker", "--label", "--summary", "--story"}, "story-confirm": {"--type"}, "answer-row": {"--angle"},
     "answer-row-add": {"--scope"}, "answer-set": {"--angle", "--remove"},
     "new": {"--month", "--status", "--field", "--field-source", "--visibility-source", "--today"},
     "state": {"--today"}, "pending-add": {"--today"}, "period": {"--cover", "--ongoing"},
@@ -4175,11 +4563,11 @@ FLAGS = {   # each subcommand's flags; --root is every one's
 TAKES = {"list": 0, "rulings-hits": 0, "story-coverage": 0, "story-wordings": 0, "readme": 0, "refs": 1,
          "links-since": 1, "story-candidates": 1, "story-stale": 1, "story-finish": 1, "new": 1, "set-status": 2,
          "period": 1, "story-wording-add": 2, "phrasing-add": 2, "pending-add": 2, "set-visibility": 2,
-         "story-type-add": 1, "story-add": 2, "story-core": 2, "story-confirm": 1, "answer-row": 1,
+         "story-type-add": 1, "story-add": 2, "story-name": 3, "story-core": 2, "story-confirm": 1, "answer-row": 1,
          "answer-row-add": 1, "answer-set": 2, "drop": 1,
-         "check": None, "state": None, "split": None, "diff": None, "story-leads": None}
+         "check": None, "state": None, "split": None, "diff": None, "story-leads": None, "story-card": None}
 # None: check takes entries with --consolidated only, state any number, split and diff one or more,
-# story-leads a pack with --check only
+# story-leads a pack with --check only, story-card a card with --check or --confirm only
 FREE_TEXT = ("story-wording-add", "phrasing-add", "pending-add")   # their text may follow `--`
 
 
@@ -4242,12 +4630,14 @@ def main(argv):
              " state [<entry>...] | pending-add <entry> <text> |"
              " period <entry> --cover YYYY-MM-DD|--ongoing | set-visibility <entry> public|private|nda [--source <source>] |"
              " phrasing-add <entry> --angle <angle> --source <citation> [--distinct|--replace <n>] <wording> |"
-             " story-coverage [--type <question type>]... | story-candidates <question type> |"
-             " story-leads --type <question type>... | story-leads --check <pack> |"
+             " story-coverage [--type <question type>]... [--interviewers <n>] | story-candidates <question type> |"
+             " story-leads [--brief] --type <question type>... | story-leads --check <pack> |"
+             " story-card --type <question type>[=<key>]... | story-card --check|--confirm <cue card> |"
              " story-stale <talking points file> | story-finish <entry> |"
              " story-wording-add <question type> <wording> | story-wordings [--type <question type>]... |"
              " story-type-add <question type> | story-add <question type> <target> [--marker raw|pending|core]..."
-             " [--label <label>] [--summary <summary>] | story-core <entry> on|off |"
+             " [--label <label>] [--summary <summary>] [--story <name>] | story-name <question type> <key> <name> |"
+             " story-core <entry> on|off |"
              " story-confirm <talking points file> [--type <question type>] |"
              " answer-row <question type> [--angle <angle>] |"
              " answer-row-add <question type> --scope shared|per-angle|per-company |"
@@ -4305,7 +4695,10 @@ def main(argv):
         return bad_usage([] if takes == 2 or consolidated else rest[takes or 0:])
     if takes is None:
         if cmd == "check" and bool(rest) != consolidated or cmd in ("split", "diff") and not rest \
-                or cmd == "story-leads" and (len(rest) != ("--check" in opts) or ("--check" in opts) == bool(opts.get("--type"))):
+                or cmd == "story-leads" and (len(rest) != ("--check" in opts) or ("--check" in opts) == bool(opts.get("--type"))
+                                            or "--brief" in opts and "--check" in opts) \
+                or cmd == "story-card" and (len(rest) != ("--check" in opts) + ("--confirm" in opts)
+                                            or len(rest) + bool(opts.get("--type")) != 1):
             return bad_usage([] if consolidated else rest)
     elif len(rest) != takes:
         return bad_usage(rest[takes:])
@@ -4345,15 +4738,27 @@ def main(argv):
         if cmd == "rulings-hits":
             return cmd_rulings_hits(root)
         if cmd == "story-coverage":
+            if "--interviewers" in opts and not re.fullmatch(r"[1-9][0-9]*", opts["--interviewers"]):
+                return bad("--interviewers takes a whole number, 1 or more: the stage's interviewers")
             return cmd_story_coverage(root, opts.get("--type", []), "--talking-points" in opts,
-                                      "--application-questions" in opts)
+                                      "--application-questions" in opts,
+                                      int(opts.get("--interviewers", MAX_PER_INTERVIEW)))
+        if cmd == "story-card":
+            if "--check" in opts:
+                return cmd_story_card_check(root, card_arg(root, rest[0]))
+            if "--confirm" in opts:
+                return cmd_story_card_confirm(root, card_arg(root, rest[0]),
+                                              datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
+            return cmd_story_card(root, opts["--type"])
         if cmd == "story-leads":
-            return cmd_story_leads_check(root, rest[0]) if rest else cmd_story_leads(root, opts["--type"])
+            return cmd_story_leads_check(root, rest[0]) if rest else cmd_story_leads(root, opts["--type"], "--brief" in opts)
         if cmd == "story-type-add":
             return cmd_story_type_add(root, rest[0])
         if cmd == "story-add":
             return cmd_story_add(root, rest[0], rest[1], opts.get("--marker", []), opts.get("--label"),
-                                 opts.get("--summary"))
+                                 opts.get("--summary"), opts.get("--story"))
+        if cmd == "story-name":
+            return cmd_story_name(root, *rest)
         if cmd == "story-core":
             if rest[1] not in ("on", "off"):
                 return bad("story-core takes <entry> on or <entry> off")

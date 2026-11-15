@@ -1,26 +1,29 @@
 """The helpers the Log's tools share: reading and writing its files, front matter, Markdown tables
 and sections, heading anchors, slugs, dated names, git, the Log's root and its own files, the
-applications it records, the Target versions and the start record, a posting run's folder and live
-marker (and the uncommitted Log files a live run wrote), the URLs in a text, and Claude
-Code's project folder for a checkout.
+applications it records, the Target versions and the start record, a posting run's folder, a
+session's record (its key, baseline and claims: ADR 0014) and the uncommitted Log files each session
+claimed, the URLs in a text, an HTML page's text, a time in this machine's zone, and Claude Code's
+project folder for a checkout.
 
 A library, with no command line. A tool beside it imports it with
   sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I leaves this folder off sys.path
   sys.dont_write_bytecode = True   # no tools/__pycache__ left in the Log
   import logfiles
 
-What an entry is (ENTRY_PATH, entry_paths, Entry, the Story model) stays in entries.py. One helper
-reaches a tool: targets() imports tools/resume.py when it runs, for what a part of a resume is.
-Standard library only. It imports on any Python 3 (tools/check.py imports it before it says that
+What an entry is (ENTRY_PATH, entry_paths, Entry, the Story model) stays in entries.py. It imports
+no tool. Standard library only. It imports on any Python 3 (tools/check.py imports it before it says that
 the Log needs 3.11+), so nothing here needs a newer one at import time.
 """
 import bisect
 import datetime
 import glob
+import hashlib
+import html.parser
 import itertools
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -116,6 +119,14 @@ def arg_path(root, arg, fits=os.path.isfile):
         if fits(full):
             return full
     return None
+
+
+def glob_under(folder, *pattern):
+    """The paths under folder that match pattern (a glob, one argument per path segment), in no
+    order: folder is read as it is written, whatever `[`, `]`, `*` or `?` its path holds. Every glob
+    under a folder goes through here, in the Log or outside it (a home, LOCALAPPDATA, Playwright's
+    cache): tools/tests/test_logfiles.py fails on one by hand that is not in its OUTSIDE_THE_LOG."""
+    return glob.glob(os.path.join(glob.escape(folder), *pattern))
 
 
 def add_root(parser, script):
@@ -256,10 +267,14 @@ def md_cell_spans(line):
     return [(a + 1, b) for a, b in zip(bounds, bounds[1:])]
 
 
+def md_cell(text):
+    """Text as a table cell (or a piece of one): `|` written as `\\|`, line ends as spaces."""
+    return str(text).replace("|", "\\|").replace("\r", "").replace("\n", " ")
+
+
 def md_row(cells):
-    """A table row from cells, with `|` written as `\\|` and line ends as spaces."""
-    return "| " + " | ".join(str(c).replace("|", "\\|").replace("\r", "").replace("\n", " ")
-                             for c in cells) + " |"
+    """A table row from cells, each written as md_cell writes it."""
+    return "| " + " | ".join(md_cell(c) for c in cells) + " |"
 
 
 def is_rule(cells):
@@ -284,7 +299,8 @@ class Table:
 
 def md_tables(text):
     """Each table in the text, in order: a run of lines that start with `|` (after spaces), its first
-    row the header."""
+    row the header. Only the row right under the header is read as the divider (is_rule), as GitHub
+    reads a table: a later row of `-` cells is a data row. A row of empty cells is left out."""
     tables, current, section = [], None, None
     for n, line in enumerate(text.lstrip("\ufeff").splitlines(), 1):
         h = re.match(r"##[ \t]+(.*)", line)   # heading_re's form
@@ -297,7 +313,7 @@ def md_tables(text):
         if current is None:
             current = Table(n, section, cells)
             tables.append(current)
-        elif not is_rule(cells):
+        elif any(cells) and not (n == current.line + 1 and is_rule(cells)):
             current.rows.append((n, cells))
         current.end = n
     return tables
@@ -415,6 +431,16 @@ def question_slug(question_type):
     """A question type as a file name: lowercase, each run of other characters one `-` (letters of
     any script kept)."""
     return re.sub(r"[\W_]+", "-", question_type.lower()).strip("-")
+
+
+# A slug: lowercase ASCII letters and digits, with single hyphens between them (a Story's name, a stage, a
+# --slug). Tools use this, never a copy of the pattern (tools/tests/test_logfiles.py fails on one).
+SLUG = r"[a-z0-9]+(?:-[a-z0-9]+)*"
+
+
+def is_slug(text):
+    """Whether text is a slug (SLUG)."""
+    return bool(re.fullmatch(SLUG, text or ""))
 
 
 def ascii_slug(text):
@@ -563,6 +589,36 @@ def tex_items(text):
     return [(n, " ".join(" ".join(chunks).split())) for n, chunks in out]
 
 
+INPUT = re.compile(r"\\(?:input|include)\s*\{([^{}]+)\}")
+
+
+def local_inputs(tex):
+    """The files beside tex, relative to its folder, that it (or one of them) \\input's or
+    \\include's, the name as given or with .tex added; a name that is no file there (a
+    package's own file), that leaves the folder or that is tex itself is not one."""
+    folder = os.path.dirname(os.path.abspath(tex))
+    own = os.path.normcase(os.path.basename(tex))
+    found, todo = [], [tex]
+    while todo:
+        try:
+            text = read_text(todo.pop())
+        except (OSError, UnicodeDecodeError):
+            continue
+        text = "\n".join(map(tex_uncomment, text.split("\n")))   # a commented-out \input is not read
+        for name in INPUT.findall(text):
+            for cand in (name.strip(), name.strip() + ".tex"):
+                if os.path.isabs(cand) or os.path.splitdrive(cand)[0]:
+                    break
+                path = os.path.normpath(os.path.join(folder, cand))
+                rel = os.path.relpath(path, folder)
+                if (os.path.isfile(path) and rel != os.pardir and not rel.startswith(os.pardir + os.sep)
+                        and os.path.normcase(rel) != own and rel not in found):
+                    found.append(rel)
+                    todo.append(path)
+                    break
+    return found
+
+
 def tex_bullets(text):
     """tex_items less the items under a body `\\section` (tex_sections) whose items are no bullets
     (has_bullets: a coursework line, a Skills row): an experience or project bullet, under any other
@@ -674,7 +730,7 @@ def application_records(root):
     the city (when given); an applications.md table row when a cell equals the company and one the
     role."""
     out = []
-    for d in sorted(glob.glob(os.path.join(glob.escape(os.path.join(root, "outputs", "applications")), "*"))):
+    for d in sorted(glob_under(os.path.join(root, "outputs", "applications"), "*")):
         if not os.path.isdir(d):
             continue
         posting = os.path.join(d, "posting.md")
@@ -706,13 +762,9 @@ def targets(root):
     """The Target versions: the name of each outputs/resumes/<target>.tex, sorted, less a part (a .tex
     another one there \\input's or \\include's, with no .pdf beside it), as tools/resume.py --stale
     reads them."""
-    here = os.path.dirname(os.path.abspath(__file__))
-    if here not in sys.path:
-        sys.path.insert(0, here)   # -I leaves this folder off sys.path
-    import resume   # tools/resume.py, beside this file, owns what a part is; it imports this module
     folder = os.path.join(root, *RESUMES.split("/"))
-    texs = sorted(glob.glob(os.path.join(glob.escape(folder), "*.tex")))
-    parts = {os.path.normcase(os.path.join(folder, rel)) for tex in texs for rel in resume.local_inputs(tex)}
+    texs = sorted(glob_under(folder, "*.tex"))
+    parts = {os.path.normcase(os.path.join(folder, rel)) for tex in texs for rel in local_inputs(tex)}
     return [os.path.basename(t)[:-4] for t in texs
             if os.path.normcase(t) not in parts or os.path.isfile(t[:-4] + ".pdf")]
 
@@ -743,8 +795,7 @@ def start_record_lacks(record):
 
 RUNS = ".build/runs"   # one folder per posting run, named by its key (tools/scan.py run makes it)
 RUN_KEY = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})-(?P<hh>\d{2})(?P<mm>\d{2})(?P<ss>\d{2})(?:-(?P<n>\d+))?$")
-LIVE = "live"   # a run's live marker, in its folder: {"start", "mode"}
-LIVE_HOURS = 2   # a live marker untouched this long has expired (scan.py run --touch refreshes it)
+RUN_SESSION = "session"   # in a run's folder: the key of the session that started it (scan.py run --session)
 
 
 def run_key(date, clock, n=1):
@@ -757,62 +808,212 @@ def run_folder(key):
     return "%s/%s" % (RUNS, key)
 
 
-def write_live(path, start, mode):
-    """Write a live marker: `start` the run's start time (ISO 8601), `mode` its mode or None."""
-    write_text(path, json.dumps({"start": start, "mode": mode}) + "\n")
-
-
-def read_live(path):
-    """A live marker's start, in seconds since the epoch, while it was touched in the last LIVE_HOURS
-    hours; None when it has expired, is gone or does not parse."""
-    try:
-        if time.time() - os.path.getmtime(path) > LIVE_HOURS * 3600:
-            return None
-        return datetime.datetime.fromisoformat(json.loads(read_text(path))["start"]).timestamp()
-    except (OSError, UnicodeError, ValueError, KeyError, TypeError):
+def run_session(root, key):
+    """The session key a run recorded (scan.py run --session), or None: no such run, or it recorded none."""
+    if not RUN_KEY.match(key or ""):
         return None
-
-
-def live_runs(root):
-    """[(start, key)] of the runs still going, oldest first: each <RUNS>/<key>/live that read_live
-    reads, in a folder named as a run key."""
-    runs = []
-    for path in glob.glob(os.path.join(glob.escape(os.path.join(root, *RUNS.split("/"))), "*", LIVE)):
-        key = os.path.basename(os.path.dirname(path))
-        start = read_live(path) if RUN_KEY.match(key) else None
-        if start is not None:
-            runs.append((start, key))
-    return sorted(runs)
-
-
-def live_run(root, path, runs):
-    """The key of the latest-started of runs (live_runs) that started at or before the time on disk of
-    path (relative to the root), or None."""
     try:
-        mtime = os.path.getmtime(os.path.join(root, path))
-    except OSError:   # a deleted file has no time: an earlier session's
+        found = read_text(os.path.join(root, *run_folder(key).split("/"), RUN_SESSION)).strip()
+    except (OSError, UnicodeError):
         return None
-    keys = [key for start, key in runs if int(start) <= mtime]
-    return keys[-1] if keys else None
+    return found if SESSION_KEY.match(found) else None
+
+
+def commit_session(root, session, run):
+    """The session a commit runs under: --session's, or for one release the session --run's run recorded (scan.py
+    run --session); None for neither."""
+    return session or (run_session(root, run) if run else None)
+
+
+# ---- A session's record: its key, baseline and claims (ADR 0014) ----
+
+SESSIONS = ".build/sessions"   # one folder per agent session, named by its key (tools/check.py makes it)
+SESSION_KEY = RUN_KEY   # `<YYYY-MM-DD>-<HHMMSS>[-<n>]`, the time of the session's first check
+SESSION_FILE = "session.json"   # {"start", "baseline": {path: hash}, "claims": [path]}
+SESSION_KEEP_DAYS = 7   # a session holding no claim whose key is older than this is deleted (new_session)
+GONE = "-"   # a baseline hash: the file is deleted
+LOCK = ".lock"   # in SESSIONS: held while one tool changes records another session may read or change
+LOCK_TRIES, LOCK_WAIT, LOCK_STALE = 100, 0.1, 60   # seconds; a lock older than LOCK_STALE is a crashed tool's
+
+
+def session_path(root, key):
+    return os.path.join(root, *SESSIONS.split("/"), key, SESSION_FILE)
+
+
+def read_session(root, key):
+    """A session's record {"start", "baseline", "claims"}, or None when it has none or it does not parse."""
+    if not SESSION_KEY.match(key or ""):
+        return None
+    try:
+        data = json.loads(read_text(session_path(root, key)))
+    except (OSError, UnicodeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    baseline, claims = data.get("baseline"), data.get("claims")
+    return {"start": data.get("start"),
+            "baseline": {p: h for p, h in baseline.items() if isinstance(p, str) and isinstance(h, str)}
+            if isinstance(baseline, dict) else {},
+            "claims": [p for p in claims if isinstance(p, str)] if isinstance(claims, list) else []}
+
+
+def write_session(root, key, record):
+    """Write a session's record whole (a temporary file, then a rename: a reader never sees half of it)."""
+    path = session_path(root, key)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = "%s.%d.tmp" % (path, os.getpid())
+    write_text(tmp, json.dumps({"start": record.get("start"), "baseline": dict(sorted(record["baseline"].items())),
+                                "claims": sorted(set(record["claims"]))}, indent=1) + "\n")
+    os.replace(tmp, path)
+
+
+def sessions(root):
+    """{key: record} of every session of this Log whose record reads."""
+    folder = os.path.join(root, *SESSIONS.split("/"))
+    out = {}
+    for key in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+        record = read_session(root, key)
+        if record is not None:
+            out[key] = record
+    return out
+
+
+class session_lock:
+    """Held while a tool reads and changes session records (a claim, a release, a baseline that lapses), so two
+    sessions never claim one file at once: a file made with O_EXCL, waited for, and taken over once stale."""
+
+    def __init__(self, root):
+        self.path = os.path.join(root, *SESSIONS.split("/"), LOCK)
+
+    def __enter__(self):
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        for _ in range(LOCK_TRIES):
+            try:
+                os.close(os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                return self
+            except FileExistsError:
+                try:
+                    if time.time() - os.path.getmtime(self.path) > LOCK_STALE:
+                        os.remove(self.path)
+                        continue
+                except OSError:
+                    continue
+                time.sleep(LOCK_WAIT)
+        raise LogError("%s/%s is held by another tool; if no other session is running one, delete it"
+                       % (SESSIONS, LOCK))
+
+    def __exit__(self, *exc):
+        try:
+            os.remove(self.path)
+        except OSError:
+            pass
+
+
+def file_hash(root, path):
+    """The hash a baseline keeps for a Log file (path relative to the root): its bytes', or GONE."""
+    try:
+        with open(os.path.join(root, path), "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return GONE
+
+
+def make_keyed_folder(parent, key_of):
+    """Make parent if it is missing, then the folder parent/key_of(n) for the first n from 1 that is not there
+    yet; its key. A record kept one folder per key (a run, a session) gets its folder here: the copied loop
+    is what tools/tests/test_logfiles.py fails on."""
+    os.makedirs(parent, exist_ok=True)
+    n = 1
+    while True:   # mkdir makes the folder or fails, so two records started the same second never share one
+        key = key_of(n)
+        try:
+            os.mkdir(os.path.join(parent, key))
+            return key
+        except FileExistsError:
+            n += 1
+
+
+def new_session(root, baseline):
+    """Make a session's folder and record with this baseline {path: hash}; its key, the time now. Deletes each
+    session that holds no claim and whose key's date is more than SESSION_KEEP_DAYS before today."""
+    now = datetime.datetime.now()
+    parent = os.path.join(root, *SESSIONS.split("/"))
+    os.makedirs(parent, exist_ok=True)
+    oldest = (now.date() - datetime.timedelta(days=SESSION_KEEP_DAYS)).isoformat()
+    for key, record in sessions(root).items():
+        if not record["claims"] and SESSION_KEY.match(key).group("date") < oldest:
+            shutil.rmtree(os.path.join(parent, key), ignore_errors=True)
+    key = make_keyed_folder(parent, lambda n: run_key(now.strftime("%Y-%m-%d"), now.strftime("%H%M%S"), n))
+    write_session(root, key, {"start": now.astimezone().isoformat(timespec="seconds"), "baseline": baseline,
+                              "claims": []})
+    return key
+
+
+def under(path, named):
+    """Whether path is the named path, or under it when it names a folder."""
+    named = named.rstrip("/")
+    return path == named or path.startswith(named + "/")
+
+
+def holder(records, path, but=None):
+    """The key of the session (other than but) whose claims cover path or a path under it, or None."""
+    for key, record in records.items():
+        if key != but and any(under(path, c) or under(c, path) for c in record["claims"]):
+            return key
+    return None
+
+
+def lapse(root, changed):
+    """Drop, from every session's baseline, each file that matches HEAD now (not in changed, the paths git lists
+    as changed or new): an entry lapses once its file is settled, and never comes back."""
+    with session_lock(root):
+        for key, record in sessions(root).items():
+            kept = {p: h for p, h in record["baseline"].items() if p in changed}
+            if len(kept) != len(record["baseline"]):
+                record["baseline"] = kept
+                write_session(root, key, record)
+
+
+def release_claims(root, key, paths=None):
+    """Release the session's claims on paths (None: every claim; Next up, or its end); the released paths. Its
+    record stays: an idle session keeps its key."""
+    with session_lock(root):
+        record = read_session(root, key)
+        if record is None:
+            return []
+        gone = list(record["claims"]) if paths is None else [p for p in paths if p in record["claims"]]
+        record["claims"] = [p for p in record["claims"] if p not in gone]
+        write_session(root, key, record)
+    return gone
+
+
+def is_log_path(path):
+    """Whether a path (relative to the root, / separators) is one of the Log's own files or folders (LOG_PATHS)."""
+    path = path.rstrip("/")
+    return ((path in LOG_FILES or path.split("/")[0] in LOG_FOLDERS)
+            and path not in NOT_LOG and not under(path, INBOX))
 
 
 def uncommitted(root):
-    """[(status, path, old path or None, live run key or None)] of the Log's own files (LOG_PATHS) that
-    git shows as changed or new, each with the live run whose file it is (live_run); None when git
-    fails."""
+    """[(status, path, old path or None, claiming session key or None)] of the Log's own files (LOG_PATHS)
+    that git shows as changed or new, each with the session whose claims cover it (holder); None when git
+    fails. Each baseline entry whose file matches HEAD again lapses here (lapse)."""
     try:
         p = git_run(root, "status", "--porcelain", "-z", "--untracked-files=all", "--", *LOG_PATHS, timeout=30)
     except LogError:
         return None
     if p.returncode != 0:
         return None
-    out, entries, runs = [], iter(p.stdout.split("\0")), live_runs(root)
+    found, entries = [], iter(p.stdout.split("\0"))
     for entry in entries:
         if len(entry) > 3:
             status, path = entry[:2], entry[3:]
             old = next(entries, "?") if "R" in status or "C" in status else None   # a rename's -z entry is followed by its old path
-            out.append((status.strip(), path, old, live_run(root, path, runs) if runs else None))
-    return out
+            found.append((status.strip(), path, old))
+    if os.path.isdir(os.path.join(root, *SESSIONS.split("/"))):
+        lapse(root, {p for _, p, _ in found} | {o for _, _, o in found if o})
+    records = sessions(root)
+    return [(status, path, old, holder(records, path)) for status, path, old in found]
 
 
 # ---- URLs ----
@@ -831,6 +1032,66 @@ def urls(text):
     return [clean_url(u) for u in URL.findall(text)]
 
 
+# ---- An HTML page's text, and a time in this machine's zone (#791) ----
+
+HTML_HIDDEN = {"script", "style", "noscript", "template", "svg", "title"}
+HTML_BLOCKS = {"address", "article", "blockquote", "br", "dd", "div", "dl", "dt", "footer", "h1", "h2", "h3", "h4",
+               "h5", "h6", "header", "hr", "li", "main", "ol", "p", "pre", "section", "table", "td", "th", "tr", "ul"}
+
+
+class HtmlText(html.parser.HTMLParser):
+    """An HTML page as its reader sees it: a line per block, nothing from HTML_HIDDEN (or the caller's
+    extra hidden tags), the spaces and line breaks in the markup's text read as one space, as a browser
+    does, except inside <pre>. With marks, a list item starts with `- ` and a table's cells on one row
+    are joined by tabs."""
+    def __init__(self, hide=(), marks=False):
+        super().__init__(convert_charrefs=True)
+        self.hiding, self.marks = HTML_HIDDEN | set(hide), marks
+        self.parts, self.hidden, self.pre = [], 0, 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "pre":
+            self.pre += 1
+        if tag in self.hiding:
+            self.hidden += 1
+        elif self.marks and tag == "li":
+            self.parts.append("\n- ")
+        elif self.marks and tag in ("td", "th"):
+            self.parts.append("\t")
+        elif tag in HTML_BLOCKS:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag == "pre":
+            self.pre = max(0, self.pre - 1)
+        if tag in self.hiding:
+            self.hidden = max(0, self.hidden - 1)
+        elif self.marks and tag in ("li", "td", "th"):   # the next item's `- ` or cell's tab follows on
+            pass
+        elif tag in HTML_BLOCKS:
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        if not self.hidden:
+            self.parts.append(data.replace("\r\n", "\n") if self.pre else re.sub(r"[ \t\r\n\f]+", " ", data))
+
+
+def html_text(markup, hide=(), marks=False):
+    """The text of an HTML page or mail part (HtmlText), each line stripped of spaces; blank lines kept,
+    for the caller to drop or squeeze."""
+    p = HtmlText(hide, marks)
+    p.feed(markup)
+    p.close()
+    return "\n".join(line.strip(" ") for line in "".join(p.parts).split("\n"))
+
+
+def local_time(when):
+    """A timestamp as an aware datetime in this machine's time zone. `when` is an ISO 8601 string or
+    a datetime: one with a zone (`Z`, `+05:30`, `-0800`) is converted; one without is taken as this
+    machine's time already. A citation's `(user, YYYY-MM-DD)` is this time's date (SKILL.md)."""
+    return (datetime.datetime.fromisoformat(when) if isinstance(when, str) else when).astimezone()
+
+
 # ---- Claude Code's project folders ----
 
 def projects_dir(given=None):
@@ -845,10 +1106,21 @@ def fold(name):
     return name.lower() if os.name == "nt" else name  # a Windows drive letter's case varies
 
 
+def folder_name(path):
+    """A project folder name for an absolute path: every character outside [A-Za-z0-9] becomes '-'
+    (`/Users/me/Repos/career-log` -> `-Users-me-Repos-career-log`). The one copy of the rule."""
+    return re.sub(r"[^A-Za-z0-9]", "-", path)
+
+
 def claude_folder(path):
-    """Claude Code's project folder name for a working directory: every character outside [A-Za-z0-9]
-    becomes '-' (`/Users/me/Repos/career-log` -> `-Users-me-Repos-career-log`). The one copy of the rule."""
-    return re.sub(r"[^A-Za-z0-9]", "-", os.path.abspath(path))
+    """Claude Code's project folder name for a working directory. On macOS and Linux, Claude Code
+    names it from its resolved working directory, so the path is resolved first (os.path.realpath:
+    a checkout reached through a symlink, or macOS's /tmp, which is /private/tmp, gets the name of
+    its real path; #788). Whether Claude Code resolves on Windows is not verified, so there the path
+    is named as given (os.path.abspath), as before #788: realpath there can swap a subst or mapped
+    drive for its target, or a short 8.3 name for the long one, and find_project_folder tries the
+    resolved name as well."""
+    return folder_name(os.path.abspath(path) if os.name == "nt" else os.path.realpath(path))
 
 
 def folder_of(name, slug):
@@ -858,10 +1130,15 @@ def folder_of(name, slug):
 
 def find_project_folder(projects, path):
     """The folder under projects that Claude Code keeps for a working directory (an exact name first,
-    then, for a path over 200 characters, the first folder its cut name starts), or None."""
-    slug = claude_folder(path)
+    then, for a path over 200 characters, the first folder its cut name starts), or None. Claude Code
+    names it from its resolved working directory, so a path reached through a symlink (macOS's /var is
+    /private/var) is tried as given, then resolved (#768): a folder an older tool named from the path as
+    given is still found first."""
     names = sorted(os.listdir(projects)) if os.path.isdir(projects) else []
-    exact = [n for n in names if fold(n) == fold(slug)]
-    near = [n for n in names if len(slug) > 200 and fold(n).startswith(fold(slug[:200]))]
-    found = (exact or near)[:1]
-    return os.path.join(projects, found[0]) if found else None
+    for slug in dict.fromkeys((folder_name(os.path.abspath(path)), folder_name(os.path.realpath(path)))):
+        exact = [n for n in names if fold(n) == fold(slug)]
+        near = [n for n in names if len(slug) > 200 and fold(n).startswith(fold(slug[:200]))]
+        found = (exact or near)[:1]
+        if found:
+            return os.path.join(projects, found[0])
+    return None

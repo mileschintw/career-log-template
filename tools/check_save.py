@@ -4,7 +4,7 @@ and rank step 6's on a ranking (skills/career-log/modes/rank.md), then commit it
 audit point 6's on every output (skills/career-log/modes/audit.md).
 
   python3 -I tools/check_save.py <saved>... [--humanizer <file> | --humanizer none] [--root <root>]
-  python3 -I tools/check_save.py <saved> [--humanizer ...] --commit "<subject>" [--checked] [--root <root>]
+  python3 -I tools/check_save.py <saved> [--humanizer ...] --commit "<subject>" [--checked] [--session <key>] [--root <root>]
   python3 -I tools/check_save.py --audit [--root <root>]
 
 <root> is the Log's root (default: the folder above this script's). <saved> is a path in it, read
@@ -110,9 +110,15 @@ are the folder's name after its date (the `commit:` line tools/application.py na
 <event> as its file name has it. A subject that is none of these is a `Commit subject:` line that
 fails. On `check_save: ok` it commits, printing `commit: <subject>`, then a `left: <path>: differs
 from HEAD, not written by this save: not committed` line for each other Log file that differs from
-HEAD, as tools/check.py's Uncommitted Log changes lists them, less a live run's (a bulk change
-waiting for its yes stays out), then tools/sync.py commit's lines, so it still ends with `sync: ok`
-or a `next:` line; it exits with sync.py's code. It commits only the files this save wrote, told by what each
+HEAD, as tools/check.py's Uncommitted Log changes lists them, less those another session has
+claimed (a bulk change waiting for its yes stays out), then tools/sync.py commit's lines, so it still
+ends with `sync: ok` or a `next:` line; it exits with sync.py's code. --session <key> (this session's
+key, the Trigger check's `session:` line) goes to tools/sync.py commit, which claims for this session
+every file the save commits, its saved output included (<saved>, whole folder included, and a
+target's .tex and .pdf with its .md), and holds a file another session has claimed or one in this
+session's baseline (`held:` lines, then a `next: stop:` line); while another session holds claims, it
+stops without --session. --run <key> (a posting or target run's `run:` key) stands for the session
+that run recorded, for one release. It commits only the files this save wrote, told by what each
 gained or lost since HEAD (new files included): <saved>, a target's .tex and .pdf with its .md; each
 entry whose `## Past phrasings` gained or lost a line naming the output (its path from outputs/ on, or
 a target's <target>.md, .tex or .pdf) or gained one holding its bullet; stories.md when a line it
@@ -141,7 +147,7 @@ from entries import ENTRY_PATH, SCAN_REPORT, outputs   # what an entry's path is
 from entries import PHRASING_PARTS, SIMILAR, phrasings, similar, words   # the Past phrasings parser
 import writing_lint   # the Visibility and AI-tell check 9 lines, run again at save
 import sponsorship   # where the sponsorship records are (RECORDS)
-import resume   # which pdftotext tools/resume.py uses
+import resume   # pdf_text: a PDF's text, as --same-text reads it
 
 OUTPUT_REF = re.compile(r"\b(?:outputs|applications|resumes|reports)/|\bresume\.tex\b|\bprovenance\b", re.I)
 SOURCE_PATH = re.compile(r"\bsources/(?:[^;|\s]|\s+(?![^;|\s]*\b(?:outputs|applications|resumes|reports)/))*|[\w.-]+@[0-9a-f]{6,}:\S+|https?://(?![^\s]*/outputs/)\S+")
@@ -351,12 +357,10 @@ def untyped_headings(lines):
 def pdf_words(pdf):
     """The words of a PDF's text layer, as tools/resume.py --same-text reads them; None with no
     pdftotext; [] when it cannot read the file."""
-    exe = resume.poppler_bin("pdftotext")
-    if not exe:
-        return None
-    resume.no_error_dialogs()
-    run = subprocess.run([exe, "-enc", "UTF-8", pdf, "-"], capture_output=True, encoding="utf-8", errors="replace")
-    return run.stdout.split() if run.returncode == 0 else []
+    text, why = resume.pdf_text(pdf)
+    if text is None:
+        return None if why == resume.NO_PDFTOTEXT else []
+    return text.split()
 
 
 def same_as_draft(root, rel, tex, pdf, name, out):
@@ -788,6 +792,16 @@ def subject_problem(root, rel, subject):
     return None if subject == want else "`%s`" % want
 
 
+def own_outputs(root, saved):
+    """The output files this save wrote: each <saved>, and a target's .tex and .pdf with its .md."""
+    paths = []
+    for rel in saved:
+        paths.append(rel)
+        if TARGET.match(rel):
+            paths += [p for p in (rel[:-3] + ".tex", rel[:-3] + ".pdf") if exists(root, p)]
+    return paths
+
+
 def commit_paths(root, saved, entries):
     """The paths a save commits: each <saved> (a target's .tex and .pdf with its .md), then each Log
     file this save wrote, by what it gained since HEAD: <entries> (check_entries' list); stories.md
@@ -795,12 +809,7 @@ def commit_paths(root, saved, entries):
     list gained a line; for an application folder each scan report whose gained lines name it (a scan
     accept's status line) and then outputs/dashboard/; for a ranking applications.md when a line it
     gained names it."""
-    paths = []
-    for rel in saved:
-        paths.append(rel)
-        if TARGET.match(rel):
-            paths += [p for p in (rel[:-3] + ".tex", rel[:-3] + ".pdf") if exists(root, p)]
-    paths += entries
+    paths = own_outputs(root, saved) + entries
     if any(names_output(l, saved) for l in added_lines(root, "stories.md")):
         paths.append("stories.md")
     if exists(root, "profile.md"):
@@ -818,23 +827,25 @@ def commit_paths(root, saved, entries):
     return list(dict.fromkeys(paths))
 
 
-def left_paths(root, paths):
+def left_paths(root, paths, session=None):
     """The Log's own files that differ from HEAD (logfiles.uncommitted) and are not among the committed
-    ones (nor in a committed folder), less those of a live run (a run going in another session)."""
+    ones (nor in a committed folder), less those a session other than session has claimed."""
     inside = lambda p: any(p == c or p.startswith(c.rstrip("/") + "/") for c in paths)
-    return sorted(p for _, p, _, key in logfiles.uncommitted(root) or [] if not key and not inside(p))
+    return sorted(p for _, p, _, key in logfiles.uncommitted(root) or [] if key in (None, session) and not inside(p))
 
 
-def commit(root, saved, subject, entries):
+def commit(root, saved, subject, entries, session=None, run=None):
     """`commit: <subject>`, a `left:` line for each other path that differs from HEAD, then
-    tools/sync.py commit's own lines; sync.py's exit code."""
+    tools/sync.py commit's own lines; sync.py's exit code. session goes to sync.py as --session, run as --run
+    (it stands for the session its run recorded): sync.py claims every path this save commits."""
     print("commit: %s" % subject)
     paths = commit_paths(root, saved, entries)
-    for path in left_paths(root, paths):
+    for path in left_paths(root, paths, logfiles.commit_session(root, session, run)):
         print("left: %s: differs from HEAD, not written by this save: not committed" % path)
     sys.stdout.flush()
-    p = subprocess.run([sys.executable, "-I", os.path.join(HERE, "sync.py"), "commit", "--root", root, subject, "--"]
-                       + paths, capture_output=True, encoding="utf-8", errors="replace")
+    flags = ["--session", session] if session else ["--run", run] if run else []
+    p = subprocess.run([sys.executable, "-I", os.path.join(HERE, "sync.py"), "commit", "--root", root] + flags
+                       + [subject, "--"] + paths, capture_output=True, encoding="utf-8", errors="replace")
     sys.stdout.write(p.stdout + p.stderr)
     return p.returncode
 
@@ -905,6 +916,10 @@ def main(argv):
     ap.add_argument("--audit", action="store_true", help="audit point 6's checks on every output")
     ap.add_argument("--commit", metavar="SUBJECT", help="on exit 0, commit the save with this subject (tools/sync.py commit)")
     ap.add_argument("--checked", action="store_true", help="with --commit: each `check:` line was acted on")
+    ap.add_argument("--session", metavar="KEY", help="with --commit: this session's key (the Trigger check's `session:`"
+                                                      " line), passed to tools/sync.py commit")
+    ap.add_argument("--run", metavar="KEY", help="with --commit, for one release: a run's key, standing for the session"
+                                                  " that run recorded (scan.py run --session)")
     logfiles.add_root(ap, __file__)
     a = ap.parse_args(argv[1:])
     root = os.path.abspath(a.root)
@@ -913,8 +928,15 @@ def main(argv):
             print("--audit reads every output: give it no <saved> and no --commit")
             return 2
         return audit(root)
-    if a.checked and not a.commit:
-        print("--checked goes with --commit")
+    for flag, given in (("--checked", a.checked), ("--session", a.session), ("--run", a.run)):
+        if given and not a.commit:
+            print("%s goes with --commit" % flag)
+            return 2
+        if given and flag != "--checked" and not logfiles.SESSION_KEY.match(given):
+            print("%s needs a key: <YYYY-MM-DD>-<HHMMSS>[-<n>]" % flag)
+            return 2
+    if a.session and a.run:
+        print("--session and --run: give one (--run stands for the session its run recorded)")
         return 2
     if a.commit is not None and len(a.saved) != 1:
         print("--commit takes one saved output: the one this save wrote")
@@ -987,7 +1009,7 @@ def main(argv):
               " cuts the lines it prints, and the check then fails")
         return 1
     try:
-        return commit(root, saved, a.commit, entries)
+        return commit(root, saved, a.commit, entries, a.session, a.run)
     except logfiles.LogError as e:
         print(e)
         return 2

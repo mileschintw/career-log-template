@@ -1,0 +1,278 @@
+{
+ "duration": 16.0,
+ "voiced": [
+  [
+   0.45,
+   5.25
+  ],
+  [
+   7.25,
+   12.05
+  ]
+ ],
+ "words": [
+  {
+   "word": " First,",
+   "start": 0.5,
+   "end": 0.8
+  },
+  {
+   "word": " the",
+   "start": 0.9,
+   "end": 1.2
+  },
+  {
+   "word": " problem.",
+   "start": 1.3,
+   "end": 1.6
+  },
+  {
+   "word": " The",
+   "start": 1.7,
+   "end": 2.0
+  },
+  {
+   "word": " service",
+   "start": 2.1,
+   "end": 2.4
+  },
+  {
+   "word": " fell",
+   "start": 2.5,
+   "end": 2.8
+  },
+  {
+   "word": " behind",
+   "start": 2.9,
+   "end": 3.2
+  },
+  {
+   "word": " every",
+   "start": 3.3,
+   "end": 3.6
+  },
+  {
+   "word": " morning",
+   "start": 3.7,
+   "end": 4.0
+  },
+  {
+   "word": " when",
+   "start": 4.1,
+   "end": 4.4
+  },
+  {
+   "word": " traffic",
+   "start": 4.5,
+   "end": 4.8
+  },
+  {
+   "word": " rose.",
+   "start": 4.9,
+   "end": 5.2
+  },
+  {
+   "word": " Second,",
+   "start": 7.3,
+   "end": 7.6
+  },
+  {
+   "word": " the",
+   "start": 7.7,
+   "end": 8.0
+  },
+  {
+   "word": " design.",
+   "start": 8.1,
+   "end": 8.4
+  },
+  {
+   "word": " A",
+   "start": 8.5,
+   "end": 8.8
+  },
+  {
+   "word": " small",
+   "start": 8.9,
+   "end": 9.2
+  },
+  {
+   "word": " cache",
+   "start": 9.3,
+   "end": 9.6
+  },
+  {
+   "word": " answered",
+   "start": 9.7,
+   "end": 10.0
+  },
+  {
+   "word": " most",
+   "start": 10.1,
+   "end": 10.4
+  },
+  {
+   "word": " queries",
+   "start": 10.5,
+   "end": 10.8
+  },
+  {
+   "word": " before",
+   "start": 10.9,
+   "end": 11.2
+  },
+  {
+   "word": " the",
+   "start": 11.3,
+   "end": 11.6
+  },
+  {
+   "word": " index.",
+   "start": 11.7,
+   "end": 12.0
+  },
+  {
+   "word": " Thank",
+   "start": 14.0,
+   "end": 14.3
+  },
+  {
+   "word": " you.",
+   "start": 14.3,
+   "end": 14.6
+  }
+ ],
+ "check_model": "small",
+ "check_words": [
+  {
+   "word": " First,",
+   "start": 0.5,
+   "end": 0.8
+  },
+  {
+   "word": " the",
+   "start": 0.9,
+   "end": 1.2
+  },
+  {
+   "word": " problem.",
+   "start": 1.3,
+   "end": 1.6
+  },
+  {
+   "word": " The",
+   "start": 1.7,
+   "end": 2.0
+  },
+  {
+   "word": " service",
+   "start": 2.1,
+   "end": 2.4
+  },
+  {
+   "word": " fell",
+   "start": 2.5,
+   "end": 2.8
+  },
+  {
+   "word": " behind",
+   "start": 2.9,
+   "end": 3.2
+  },
+  {
+   "word": " every",
+   "start": 3.3,
+   "end": 3.6
+  },
+  {
+   "word": " morning",
+   "start": 3.7,
+   "end": 4.0
+  },
+  {
+   "word": " when",
+   "start": 4.1,
+   "end": 4.4
+  },
+  {
+   "word": " traffic",
+   "start": 4.5,
+   "end": 4.8
+  },
+  {
+   "word": " rose.",
+   "start": 4.9,
+   "end": 5.2
+  },
+  {
+   "word": " Second,",
+   "start": 7.3,
+   "end": 7.6
+  },
+  {
+   "word": " the",
+   "start": 7.7,
+   "end": 8.0
+  },
+  {
+   "word": " desire.",
+   "start": 8.1,
+   "end": 8.4
+  },
+  {
+   "word": " A",
+   "start": 8.5,
+   "end": 8.8
+  },
+  {
+   "word": " small",
+   "start": 8.9,
+   "end": 9.2
+  },
+  {
+   "word": " cache",
+   "start": 9.3,
+   "end": 9.6
+  },
+  {
+   "word": " answered",
+   "start": 9.7,
+   "end": 10.0
+  },
+  {
+   "word": " most",
+   "start": 10.1,
+   "end": 10.4
+  },
+  {
+   "word": " queries",
+   "start": 10.5,
+   "end": 10.8
+  },
+  {
+   "word": " before",
+   "start": 10.9,
+   "end": 11.2
+  },
+  {
+   "word": " the",
+   "start": 11.3,
+   "end": 11.6
+  },
+  {
+   "word": " index.",
+   "start": 11.7,
+   "end": 12.0
+  },
+  {
+   "word": " Thank",
+   "start": 14.0,
+   "end": 14.3
+  },
+  {
+   "word": " you.",
+   "start": 14.3,
+   "end": 14.6
+  }
+ ]
+}

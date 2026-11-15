@@ -5,7 +5,7 @@ identity they set.
 
   python3 -I tools/tests/test_sync.py
 """
-import importlib.util, os, shutil, subprocess, sys, tempfile, threading, unittest
+import datetime, importlib.util, json, os, shutil, subprocess, sys, tempfile, threading, time, unittest
 
 sys.dont_write_bytecode = True   # the tool loaded below leaves no tools/__pycache__
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -13,6 +13,7 @@ TOOL = os.path.join(HERE, "..", "sync.py")
 spec = importlib.util.spec_from_file_location("sync", TOOL)
 sync = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sync)
+logfiles = sync.logfiles
 
 
 class Log(unittest.TestCase):
@@ -206,7 +207,7 @@ class Commit(Log):
         self.git(other, "commit", "-q", "-m", "theirs")
         self.git(other, "push", "-q")
         self.write("README.md", "# Mine\n")
-        self.write("entries/2031-02-live.md", "a live run's file\n")   # another session's: left as it is
+        self.write("entries/2031-02-live.md", "another session's file\n")   # left as it is
         code, out = self.sync("commit", "log(widget): mine", "--", "README.md")
         self.assertEqual(code, 0, out)
         self.assertEqual(out.splitlines()[1:], ["push: rebased on origin/master", "pushed: origin/master", "sync: ok"])
@@ -222,7 +223,7 @@ class Commit(Log):
         self.git(other, "push", "-q")
         left = os.path.join(self.root, "entries", "2031-01-widget.md")
         self.write("entries/2031-01-widget.md", "---\ntitle: Widget, left by an earlier session\n---\n")
-        os.utime(left, (1_700_000_000, 1_700_000_000))   # its time tells check.py it is no live run's
+        os.utime(left, (1_700_000_000, 1_700_000_000))   # an earlier session's file keeps its own time
         self.write("README.md", "# Mine\n")
         code, out = self.sync("commit", "log(widget): mine", "--", "README.md")
         self.assertEqual(code, 0, out)
@@ -312,6 +313,207 @@ class Commit(Log):
         code, out = self.sync("--help")
         self.assertEqual(code, 0)
         self.assertIn("settle discard", out)
+
+
+class Sessions(Log):
+    """ADR 0014: a session claims the Log files it writes; commit holds a file another session claimed, or one
+    in its own baseline, and the `next:` line under `owned:` and `held:` is the only place the user is asked
+    whether another session is still going."""
+
+    def setUp(self):
+        super().setUp()
+        with open(os.path.join(self.root, ".git", "info", "exclude"), "a") as f:
+            f.write(".build/\n")
+        self.entry = "entries/2031-01-widget.md"
+        self.a = logfiles.new_session(self.root, {})   # the pack session, started first
+        self.b = logfiles.new_session(self.root, {})   # the talk session
+
+    def head(self):
+        return self.git(self.root, "rev-parse", "HEAD")
+
+    def claims(self, key):
+        return logfiles.read_session(self.root, key)["claims"]
+
+    def asks_about(self, line, key):
+        """The `next: stop:` line asks the user whether session key is still going, and names its end."""
+        self.assertTrue(line.startswith("next: stop: nothing was changed."), line)
+        self.assertIn("ask the user whether session %s is still going" % key, line)
+        self.assertIn("`sync.py end --session %s`" % key, line)
+
+    def test_another_sessions_claim_refuses_the_claim_and_holds_the_commit(self):
+        code, out = self.sync("claim", "--session", self.a, "--", self.entry)
+        self.assertEqual((code, out.splitlines()), (0, ["claimed: %s" % self.entry, "sync: ok"]))
+        before = self.head()
+        code, out = self.sync("claim", "--session", self.b, "--", self.entry, "profile.md")
+        self.assertEqual(code, 1, out)
+        self.assertEqual(out.splitlines()[0], "owned: %s (session %s)" % (self.entry, self.a))
+        self.asks_about(out.splitlines()[-1], self.a)
+        self.assertEqual(self.claims(self.b), [])   # all or none: profile.md is not claimed either
+        self.write(self.entry, "---\ntitle: Widget, by the talk session\n---\n")
+        for folder in (self.entry, "entries/"):
+            code, out = self.sync("commit", "--session", self.b, "log(widget): mine", "--", folder)
+            self.assertEqual(code, 1, out)
+            self.assertEqual(out.splitlines()[0], "held: %s (session %s)" % (self.entry, self.a))
+            self.asks_about(out.splitlines()[-1], self.a)
+            self.assertEqual(self.head(), before)
+
+    def test_a_commit_never_claims_a_file_another_session_claimed_before_its_edit(self):
+        """A claim comes before the first edit, so the claimed file may still match HEAD: a commit that names it
+        is held all the same, and claims nothing."""
+        self.assertEqual(self.sync("claim", "--session", self.a, "--", "README.md")[0], 0)
+        self.write(self.entry, "---\ntitle: Widget, the talk session's\n---\n")
+        code, out = self.sync("commit", "--session", self.b, "log(widget): mine", "--", self.entry, "README.md")
+        self.assertEqual(code, 1, out)
+        self.assertEqual(out.splitlines()[0], "held: README.md (session %s)" % self.a)
+        self.assertEqual(self.claims(self.b), [])
+        self.assertEqual(self.claims(self.a), ["README.md"])
+
+    def test_the_703_order_holds_the_session_that_did_not_claim(self):
+        """#703: the pack session claims and edits the pack file, the talk session edits it too, and the pack
+        session edits it last. By time on disk the file was the talk session's; by claim it is the pack's."""
+        self.assertEqual(self.sync("claim", "--session", self.a, "--", self.entry)[0], 0)
+        self.write(self.entry, "---\ntitle: Widget\n---\npack\n")
+        self.write(self.entry, "---\ntitle: Widget\n---\npack\ntalk\n")
+        time.sleep(0.05)
+        self.write(self.entry, "---\ntitle: Widget\n---\npack\ntalk\npack again\n")   # the pack session edits last
+        code, out = self.sync("commit", "--session", self.b, "interview: talk notes", "--", self.entry)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(out.splitlines()[0], "held: %s (session %s)" % (self.entry, self.a))
+        code, out = self.sync("commit", "--session", self.a, "interview: pack", "--", self.entry)
+        self.assertEqual(code, 0, out)
+        self.assertTrue(self.pushed(), out)
+
+    def test_a_commit_claims_what_it_commits(self):
+        self.write(self.entry, "---\ntitle: Widget, logged\n---\n")
+        code, out = self.sync("commit", "--session", self.b, "log(widget): mine", "--", self.entry, "profile.md")
+        self.assertEqual(code, 0, out)
+        self.assertIn("skipped: profile.md (no such file, and none git knows)", out)
+        self.assertEqual(self.claims(self.b), [self.entry])   # committed and clean, still claimed until Next up
+        code, out = self.sync("claim", "--session", self.a, "--", self.entry)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(out.splitlines()[0], "owned: %s (session %s)" % (self.entry, self.b))
+
+    def test_end_releases_another_sessions_claims(self):
+        self.assertEqual(self.sync("claim", "--session", self.a, "--", self.entry, "profile.md")[0], 0)
+        code, out = self.sync("end", "--session", self.a)   # on the user's word that session a has ended
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.splitlines(), ["released: %s" % self.entry, "released: profile.md",
+                                            "session: %s ended (2 claim(s) released)" % self.a, "sync: ok"])
+        self.assertIsNotNone(logfiles.read_session(self.root, self.a))   # an ended session keeps its record
+        self.assertEqual(self.sync("claim", "--session", self.b, "--", self.entry)[0], 0)
+        self.assertEqual(self.sync("end", "--session", self.a)[1].splitlines()[0],
+                         "session: %s ended (it held no claim)" % self.a)
+
+    def test_release_hands_a_file_on(self):
+        self.assertEqual(self.sync("claim", "--session", self.a, "--", "./" + self.entry)[0], 0)
+        code, out = self.sync("release", "--session", self.a, "--", self.entry, "profile.md")
+        self.assertEqual(out.splitlines(), ["released: %s" % self.entry,
+                                            "not claimed: profile.md (by session %s)" % self.a, "sync: ok"])
+        self.assertEqual(self.sync("claim", "--session", self.b, "--", self.entry)[1].splitlines()[0],
+                         "claimed: %s" % self.entry)
+        self.assertEqual(self.sync("claim", "--session", self.b, "--", self.entry)[1].splitlines()[0],
+                         "claimed: %s (already)" % self.entry)
+
+    def test_an_idle_session_keeps_its_claims(self):
+        """No timer: a session that ran no tool for hours still holds its files."""
+        self.assertEqual(self.sync("claim", "--session", self.a, "--", self.entry)[0], 0)
+        path = logfiles.session_path(self.root, self.a)
+        record = logfiles.read_session(self.root, self.a)
+        record["start"] = "2000-01-01T00:00:00+00:00"
+        logfiles.write_session(self.root, self.a, record)
+        os.utime(path, (time.time() - 30 * 3600,) * 2)
+        os.utime(os.path.dirname(path), (time.time() - 30 * 3600,) * 2)
+        code, out = self.sync("claim", "--session", self.b, "--", self.entry)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(out.splitlines()[0], "owned: %s (session %s)" % (self.entry, self.a))
+
+    def test_a_baseline_file_is_refused_until_settled_and_then_lapses_everywhere(self):
+        self.write(self.entry, "---\ntitle: Widget, left by an earlier session\n---\n")
+        found = {self.entry: logfiles.file_hash(self.root, self.entry)}
+        c = logfiles.new_session(self.root, found)
+        d = logfiles.new_session(self.root, dict(found))
+        code, out = self.sync("claim", "--session", c, "--", self.entry)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(out.splitlines()[0], "baseline: %s (uncommitted when this session started)" % self.entry)
+        self.assertIn("settle commit --session %s -- <file>" % c, out.splitlines()[-1])
+        code, out = self.sync("commit", "--session", c, "log(widget): mine", "--", self.entry)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(out.splitlines()[0], "held: %s (uncommitted when this session started)" % self.entry)
+        code, out = self.sync("settle", "commit", "--session", c, "--", self.entry)   # on the user's yes
+        self.assertEqual(code, 0, out)
+        self.assertTrue(self.pushed(), out)
+        self.assertEqual(self.claims(c), [])   # a settle claims nothing
+        self.write(self.entry, "---\ntitle: Widget, this session's\n---\n")
+        for key in (c, d):   # the entry lapsed in every session's baseline once it matched HEAD
+            code, out = self.sync("claim", "--session", key, "--", self.entry)
+            self.assertEqual(code, 0, out)
+            self.assertEqual(logfiles.read_session(self.root, key)["baseline"], {})
+            self.sync("release", "--session", key, "--", self.entry)
+
+    def test_settle_commit_still_holds_another_sessions_file(self):
+        self.write(self.entry, "---\ntitle: Widget, the pack session's\n---\n")
+        self.assertEqual(self.sync("claim", "--session", self.a, "--", self.entry)[0], 0)
+        code, out = self.sync("settle", "commit", "--session", self.b)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(out.splitlines()[0], "held: %s (session %s)" % (self.entry, self.a))
+
+    def test_settle_discard_never_puts_back_a_claimed_file(self):
+        self.write(self.entry, "---\ntitle: Widget, the pack session's\n---\n")
+        self.assertEqual(self.sync("claim", "--session", self.a, "--", self.entry)[0], 0)
+        for args in ((), ("--session", self.b)):
+            code, out = self.sync("settle", "discard", *args, "--", self.entry)
+            self.assertEqual(code, 1, out)
+            self.assertEqual(out.splitlines()[0], "held: %s (session %s)" % (self.entry, self.a))
+            self.assertEqual(self.git(self.root, "status", "--short"), " M %s\n" % self.entry)
+        code, out = self.sync("settle", "discard", "--session", self.a, "--", self.entry)
+        self.assertEqual(code, 0, out)
+
+    def test_a_commit_without_session_stops_while_another_session_holds_claims(self):
+        self.write("README.md", "# Log, edited\n")
+        self.assertEqual(self.sync("claim", "--session", self.a, "--", "profile.md")[0], 0)
+        for args in (("commit", "log: readme", "--", "README.md"), ("settle", "commit")):
+            code, out = self.sync(*args)
+            self.assertEqual(code, 1, out)
+            self.assertEqual(out.splitlines()[0], "session: none given (session %s holds claims in this Log)" % self.a)
+            self.assertIn("run this command again with --session <key>", out.splitlines()[-1])
+            self.assertIn("`session:` line", out.splitlines()[-1])
+        self.assertEqual(self.sync("end", "--session", self.a)[0], 0)
+        code, out = self.sync("commit", "log: readme", "--", "README.md")   # nobody holds claims: as before
+        self.assertEqual(code, 0, out)
+        self.assertTrue(self.pushed(), out)
+
+    def test_run_stands_for_the_session_its_run_recorded(self):
+        """For one release, `--run <key>` (a mode file's older line) commits as the session `scan.py run
+        --session` recorded; a run that recorded none commits as no session."""
+        run = "2031-01-02-100000"
+        self.write(".build/runs/%s/session" % run, self.a + "\n")
+        self.assertEqual(self.sync("claim", "--session", self.a, "--", self.entry)[0], 0)
+        self.write(self.entry, "---\ntitle: Widget, the run's\n---\n")
+        code, out = self.sync("commit", "--run", run, "write: save", "--", self.entry)
+        self.assertEqual(code, 0, out)
+        self.assertTrue(self.pushed(), out)
+        self.assertEqual(self.sync("end", "--session", self.a)[0], 0)
+        self.write(self.entry, "---\ntitle: Widget, a later run's\n---\n")
+        os.makedirs(os.path.join(self.root, ".build", "runs", "2031-01-02-110000"))
+        code, out = self.sync("commit", "--run", "2031-01-02-110000", "write: save", "--", self.entry)
+        self.assertEqual(code, 0, out)
+
+    def test_an_unknown_session(self):
+        code, out = self.sync("claim", "--session", "2031-01-02-100000", "--", self.entry)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(out.splitlines()[0], "session: 2031-01-02-100000 unknown (no record of it in .build/sessions/)")
+
+    def test_usage(self):
+        for args in (("commit", "--run", "x", "x", "--", self.entry),
+                     ("commit", "--session", "nope", "x", "--", self.entry),
+                     ("commit", "--session", self.a, "--run", self.b, "x", "--", self.entry),
+                     ("commit", "--take", self.entry, "x", "--", self.entry),   # --take went with time attribution
+                     ("claim", "--", self.entry), ("claim", "--session", self.a), ("claim", "--session", self.a, "--"),
+                     ("claim", "--session", self.a, "--", "tools/x.py"),
+                     ("claim", "--session", self.a, "--", "sources/inbox/cv.txt"),
+                     ("release", "--session", self.a), ("end",), ("end", "--session", self.a, "--", self.entry),
+                     ("settle", "discard", "--session", "nope")):
+            self.assertEqual(self.sync(*args)[0], 2, args)
 
 
 class Push(Log):

@@ -53,10 +53,20 @@
       prints `unknown shape:` and why.
 
 Claude Code session transcripts (one session each, ~/.claude/projects/<folder>/<session id>.jsonl):
-  chat_export.py turns [<transcript>] [--show U3,A3:2-4] [--cwd <dir>] [--projects <dir>]
+  chat_export.py turns [<transcript> | --current <words>] [--show U3,A3:2-4] [--cwd <dir>] [--projects <dir>]
       Number the session's turns: U<k>, the k-th turn the user typed, and A<k>, the assistant's text
       after it, with its paragraph count. --show prints those turns whole, with [p<n>] paragraph marks.
-      With no transcript, reads the newest one for --cwd (default: the current directory).
+      With no transcript, reads the newest one for --cwd (default: the current directory) by modification
+      time, which with forks or sessions running side by side is often another session's. --current
+      reads instead the newest one with a user turn holding <words> (a few words of your latest message,
+      case and spacing ignored), and says how many others hold them; none is an error.
+  chat_export.py forks [<transcript> | --current <words>] [--cwd <dir>] [--projects <dir>]
+      List the transcripts in the transcript's folder that share lines with it: a line of work and its
+      forks, since each fork, and each continuation after one, is a new file copying the earlier lines.
+      One line each, oldest last turn first: the file (marked `(this one)` for the one given), its first and
+      last turn in UTC, its user turns, its first user turn after the split (from the closest file that does
+      not hold all of it; `-` when every other file goes on from it), and its last user turn. The files do
+      not say which one is the main line. Each file is a session of its own, with its own U<k>.
   chat_export.py excerpt <transcript> --keep U3,A3:2-4 --slug <slug> --out <log>/sources [--title <t>]
       Write the kept turns to sources/claude-code/<date>-<slug>.md: user turns whole, assistant turns
       whole or only the paragraphs given, secrets redacted (a count goes to stderr). Run again with the
@@ -1114,7 +1124,7 @@ def read_transcript(path):
                 text = user_text(content)
                 if text is not None:
                     u += 1
-                    turns.append({"label": f"U{u}", "time": t, "text": text})
+                    turns.append({"label": f"U{u}", "time": t, "text": text, "uuid": o.get("uuid")})
                 continue
             if o.get("isApiErrorMessage"):
                 continue
@@ -1128,8 +1138,9 @@ def read_transcript(path):
                 turns.append({"label": f"A{u}", "time": t, "text": text})
     if not turns:
         sys.exit(f"{path}: no turns found; is it a Claude Code session transcript?")
-    # The file names the session: a forked session copies its parent's sessionId but numbers its own turns
-    return {"session": os.path.splitext(os.path.basename(path))[0], "start": start, "turns": turns}
+    # The file names the session: a forked session copies its parent's sessionId but numbers its own turns.
+    # seen holds the uuid of every line read: a fork's file copies its parent's opening lines, uuids included.
+    return {"session": os.path.splitext(os.path.basename(path))[0], "start": start, "turns": turns, "uuids": seen}
 
 
 def paragraphs(text):
@@ -1224,15 +1235,46 @@ def order(label):
     return int(label[1:]), label[0] == "A"
 
 
+def folder_transcripts(folder):
+    """The session transcripts directly in a project folder, oldest first by modification time."""
+    return [p for _, p in sorted((os.path.getmtime(p), p) for p in (os.path.join(folder, n) for n in os.listdir(folder))
+                                 if p.endswith(".jsonl") and os.path.isfile(p))]
+
+
+def holds(path, phrase, raws):
+    """Whether a user turn of the transcript contains the phrase (one_line, lowered)."""
+    if raws is not None:  # parsing is the slow part: skip a file the phrase cannot be in
+        with open(path, "rb") as f:
+            if not may_hold(f.read().lower(), raws):
+                return False
+    try:
+        tr = read_transcript(path)
+    except SystemExit:
+        return False
+    return any(t["label"][0] == "U" and phrase in one_line(t["text"]).lower() for t in tr["turns"])
+
+
 def transcript_path(a):
     if a.transcript:
+        if a.current:
+            sys.exit("give a transcript or --current, not both")
         return a.transcript
     folder = project_folder(projects_dir(a.projects), a.cwd or os.getcwd())
-    found = sorted((os.path.getmtime(p), p) for p in (os.path.join(folder, n) for n in os.listdir(folder)) if p.endswith(".jsonl"))
+    found = folder_transcripts(folder)
     if not found:
         sys.exit(f"no transcripts in {folder}")
-    print(f"transcript: {found[-1][1]} (the newest of {len(found)} in {folder}; pass another one's path to read it)")
-    return found[-1][1]
+    if a.current:
+        phrase = one_line(a.current).lower()
+        raws = raw_phrases([a.current])
+        hits = [p for p in found if holds(p, phrase, raws)]
+        if not hits:
+            sys.exit(f"--current: no transcript in {folder} has a user turn with {a.current!r}; "
+                     "pass the transcript's path (`find` searches every project folder)")
+        print(f"transcript: {hits[-1]} (the newest in {folder} holding those words; {len(hits) - 1} others "
+              "hold them too; pass another one's path to read it)")
+        return hits[-1]
+    print(f"transcript: {found[-1]} (the newest of {len(found)} in {folder}; pass another one's path to read it)")
+    return found[-1]
 
 
 def cmd_turns(a):
@@ -1251,6 +1293,41 @@ def cmd_turns(a):
     for t in tr["turns"]:
         extra = f"{len(paragraphs(t['text']))} paragraphs" if t["label"][0] == "A" else t["time"][:16]
         print(f"{t['label']}\t{extra}\t{one_line(t['text'])[:200]}")
+
+
+def split_turn(tr, group):
+    """The transcript's first user turn after it split from its closest relative in the group: of the other files
+    that do not hold every line of it (a continuation copies the file whole), the one sharing the most lines."""
+    others = [o for _, o in group if o is not tr and not tr["uuids"] <= o["uuids"]]
+    if not others:
+        return None
+    near = max(others, key=lambda o: len(tr["uuids"] & o["uuids"]))
+    return next((t for t in tr["turns"] if t["label"][0] == "U" and t["uuid"] not in near["uuids"]), None)
+
+
+def cmd_forks(a):
+    """The transcripts in the given one's folder that share lines with it (a line of work and its forks)."""
+    path = transcript_path(a)
+    me = read_transcript(path)
+    group = []
+    for p in folder_transcripts(os.path.dirname(os.path.abspath(path))):
+        if os.path.normcase(os.path.abspath(p)) == os.path.normcase(os.path.abspath(path)):
+            group.append((p, me))
+            continue
+        try:
+            tr = read_transcript(p)
+        except SystemExit:
+            continue
+        if tr["uuids"] & me["uuids"]:
+            group.append((p, tr))
+    print(f"{len(group)} transcripts share their opening with {path}:")
+    for p, tr in sorted(group, key=lambda g: (g[1]["turns"][-1]["time"], g[0])):
+        users = [t for t in tr["turns"] if t["label"][0] == "U"]
+        split = split_turn(tr, group)
+        print("\t".join([p + (" (this one)" if tr is me else ""), tr["turns"][0]["time"][:16],
+                         tr["turns"][-1]["time"][:16], str(len(users)),
+                         f"{split['label']} {one_line(split['text'])[:120]}" if split else "-",
+                         one_line(users[-1]["text"])[:120] if users else "-"]))
 
 
 def session_files(folder, session):
@@ -1279,11 +1356,11 @@ def excerpt_name(folder, slug, session, start):
 
 def local_day(time):
     """A UTC ISO time's day in this machine's time zone: the date a `(user, YYYY-MM-DD)` citation gives."""
-    return datetime.fromisoformat(time).astimezone().date().isoformat() if time else "unknown"
+    return logfiles.local_time(time).date().isoformat() if time else "unknown"
 
 
 def cmd_excerpt(a):
-    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", a.slug):
+    if not logfiles.is_slug(a.slug):
         sys.exit("--slug: lowercase letters, digits and single hyphens, like api-retry-design")
     tr = read_transcript(a.transcript)
     keep = parse_keep(a.keep, tr)
@@ -1693,7 +1770,7 @@ def cmd_quote(a):
     folder_name = re.sub(r"[^a-z0-9]+", "-", a.agent.lower()).strip("-")
     if not re.fullmatch(r"[a-z][a-z0-9]*(?:-[a-z][a-z0-9]*)*", folder_name):
         sys.exit(f"--agent {a.agent!r}: name the agent in letters and digits, starting with a letter (codex, cursor)")
-    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", a.slug):
+    if not logfiles.is_slug(a.slug):
         sys.exit("--slug: lowercase letters, digits and single hyphens, like api-retry-design")
     if a.started and not re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", a.started):
         sys.exit("--started: the session's first turn as 'YYYY-MM-DD HH:MM', in UTC")
@@ -1798,9 +1875,16 @@ def main():
     p = sub.add_parser("turns")
     p.add_argument("transcript", nargs="?")
     p.add_argument("--show")
+    p.add_argument("--current", help="words from your latest message: read the newest transcript that has them")
     p.add_argument("--cwd")
     p.add_argument("--projects")
     p.set_defaults(fn=cmd_turns)
+    p = sub.add_parser("forks")
+    p.add_argument("transcript", nargs="?")
+    p.add_argument("--current", help="words from your latest message: start from the newest transcript that has them")
+    p.add_argument("--cwd")
+    p.add_argument("--projects")
+    p.set_defaults(fn=cmd_forks)
     p = sub.add_parser("excerpt")
     p.add_argument("transcript")
     p.add_argument("--keep", required=True)

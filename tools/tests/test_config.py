@@ -76,7 +76,8 @@ class ConfigTest(unittest.TestCase):
         self.write('front_page = "trimmed"\n')
         code, lines = self.run_tool("show")
         self.assertEqual(code, 0)
-        self.assertEqual(lines[:len(config.FIELDS)], ['record_language = "English" (default)', 'interviewer_profiles = "never" (default)',
+        self.assertEqual(lines[:len(config.FIELDS)], ['record_language = "English" (default)',
+                                 'conversation_language = "" (default)', 'interviewer_profiles = "never" (default)',
                                  'front_page = "trimmed"', 'window = 7 (default)', 'scheduled_window = "window" (default)',
                                  'screen_budget = 40 (default)', 'fit_budget = 15 (default)', 'n = 10 (default)', 'auto_write = "off" (default)',
                                  'm = 5 (default)', 'update_check = "on" (default)',
@@ -107,6 +108,32 @@ class ConfigTest(unittest.TestCase):
         for text in ('m = "5"\n', "m = true\n", "window = 7.0\n", 'record_language = 3\n'):
             self.write(text)
             self.assertEqual(self.run_tool("show")[0], 1, text)
+
+    def test_conversation_language_takes_a_language_tag_or_empty(self):
+        """#699: a BCP 47 tag with script and region, or empty (the language the user writes in)."""
+        self.run_tool("init")
+        self.assertIn('conversation_language = ""', self.run_tool("show")[1])   # init writes every field
+        code, lines = self.run_tool("set", "conversation_language", "zh-Hant-TW")
+        self.assertEqual((code, lines), (0, ['before: conversation_language = ""', 'after: conversation_language = "zh-Hant-TW"', "written"]))
+        with open(os.path.join(self.root, "config.toml"), "rb") as f:
+            self.assertEqual(tomllib.load(f)["conversation_language"], "zh-Hant-TW")
+        for tag in ("en", "de-DE", "es-419", "sr-Latn", "zh-Hans-CN", "ja", ""):
+            self.assertEqual(self.run_tool("set", "conversation_language", tag)[0], 0, tag)
+        before = self.read()
+        for tag in ("Traditional Chinese", "zh_TW", "zh-", "-TW", "z", "zh-Hant-TW-", "zh--TW", " zh-TW", "zh-TW ",
+                    "toolonglanguage", "zh-Hant-Hans", "en-US-x"):
+            code, lines = self.run_tool("set", "conversation_language", tag)
+            self.assertEqual(code, 1, tag)
+            self.assertTrue(lines[0].startswith("config: conversation_language must be"), lines)
+        self.assertEqual(self.read(), before)
+        for text in ('conversation_language = "Chinese"\n', "conversation_language = 1\n"):
+            self.write(text)
+            self.assertEqual(self.run_tool("show")[0], 1, text)
+
+    def test_fields_names_the_tag_form(self):
+        lines = self.run_tool("fields")[1]
+        self.assertIn('config: conversation_language ("" or a BCP 47 language tag with its script and region,'
+                      ' such as zh-Hant-TW)', lines)
 
     def test_fit_budget_never_above_screen_budget(self):
         self.run_tool("init")
