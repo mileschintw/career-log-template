@@ -1,29 +1,37 @@
 #!/bin/sh
 # Build the shareable Template (Engine + empty Log skeleton) into a new folder.
-#   tools/export-template.sh [--version <semver>] <dest>
+#   tools/export-template.sh [--version <semver>[-dev.<n>]] <dest>
 # --version names the release this export is (ADR 0011); without it the export is
-# stamped `next`, a build no Log upgrades from or to.
+# stamped `next`, a build no Log upgrades from or to. A Dev build's version, <semver>-dev.<n>
+# (maintainer/devbuild.py), is a build towards the release not yet made: it ships the next guide
+# as it stands, where a release refuses one that holds a change.
 # Exports committed content only (git archive HEAD): the allowlist below, then the
 # skeleton in tools/template/ overlaid at the root. Anything not on the allowlist
 # (entries, sources, outputs, profile, direction, ...) never leaves, and neither do
 # uncommitted edits or untracked files.
 # Then scans every exported file name and file for the patterns in .export-deny
 # (one extended regex per line, whole words, case-insensitive; that file stays here)
-# and fails on any hit. See docs/adr/0001 and 0002. Before that, in the Template's source only,
-# tools/deny_coverage.py fails when .export-deny misses an employer or project name the Log records.
+# and fails on any hit. See docs/adr/0002 and 0015. In the Template's source (the Engine repo,
+# known by its maintainer/ folder), which holds no Log and so no .export-deny of its own, the
+# scan reads tools/template/.export-deny, the list every Log starts with.
 set -eu
 ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
-USAGE="usage: tools/export-template.sh [--version <semver>] <dest>"
+USAGE="usage: tools/export-template.sh [--version <semver>[-dev.<n>]] <dest>"
 VERSION=next
+DEV=
 if [ "${1:-}" = "--version" ]; then
   VERSION=${2:?$USAGE}; shift 2
-  if ! printf '%s\n' "$VERSION" | grep -qxE '[0-9]+\.[0-9]+\.[0-9]+'; then
-    echo "refusing: --version takes a semver such as 0.2.0, not $VERSION"; exit 1
+  if printf '%s\n' "$VERSION" | grep -qxE '[0-9]+\.[0-9]+\.[0-9]+-dev\.[1-9][0-9]*'; then
+    DEV=1
+  elif ! printf '%s\n' "$VERSION" | grep -qxE '[0-9]+\.[0-9]+\.[0-9]+'; then
+    echo "refusing: --version takes a semver such as 0.2.0, or a Dev build's such as 0.2.1-dev.1, not $VERSION"; exit 1
   fi
 fi
 DEST=${1:?$USAGE}
+# The Template's source: the Engine repo, the one repo with the maintainer's tools (ADR 0015)
+SOURCE=; [ -d "$ROOT/maintainer" ] && SOURCE=1
 DENY="$ROOT/.export-deny"
-ALLOWED="$ROOT/.export-allow"
+if [ -n "$SOURCE" ] && [ ! -f "$DENY" ]; then DENY="$ROOT/tools/template/.export-deny"; fi
 
 # The allowlist: the Engine, plus the files every Log needs as they are. The rest of docs/ is the
 # source maintainer's: list docs/ subpaths one by one, never docs as a whole.
@@ -34,8 +42,8 @@ if [ -e "$DEST" ] && [ -n "$(ls -A "$DEST" 2>/dev/null)" ]; then
 fi
 # A release ships no unreleased guide: upgrade-next.* is renamed to the version first, unless it
 # still holds only the empty skeleton: no Log format change (`## Changes`, CHECKS) and no new
-# setting (`## 3. New settings`). Read from HEAD, the commit exported.
-if [ "$VERSION" != next ]; then
+# setting (`## 3. New settings`). Read from HEAD, the commit exported. A Dev build is no release.
+if [ "$VERSION" != next ] && [ -z "$DEV" ]; then
   NEXT_MD=$(git -C "$ROOT" show HEAD:docs/upgrades/upgrade-next.md 2>/dev/null || true)
   NEXT_PY=$(git -C "$ROOT" show HEAD:docs/upgrades/upgrade-next.py 2>/dev/null || true)
   if { [ -n "$NEXT_MD" ] && ! printf '%s\n' "$NEXT_MD" | tr -d '\r' | grep -qxF 'No Log format change yet.'; } ||
@@ -61,22 +69,9 @@ while IFS= read -r pat || [ -n "$pat" ]; do
   RC=0; printf 'x\n' | grep -E -- "$pat" >/dev/null 2>&1 || RC=$?
   if [ "$RC" -gt 1 ]; then echo "FAIL: bad pattern in $DENY: $pat"; exit 1; fi
 done < "$DENY"
-if [ "$NPAT" -eq 0 ]; then
+if [ "$NPAT" -eq 0 ] && [ -z "$SOURCE" ]; then
   echo "refusing: $DENY has no patterns. Add your name, email, schools, employers and projects, one per line"; exit 1
 fi
-# The scan below is only as good as .export-deny, so check that it covers every employer and
-# project name the Log records (tools/deny_coverage.py; names cleared for export are in
-# .export-cleared). Only in the Template's own source (it has .export-allow): its Engine is the one
-# written beside this Log, so an example in it can name an employer the Log records.
-if [ -f "$ALLOWED" ]; then
-  if python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' >/dev/null 2>&1; then PY=python3
-  elif py -3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' >/dev/null 2>&1; then PY="py -3"
-  else echo "FAIL: tools/deny_coverage.py needs Python 3.11 or later (python3, or py -3 on Windows)"; exit 1
-  fi
-  # shellcheck disable=SC2086
-  $PY -I "$ROOT/tools/deny_coverage.py" --root "$ROOT" || { echo "FAIL: export stopped by tools/deny_coverage.py; follow its output above (its run: lines add and commit the names), then export again"; exit 1; }
-fi
-
 # The export is built and checked in $OUT and copied to DEST only once every check passes, so
 # a failed export leaves DEST empty and a rerun into it is not refused.
 mkdir -p "$DEST"
@@ -93,14 +88,15 @@ git -C "$ROOT" -c core.autocrlf=false archive --format=tar -o "$TMP/skeleton.tar
 tar xf "$TMP/engine.tar" -C "$OUT"
 tar xf "$TMP/skeleton.tar" -C "$OUT"
 # The maintainer's files in docs/upgrades/ stay here: the scratch Logs that test a guide
-# (test-*.sh), the guide of the release not yet made (upgrade-next.*) and its empty form
-# (upgrade-skeleton.*).
-rm -f "$OUT"/docs/upgrades/test-* "$OUT"/docs/upgrades/upgrade-next.* "$OUT"/docs/upgrades/upgrade-skeleton.*
+# (test-*.sh), the guide of the release not yet made (upgrade-next.*, which a Dev build ships as it
+# stands) and its empty form (upgrade-skeleton.*).
+rm -f "$OUT"/docs/upgrades/test-* "$OUT"/docs/upgrades/upgrade-skeleton.*
+if [ -z "$DEV" ]; then rm -f "$OUT"/docs/upgrades/upgrade-next.*; fi
 # Stamp the version and the commit exported: "Use this template" squashes the history, so this
 # file is how a Log names its Template version (the upgrade mode, the issue form, import-chats
-# step 8). Written before the scan, and only from the Template's own source (it has
-# .export-allow): an export from a Log made from the Template keeps the stamp it came with.
-if [ -f "$ALLOWED" ]; then
+# step 8). Written before the scan, and only from the Template's own source: an export from a
+# Log made from the Template keeps the stamp it came with.
+if [ -n "$SOURCE" ]; then
   printf '%s\nsource %s\n' "$VERSION" "$(git -C "$ROOT" rev-parse HEAD)" > "$OUT/tools/TEMPLATE_VERSION"
 fi
 # Drop source-only blocks, text only the Template's source maintainer needs: in every .md file,
@@ -144,37 +140,19 @@ for f in README.md README.zh-TW.md; do
 done
 
 # Scan for personal content. LICENSE names the copyright holder on purpose.
-# The content scan reads a copy with the fixed strings in .export-allow masked out
-# (the Template's own upstream URL), so the deny list itself never needs loosening.
-SCAN="$TMP/scan"
-cp -R "$OUT" "$SCAN"
-# Matching ignores case, like the deny scan. LC_ALL=C makes awk treat every file as bytes, so
-# a binary or non-UTF-8 file cannot stop it. A file awk still fails on stays unmasked, which can
-# only add hits, never hide one, and the loop's exit status never aborts the export (set -e).
-if [ -f "$ALLOWED" ]; then
-  find "$SCAN" -type f > "$TMP/scan-files"
-  while IFS= read -r f; do
-    if LC_ALL=C awk 'NR == FNR { s = $0; sub(/\r$/, "", s); sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s)
-                                 if (s != "" && s !~ /^#/) a[++n] = tolower(s); next }
-                     { for (i = 1; i <= n; i++) while ((p = index(tolower($0), a[i])) > 0)
-                         $0 = substr($0, 1, p - 1) substr($0, p + length(a[i])); print }' "$ALLOWED" "$f" > "$f.masked"
-    then mv "$f.masked" "$f"
-    else rm -f "$f.masked"; echo "note: could not mask $f; scanning it as is"
-    fi
-  done < "$TMP/scan-files"
-fi
 FOUND=0
 while IFS= read -r pat || [ -n "$pat" ]; do
   pat=$(printf '%s' "$pat" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
   case "$pat" in ''|'#'*) continue ;; esac
   HITS=$( { (cd "$OUT" && find . | grep -iwE -- "$pat") || true
-            (cd "$SCAN" && grep -rniwE --exclude=LICENSE -- "$pat" .) || true; } )
+            (cd "$OUT" && grep -rniwE --exclude=LICENSE -- "$pat" .) || true; } )
   if [ -n "$HITS" ]; then
     echo "personal content: /$pat/"
     echo "$HITS" | head -5 | sed 's/^/  /'
     FOUND=1
   fi
 done < "$DENY"
+if [ "$FOUND" -ne 0 ] && [ -n "$SOURCE" ]; then echo "FAIL: a pattern in $DENY matched the export above; that list ships to every Log as it is, so take the pattern out of it, commit, then export again"; exit 1; fi
 if [ "$FOUND" -ne 0 ]; then echo "FAIL: fix the Engine files above, commit, then export again. Where a hit is a common word or a tool's name that a .export-deny line matches, ask the user whether to clear that name instead; on a yes, run: python3 -I tools/deny_coverage.py clear <name> (py -3 on Windows) and follow its output"; exit 1; fi
 
 cp -R "$OUT/." "$DEST"

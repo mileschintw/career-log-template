@@ -9,22 +9,27 @@
 <tool> is the target version's copy, which the mode puts at <root>/.build/upgrade/tools/upgrade.py, so
 the newest rules run whatever Engine the Log has. <root> is the Log's root. See docs/adr/0011.
 
-plan: needs a clean working tree. Fetches the Template's release tags (--url, default the public
-Template) into refs/career-log-upgrade/, reads the Log's version from tools/TEMPLATE_VERSION, and
-writes the plan to <root>/.build/upgrade/state.json. It prints `from:`, `to:`, `start:` (the
-commit to go back to), one `step: <version>` line per Engine replacement in order (a version whose
-release has an upgrade guide, then the target), and the Engine files this Log changed since its
-version: `edited:` (changed), `added:` (the Log's own file, kept), `removed:` (deleted),
+plan: needs a clean working tree. Reads the Log's version from tools/TEMPLATE_VERSION, fetches the
+Template's release tags into refs/career-log-upgrade/, and writes the plan to
+<root>/.build/upgrade/state.json. A version is a release's (0.4.0) or a Dev build's (0.4.1-dev.3,
+ordered after 0.4.0 and before 0.4.1; ADR 0015). The target is the newest release, or --to's
+version; a Dev build is one only by --to. When the Log's version or --to's is a Dev build, it also
+fetches the Dev builds' tags from the Engine repo; --url names the one place every tag comes from
+instead. It prints `from:`, `to:`, `start:` (the commit to go back to), one `step: <version>` line
+per Engine replacement in order (a release in between whose upgrade guide the target has, then the
+target), and the Engine files this Log changed since its version: `edited:` (changed), `added:` (the Log's own file, kept), `removed:` (deleted),
 `overwritten:` (the Log's own file at a path a step's release has: replaced), and `dropped:` (an
 Engine file the target no longer has, which a step deletes). A Log before 0.2.0, the support floor
 (a stamp below it, a commit, or no stamp), gets `stop:` naming v0.3.2, the last release whose tool
-upgrades such a Log.
+upgrades such a Log. A target older than the Log is refused when it is a Dev build; a stamp of
+`next` is refused, and `next` is no target.
 engine: replaces the Engine paths with <version>'s (the next step of the plan): checks out its
 files, deletes the Engine files it no longer has unless the Log added them, and puts this Log's
 own .gitignore lines back under `# This Log's own lines`. A front page (README.md, README.zh-TW.md)
 whose text above its entries heading is still the old Template's, unedited, gets <version>'s text
 there, its entries section and the rest kept. It copies that version's guide and script to
-.build/upgrade/ and prints `guide: <file>`, or `guide: none`.
+.build/upgrade/ (a Dev build's: upgrade-next.*, the next release's guide as it stood) and prints
+`guide: <file>`, or `guide: none`.
 reapply: after the last step, merges the `edited:` files given (or all of them, --all) back into the
 new Engine: `git merge-file` with the Log's version at `start:`, the old Template's as the base,
 and the new one. Prints `merged:`, `conflict: <path>: <n>` (markers left in the file) or
@@ -37,7 +42,10 @@ library only, Python 3.11+.
 import json, os, re, shutil, subprocess, sys, tempfile
 
 URL = "https://github.com/mileschintw/career-log-template.git"
+# The second address: the Engine repo, whose builds branch holds the Dev builds' tags (ADR 0015)
+DEV_URL = "https://github.com/mileschintw/career-log-engine.git"
 REFS = "refs/career-log-upgrade/"
+DEV_REFS = REFS + "engine/"   # where the Engine repo's tags land before its Dev builds join REFS
 BUILD = os.path.join(".build", "upgrade")
 EXPORT = "tools/export-template.sh"
 STAMP = "tools/TEMPLATE_VERSION"
@@ -48,8 +56,11 @@ SKELETON_ENGINE = [".github"]   # Engine paths the export takes from tools/templ
 # older Log upgrades to BRIDGE first, whose tool still reads the stamps of 0.1.0 and before (ADR 0011)
 FLOOR = "0.2.0"
 BRIDGE = "0.3.2"
-SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")   # a release
+# A release or a Dev build, `<next version>-dev.<n>` from 1 (tools/export-template.sh stamps the same)
+VERSION = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-dev\.([1-9]\d*))?$")
 GUIDE = "docs/upgrades/upgrade-%s.%s"
+NEXT_GUIDE = "next"   # a Dev build's guide: upgrade-next.*, the next release's guide as it stood
 # The front pages, with the heading of their entries section (tools/config.py reads above it)
 PAGES = {"README.md": "Entries", "README.zh-TW.md": "條目"}
 # logfiles.heading_re's pattern, copied: the mode runs this file alone from .build/upgrade/tools/,
@@ -61,15 +72,26 @@ class UpgradeError(Exception):
     pass
 
 
-def git(root, *args, check=True, binary=False):
-    r = subprocess.run(["git", "-C", root, *args], capture_output=True)
+def git(root, *args, check=True, binary=False, input=None):
+    r = subprocess.run(["git", "-C", root, *args], capture_output=True, input=input)
     if check and r.returncode != 0:
         raise UpgradeError("git %s: %s" % (" ".join(args), r.stderr.decode("utf-8", "replace").strip()))
     return r.stdout if binary else r.stdout.decode("utf-8", "replace")
 
 
 def key(version):
-    return tuple(int(n) for n in SEMVER.match(version).groups())
+    """The order of versions: each Dev build of x.y.z after the release before it, before x.y.z."""
+    major, minor, patch, dev = VERSION.match(version).groups()
+    return (int(major), int(minor), int(patch), 0 if dev else 1, int(dev or 0))
+
+
+def is_dev(version):
+    return bool(version) and VERSION.match(version) is not None and SEMVER.match(version) is None
+
+
+def guide_name(version):
+    """The name a version's guide has in its tree: a Dev build ships the next guide."""
+    return NEXT_GUIDE if is_dev(version) else version
 
 
 def ref(version):
@@ -96,15 +118,15 @@ def files(root, rev, paths):
 
 
 def stamped(root):
-    """The Log's version from tools/TEMPLATE_VERSION: a semver, `next`, or None (no semver: a stamp of
-    0.1.0 or before, which held a commit, or no stamp)."""
+    """The Log's version from tools/TEMPLATE_VERSION: a release's or a Dev build's, `next`, or None (no
+    version: a stamp of 0.1.0 or before, which held a commit, or no stamp)."""
     path = os.path.join(root, *STAMP.split("/"))
     try:
         with open(path, encoding="utf-8-sig") as f:   # -sig: a stamp saved with a BOM
             first = (f.readline().strip() or "")
     except OSError:
         return None, "no " + STAMP
-    if SEMVER.match(first) or first == "next":
+    if VERSION.match(first) or first == "next":
         return first, first
     return None, first or "an empty " + STAMP
 
@@ -182,9 +204,9 @@ def copy_guide(root, target, version):
     """Copy <version>'s guide and script, as the target release has them, into .build/upgrade/."""
     out = []
     for ext in ("md", "py"):
-        data = show(root, ref(target), GUIDE % (version, ext))
-        if data is not None:
-            dest = os.path.join(root, BUILD, "upgrade-%s.%s" % (version, ext))
+        data = show(root, ref(target), GUIDE % (guide_name(version), ext))
+        if data is not None:   # named as in the tree: the guide names its script by that name
+            dest = os.path.join(root, BUILD, "upgrade-%s.%s" % (guide_name(version), ext))
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             with open(dest, "wb") as f:
                 f.write(data)
@@ -192,31 +214,64 @@ def copy_guide(root, target, version):
     return out
 
 
-def plan(root, to=None, url=URL):
+def fetch_tags(root, url, dev_url):
+    """Fetch the version tags into REFS, emptied first (a Dev build left by an earlier plan is no
+    release): url's, then, when dev_url is given, the Dev builds' tags at dev_url (its releases' tags
+    stay out: releases come from url)."""
+    old = "".join("delete %s\n" % r for r in git(root, "for-each-ref", "--format=%(refname)", REFS).splitlines())
+    git(root, "update-ref", "--stdin", input=old.encode())
+    git(root, "fetch", "--no-tags", "--quiet", url, "+refs/tags/v*:%sv*" % REFS)
+    if dev_url:
+        git(root, "fetch", "--no-tags", "--quiet", dev_url, "+refs/tags/v*:%sv*" % DEV_REFS)
+        moves = []
+        for line in git(root, "for-each-ref", "--format=%(objectname) %(refname)", DEV_REFS).splitlines():
+            sha, name = line.split(" ", 1)
+            if is_dev(name[len(DEV_REFS) + 1:]):
+                moves.append("update %s%s %s\n" % (REFS, name[len(DEV_REFS):], sha))
+            moves.append("delete %s\n" % name)
+        git(root, "update-ref", "--stdin", input="".join(moves).encode())
+    names = (r[len(REFS) + 1:] for r in git(root, "for-each-ref", "--format=%(refname)", REFS).splitlines())
+    return sorted((v for v in names if VERSION.match(v)), key=key)
+
+
+def plan(root, to=None, url=None):
+    """url None: releases from URL, and Dev builds from DEV_URL when the Log's version or `to` is one.
+    A url given is the one place every tag comes from."""
     lines = []
     dirty = git(root, "status", "--porcelain").splitlines()
     if dirty:
         return 1, ["stop: uncommitted changes; commit or discard them first:"] + ["  " + l for l in dirty]
-    git(root, "fetch", "--no-tags", "--quiet", url, "+refs/tags/v*:%sv*" % REFS)
-    tags = sorted((r[len(REFS) + 1:] for r in git(root, "for-each-ref", "--format=%(refname)", REFS).splitlines()
-                   if SEMVER.match(r[len(REFS) + 1:])), key=key)
-    if not tags:
-        return 1, ["stop: no release tags at %s" % url]
-    target = to or tags[-1]
-    if target not in tags:
-        return 1, ["stop: no release v%s at %s; releases: %s" % (target, url, ", ".join(tags))]
     version, seen = stamped(root)
     if version == "next":
         return 1, ["stop: %s says next, an unreleased build: there is no release to upgrade from" % STAMP]
     if version is None or key(version) < key(FLOOR):
         return 1, ["stop: this Log is from before %s (%s), the oldest release this one upgrades from: upgrade to v%s "
                    "first, with v%s's tool and mode, then run this mode again" % (FLOOR, seen, BRIDGE, BRIDGE)]
+    dev_url = DEV_URL if url is None and (is_dev(version) or is_dev(to)) else None
+    url = url or URL
+    tags = fetch_tags(root, url, dev_url)
+    releases = [v for v in tags if not is_dev(v)]
+    builds = [v for v in tags if is_dev(v)]
+    if not releases:
+        return 1, ["stop: no release tags at %s" % url]
+    target = to or releases[-1]   # a Dev build only when named
+    if target not in tags:
+        if is_dev(target):
+            return 1, ["stop: no Dev build v%s at %s; Dev builds: %s" % (target, dev_url or url, ", ".join(builds) or "none")]
+        return 1, ["stop: no release v%s at %s; releases: %s" % (target, url, ", ".join(releases))]
     if version not in tags:
+        if is_dev(version):
+            return 1, ["stop: this Log's version %s has no Dev build tag at %s" % (version, dev_url or url)]
         return 1, ["stop: this Log's version %s has no release tag at %s" % (version, url)]
+    if key(target) < key(version) and is_dev(target):
+        return 1, ["stop: the target %s is older than this Log's version %s: an upgrade goes only forward"
+                   % (target, version)]
     if key(target) <= key(version):
-        return 0, ["OK: this Log is at %s, the target is %s: nothing to upgrade" % (version, target)]
-    between = [v for v in tags if key(version) < key(v) <= key(target)]
-    steps = [v for v in between if v != target and show(root, ref(target), GUIDE % (v, "md")) is not None] + [target]
+        tail = "; a later Dev build is a target only by name (--to)" if is_dev(version) else ""
+        return 0, ["OK: this Log is at %s, the target is %s: nothing to upgrade%s" % (version, target, tail)]
+    # the steps: each release in between whose guide the target has, then the target
+    between = [v for v in releases if key(version) < key(v) < key(target)]
+    steps = [v for v in between if show(root, ref(target), GUIDE % (v, "md")) is not None] + [target]
     base = ref(version)
     # the Engine paths of both ends: a path can join the Engine, or move out of its ALLOW list
     paths = sorted(set(engine_paths(root, base)) | set(engine_paths(root, ref(target))))
@@ -381,13 +436,13 @@ def main(argv):
             or (cmd == "reapply" and (not rest or ("--all" in rest and len(rest) > 1))):
         print(usage)
         return 2
-    if "--to" in opts and not SEMVER.match(opts["--to"].lstrip("v")):
-        print("usage: --to takes a version such as 0.2.0")
+    if "--to" in opts and not VERSION.match(opts["--to"].lstrip("v")):
+        print("usage: --to takes a release's version such as 0.2.0, or a Dev build's such as 0.2.1-dev.3")
         return 2
     try:
         root = git(root, "rev-parse", "--show-toplevel").strip()
         if cmd == "plan":
-            rc, lines = plan(root, (opts.get("--to") or "").lstrip("v") or None, opts.get("--url") or URL)
+            rc, lines = plan(root, (opts.get("--to") or "").lstrip("v") or None, opts.get("--url"))
         elif cmd == "engine":
             rc, lines = engine(root, rest[0].lstrip("v"))
         elif cmd == "reapply":

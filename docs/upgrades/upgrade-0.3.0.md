@@ -22,7 +22,7 @@ Each `migrate:` line, as its item below says. Then the `ask:` and `review:` line
 
 - `ask: <entry>: no status: ...`: the entry has no `status:`, and its README row gave none, or none that reads. Ask the user for its status (SKILL.md › Layout: `stub`, mostly `GAP`; `imported`, filled from documents or repos, not yet consolidated; `consolidated`), preselecting the one the entry reads as, `stub` when unsure, with the row's note in parentheses when it had one. Write the answer by hand as the line `status: <status>` before the front matter's closing `---`: `entries.py set-status` would rewrite the table before the other lines are settled.
 - `ask: README.md:<n>: <cells>: links no entry ...`: a row of the old Entries table that links no entry (a note the user kept there). Ask whether to keep it as a line under the table (preselected) or drop it. Either way, delete the row from the table; to keep it, also write its text as a plain line after the table's last row, with a blank line between.
-- `migrate: README.md: README table not generated: ...`: `README.md` has no place for the table. Add a `## Entries` heading where it goes (`tools/template/README.md` has it before `## Upstream`), then `<py> -I <root>/tools/entries.py readme --root <root>`.
+- `migrate: README.md: README table not generated: ...`: `README.md` has no place for the table. Add a `## Entries` heading where `tools/template/README.md` has it, then `<py> -I <root>/tools/entries.py readme --root <root>`.
 
 Done when it prints `OK: nothing left to migrate` (a `review:` line the user chose to keep may stay).
 

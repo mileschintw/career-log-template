@@ -80,9 +80,9 @@ Continue with [import.md](import.md) from step 3, treating each conversation as 
 
 Done when every exported platform is indexed, every group the user picked is extracted and merged, and the import log records what was left out in the three lines item 7.1 allows; and the user has answered the import: yes (committed and pushed, and each *Found for setup* value offered) or no (undone). The last message ends with the Next up block.
 
-## 8. Report a format change upstream
+## 8. Report a format change to the Engine repo
 
-Only when step 2 or another step needed a fix or a workaround, and only after the import is done: follow [import-chats-format.md › Report upstream](import-chats-format.md#report-upstream).
+Only when step 2 or another step needed a fix or a workaround, and only after the import is done: follow [import-chats-format.md › Report to the Engine repo](import-chats-format.md#report-to-the-engine-repo).
 
 ## Format notes
 

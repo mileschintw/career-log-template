@@ -1,0 +1,4 @@
+contact_links:
+  - name: Report it in the Engine repo
+    url: https://github.com/mileschintw/career-log-engine/issues/new
+    about: The Template is the export of the Engine repo, career-log-engine. Faults, changed chat-export formats and pull requests go there.

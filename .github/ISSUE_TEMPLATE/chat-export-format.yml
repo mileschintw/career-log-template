@@ -6,6 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
+        **Open this issue in the Engine repo, https://github.com/mileschintw/career-log-engine/issues/new**: the Template is its export, and every fix is made there.
         **Issues are public.** Describe the format with keys and shapes only.
         Never paste message text, names, ids, dates, URLs or anything from your career log.
   - type: dropdown

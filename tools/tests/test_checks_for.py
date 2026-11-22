@@ -17,7 +17,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS = os.path.dirname(HERE)
 REPO = os.path.dirname(TOOLS)
 WORKFLOWS = os.path.join(REPO, ".github", "workflows")
-NO_PATHS = {"closing-refs.yml"}   # runs on every pull request with a closing keyword, not on paths
+# closing-refs.yml runs on every pull request with a closing keyword, not on paths; dev-build.yml on
+# each push to master, its test in coord-tests.yml
+NO_PATHS = {"closing-refs.yml", "dev-build.yml"}
 
 spec = importlib.util.spec_from_file_location("checks_for", os.path.join(TOOLS, "checks_for.py"))
 checks_for = importlib.util.module_from_spec(spec)
@@ -253,7 +255,7 @@ class Kinds(unittest.TestCase):
     def test_kinds(self):
         for path, want in [("tools/entries.py", "engine"), ("docs/guide.md", "engine"),
                            ("docs/social-preview/banner.svg", "engine"), ("docs/social-preview/x.png", "not engine"),
-                           (".export-allow", "engine"), ("maintainer/coord.py", "engine"),
+                           ("LICENSE", "engine"), ("maintainer/coord.py", "engine"),
                            ("docs/maintaining-tests.md", "engine"), (".github/workflows/x.yml", "engine"),
                            (".export-deny", "guard"), (".export-cleared", "guard"),
                            ("entries/2024-01-x.md", "not engine"),
@@ -286,6 +288,7 @@ class InATemplate(unittest.TestCase):
     def test_source_only_engine_paths(self):
         self.assertEqual(checks_for.kind("maintainer/coord.py", self.root), "not engine")
         self.assertEqual(checks_for.kind(".github/workflows/x.yml", self.root), "not engine")
+        self.assertEqual(checks_for.kind("LICENSE", self.root), "not engine")   # a Log's comes from the Template
 
     def test_no_allow(self):
         with open(os.path.join(self.root, "tools", "export-template.sh"), "w") as f:

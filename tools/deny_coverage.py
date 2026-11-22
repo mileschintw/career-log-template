@@ -8,10 +8,9 @@
 
 <root> is the Log's root, by default the folder above this script's.
 
-tools/export-template.sh runs this before it builds the Template, in the Template's source only
-(the repo with .export-allow): the export scan catches a Log name in an Engine file only when
-.export-deny lists it, and the import, log and consolidate modes append names only as they meet
-them.
+Run it before you export a Template from a Log (tools/export-template.sh): the export scan catches
+a Log name in an Engine file only when .export-deny lists it, and the import, log and consolidate
+modes append names only as they meet them.
 
 Names are read from:
 - the front matter of each entry (tools/entries.py says which files are entries): `org`; `title`:

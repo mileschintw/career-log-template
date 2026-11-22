@@ -13,7 +13,7 @@ script is in).
 It prints, in this order:
 - one line per changed path: `engine: <path>` (an Engine path: the export's ALLOW list in
   tools/export-template.sh, its .export-* files, and, in the Template's source (a root with
-  `maintainer/`), `.github/`, `maintainer/` and the maintainer docs; skills/career-log/engine-changes.md says how it lands), `guard: <path>`
+  `maintainer/`), `.github/`, `maintainer/`, the maintainer docs and the root `LICENSE`; skills/career-log/engine-changes.md says how it lands), `guard: <path>`
   (.export-deny, .export-cleared) or `not engine: <path>`;
 - `warn:` when only one of the Template's two front pages changed;
 - the checks: each `run: <command>` line followed by a `check: <what passing looks like>` line,
@@ -53,12 +53,11 @@ if HERE not in sys.path:   # -I leaves this folder off sys.path
 sys.dont_write_bytecode = True   # no tools/__pycache__ left in the Log
 import logfiles
 EXPORT = "tools/export-template.sh"
-EXPORT_FILES = (".export-deny", ".export-allow", ".export-cleared")
+EXPORT_FILES = (".export-deny", ".export-cleared")
 GUARDS = (".export-deny", ".export-cleared")
 # Engine only here, in the Template's source (AGENTS.md › Changes); the export leaves them out
-SOURCE_ENGINE = (".export-allow", ".github/", "maintainer/", "docs/maintaining.md",
-                 "docs/maintaining-tests.md", "docs/migrating.md", "docs/publishing.md",
-                 ".claude/settings.json", "docs/agents/")
+SOURCE_ENGINE = (".github/", "maintainer/", "docs/maintaining.md", "docs/maintaining-tests.md",
+                 "docs/migrating.md", "docs/publishing.md", ".claude/settings.json", "docs/agents/", "LICENSE")
 NEXT_TEST = "docs/upgrades/test-next.sh"   # a Log format change's scratch Log (docs/maintaining.md)
 FRONT_PAGES = ("tools/template/README.md", "tools/template/README.zh-TW.md")
 OK = "the last line is `OK`"
@@ -216,6 +215,17 @@ GROUPS = [
         "maintainer/coord.py", "maintainer/tests/test_coord.py", "tools/export-template.sh", "tools/deny_coverage.py",
     ], [
         py("maintainer/tests/test_coord.py"),
+    ]),
+    ("dev build", "coord-tests.yml", [
+        "maintainer/devbuild.py", "maintainer/tests/test_devbuild.py", "maintainer/coord.py", "tools/export-template.sh",
+    ], [
+        py("maintainer/tests/test_devbuild.py"),
+    ]),
+    ("prepush", "coord-tests.yml", [
+        "maintainer/prepush.py", "maintainer/hooks/pre-push", "maintainer/tests/test_prepush.py",
+        "tools/deny_coverage.py",
+    ], [
+        py("maintainer/tests/test_prepush.py"),
     ]),
     ("closing refs", "coord-tests.yml", [
         ".github/workflows/closing_refs.py", "maintainer/tests/test_closing_refs.py",

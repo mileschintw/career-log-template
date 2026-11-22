@@ -13,12 +13,20 @@ One person's career records: entries, sources, outputs, profile, direction, stor
 _Avoid_: data, content, my repo
 
 **Template**:
-A shareable repo holding the Engine and an empty Log skeleton, from which someone starts their own private Log.
+A shareable repo holding the Engine and an empty Log skeleton, from which someone starts their own private Log. It is the export of the **Engine repo**, where every fix is made: its issue forms and front page send issues and pull requests there ([ADR 0015](docs/adr/0015-the-engine-is-developed-in-its-own-public-repo.md)).
 _Avoid_: clean version, starter, fork
 
 **Release**:
-One published version of the Template, a semver tag `v<version>` on its public repo with a GitHub Release; a Log names the one it came from in `tools/TEMPLATE_VERSION`. A **breaking** release changes a Log's data format and ships an **upgrade guide**, `docs/upgrades/upgrade-<version>.md`, which the upgrade mode runs with the user. A release that only adds a setting (a Config field with a default, or a Direction item) is not breaking, but ships a guide too, whose `## 3. New settings` asks about it; a release that changes only the Engine needs none.
+One published version of the Template, exported from the Engine repo and published by hand when the maintainer decides: a semver tag `v<version>` on the Template's public repo with a GitHub Release (a **Dev build** is not one); a Log names the one it came from in `tools/TEMPLATE_VERSION`. A **breaking** release changes a Log's data format and ships an **upgrade guide**, `docs/upgrades/upgrade-<version>.md`, which the upgrade mode runs with the user. A release that only adds a setting (a Config field with a default, or a Direction item) is not breaking, but ships a guide too, whose `## 3. New settings` asks about it; a release that changes only the Engine needs none.
 _Avoid_: update, snapshot, publish (when the versioned release is meant)
+
+**Engine repo**:
+The public repo the Engine is developed in, holding its source and what only its maintainer needs; the Template is exported from it, and no Log lives in it ([ADR 0015](docs/adr/0015-the-engine-is-developed-in-its-own-public-repo.md)).
+_Avoid_: dev repo, source repo, upstream (the Template is what a Log upgrades from)
+
+**Dev build**:
+An export of the Engine repo made between releases, tagged `v<next version>-dev.<n>` on its `builds` branch; a Log upgrades to one only when asked by name, and none is promised stable.
+_Avoid_: next, nightly, beta, pre-release (when the tagged build is meant)
 
 **Example**:
 A fictional person's records shipped inside the Engine to show the format and to test the setup; never part of anyone's Log.

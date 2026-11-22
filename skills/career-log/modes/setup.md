@@ -21,7 +21,7 @@ The names setup may change are the ones `python3 -I <root>/tools/config.py field
    2. **Work authorisation and other hard constraints:** does any role need a sponsorship, citizenship or clearance you lack? If you need US visa sponsorship: H-1B, and a green card too? On a student's work authorisation (OPT, CPT), which? Any location, start date or level that rules a role out? Skip to leave it empty.
    3. **Record language** for your Log files? Preselected: English.
    4. **Install playwright-cli on this machine?** It reads web pages that show their content only after their scripts run or you sign in: Node, the CLI and a browser, about 1 GB with TinyTeX, which installs either way. Preselected: yes. Leave this item out when the `playwright-cli wanted:` line says yes or no: this machine has its answer.
-   5. **Trim the front page** into a personal index of your records (keeps Entries, Upstream and License, points at the guide, and deletes the Chinese translation)? Preselected: yes. Only when that `front page:` state line says `template`.
+   5. **Trim the front page** into a personal index of your records (keeps Entries and every section after it, points at the guide, and deletes the Chinese translation)? Preselected: yes. Only when that `front page:` state line says `template`.
    6. **Conversation language,** the one I talk to you in, with its script and regional usage? Preselected: the language you are writing in, named in words with its script and region.
 
    Under the items, tell the user that the install is for their user only and asks for no password. On Linux, one step can need sudo (Chromium's system libraries, for playwright-cli): it is printed for them to run in their own terminal, never run for them.

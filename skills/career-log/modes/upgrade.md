@@ -9,12 +9,20 @@ Placeholders: `<root>` is the Log's root, `<py>` is `python3` (`py -3` on Window
 ## 1. Start, from the target release
 
 1. `git -C <root> status --short` prints nothing. When it lists files, show them to the user and ask: commit them or discard them first. The upgrade starts only from a clean tree, so the commit before it is the whole backup. Then `git -C <root> pull --ff-only`.
-2. Fetch the releases and pick the target: the newest, or the version the user named.
+2. Fetch the releases and pick the target: the newest, or the version the user named. The first line drops the refs an earlier upgrade left (a Dev build among them would sort as the newest):
    ```
+   git -C <root> for-each-ref "--format=delete %(refname)" refs/career-log-upgrade/ | git -C <root> update-ref --stdin
    git -C <root> fetch --no-tags <url> "+refs/tags/v*:refs/career-log-upgrade/v*"
    git -C <root> for-each-ref --sort=-v:refname --count=1 "--format=%(refname)" refs/career-log-upgrade/
    ```
-   The second line prints the newest release's ref (`refs/career-log-upgrade/v<version>`); for a version the user named, the ref is `refs/career-log-upgrade/v<that version>`.
+   The last line prints the newest release's ref (`refs/career-log-upgrade/v<version>`); for a version the user named, the ref is `refs/career-log-upgrade/v<that version>`.
+
+   **A Dev build** is a target only when the user names one, by its version (`0.4.1-dev.3`: a build of the Engine repo between releases, on its way to `0.4.1`). Tell the user that no Dev build is promised stable, and that the newest release stays the default. The Dev builds' tags are at the Engine repo, not the Template; to list them, or to fetch the named one:
+   ```
+   git -C <root> ls-remote --tags https://github.com/mileschintw/career-log-engine.git "v*-dev.*"
+   git -C <root> fetch --no-tags https://github.com/mileschintw/career-log-engine.git "+refs/tags/v*:refs/career-log-upgrade/engine/v*"
+   ```
+   The ref is then `refs/career-log-upgrade/engine/v<that version>`. When `<url>` is not the default, it holds every tag: list and fetch from `<url>` instead, and the ref is `refs/career-log-upgrade/v<that version>`. A **local Dev build** (the user names a Dev build and a folder on this machine, a build of a change not yet merged) is such a `<url>`: the folder's path, which holds the release tags too.
 3. Take the target's tool and this mode's file as the target has them, into `<root>/.build/upgrade/` (`.gitignore` leaves `.build/` out); this writes those two files there and leaves the Log's index and working tree as they are:
    ```
    mkdir -p <root>/.build/upgrade
@@ -27,11 +35,13 @@ Done when `<tool>` exists and you are following the target's text of this mode.
 
 ## 2. Plan
 
-`<py> -I <tool> plan <root>`, with `--to <version>` when the user named one and `--url <url>` when `<url>` is not the default. It prints:
-- **`OK:`** the Log is at the target already: tell the user, run `<py> -I <tool> clean <root>`, and end the mode.
+`<py> -I <tool> plan <root>`, with `--to <version>` when the user named one (a Dev build too) and `--url <url>` when `<url>` is not the default. It prints:
+- **`OK:`** the Log is at the target already: tell the user, run `<py> -I <tool> clean <root>`, and end the mode. On a Log at a Dev build, the line says the newest release is not after it: tell the user they can name a later Dev build.
+- **`stop: the target <x> is older than this Log's version`:** a Dev build before the Log's own. Show the line, and ask for a later version or end the mode with `clean`.
+- **`stop: no Dev build v<x>`:** show the user the Dev builds the line lists, and run `plan` again with the one they pick.
 - **`stop:` with `before 0.2.0`:** the Log is older than the oldest release this one upgrades from. Tell the user it upgrades in two passes: first to v0.3.2, whose tool and guides still handle such a Log, then to the release they asked for. Run `clean`, then go back to step 1 with `0.3.2` as the version the user named, and follow v0.3.2's text of this mode to its end. v0.3.2's text does not know about the second pass: once its step 5 is done, start this mode again from step 1 with the user's own target.
 - **`stop: uncommitted changes`:** settle them as step 1 item 1 does, then run `plan` again.
-- **`stop: this Log's version <x> has no release tag`, or `stop: … says next`:** the Log's own release is unknown. Show the line to the user and ask which release the Log came from. With an answer, write that version as the first line of `tools/TEMPLATE_VERSION`, commit it as `upgrade: name the Log's Template release`, and run `plan` again; with none, run `clean` and end the mode.
+- **`stop: this Log's version <x> has no release tag` (or `no Dev build tag`), or `stop: … says next`:** the Log's own release is unknown. Show the line to the user and ask which release the Log came from. With an answer, write that version as the first line of `tools/TEMPLATE_VERSION`, commit it as `upgrade: name the Log's Template release`, and run `plan` again; with none, run `clean` and end the mode.
 - **`stop: no release v<x> at <url>`:** show the user the releases the line lists, and run `plan` again with `--to` set to the one they pick.
 - **`stop: no release tags at <url>`:** `<url>` holds no release: check it with the user, as for a failed fetch below.
 - **`error:`** (a git call failed, exit 2): show it to the user. A failed fetch is the network or `<url>`: fix it with them and run `plan` again; for any other, run `clean` and end the mode.

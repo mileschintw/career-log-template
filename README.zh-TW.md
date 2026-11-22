@@ -35,13 +35,15 @@
 
 條目索引只放在英文版 [README.md](README.md#entries)，你每記一筆，skill 就會更新它。
 
-## 上游
+## Engine repo
 
-這個 repo 是從 https://github.com/mileschintw/career-log-template 這個 Template 建立的。聊天匯出格式改了或某個步驟壞了，請到那裡回報：開 issue（用「Chat export format changed」表單）或發 pull request。Issue 是公開的：只附欄位名稱和結構，絕不附你的記錄。import 模式會幫你草擬回報，貼出前會先問你（[import-chats.md](skills/career-log/modes/import-chats.md) 第 8 步）。
+這個 repo 是從 https://github.com/mileschintw/career-log-template 這個 Template 建立的，而 Template 是 Engine repo（https://github.com/mileschintw/career-log-engine）的匯出。聊天匯出格式改了或某個步驟壞了，請到 Engine repo 回報：開 [issue](https://github.com/mileschintw/career-log-engine/issues) 或發 pull request。每個修正都在那裡做，Template 不收。Issue 是公開的：只附欄位名稱和結構，絕不附你的記錄。import 模式會幫你草擬回報，貼出前會先問你（[import-chats.md](skills/career-log/modes/import-chats.md) 第 8 步）。
 
 ## 升級
 
 要把這個 Log 升到較新的 Template，請跟你的 agent 說「升級到最新的 Template」。upgrade 模式（[upgrade.md](skills/career-log/modes/upgrade.md)）會抓下那個版本、換掉 Engine（skill、`tools/` 和 Template 附的其他檔案）、跟你一起依序跑中間每個版本的升級指引（某個版本要改你記錄的格式，就在指引裡做，並先問你），每個版本的步驟各 commit 一次。它只從乾淨的 working tree 開始，在你對整個升級說好之前什麼都不 push；在那之前，你都可以讓 Log 回到升級開始前的那個 commit。每個版本改了什麼，寫在 Template 的 [Releases](https://github.com/mileschintw/career-log-template/releases) 頁面。
+
+兩個版本之間，Engine repo 會發布 **Dev build**：它的 [`builds`](https://github.com/mileschintw/career-log-engine/tree/builds) 分支上的 tag `v<next version>-dev.<n>`。沒有任何一個保證穩定。
 
 你改過的 Engine 檔會怎樣：
 

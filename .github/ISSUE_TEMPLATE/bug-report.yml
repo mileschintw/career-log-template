@@ -5,6 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
+        **Open this issue in the Engine repo, https://github.com/mileschintw/career-log-engine/issues/new**: the Template is its export, and every fix is made there.
         **Issues are public.** Remove personal content before posting: names, employers, projects, Log entries, postings, paths with your username.
         Replace each with a placeholder such as `<employer>`.
   - type: input
